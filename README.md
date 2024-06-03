@@ -1,0 +1,1 @@
+# sha-p2pool
