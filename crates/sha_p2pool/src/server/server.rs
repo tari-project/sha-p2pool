@@ -13,8 +13,10 @@ use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
 use thiserror::Error;
 use tokio::{io, io::AsyncBufReadExt, select};
 
+use sha_p2pool_grpc::tari_sha_p2pool_rpc::tari::sha_p2pool::rpc::sha_p2_pool_server::ShaP2PoolServer;
+
 use crate::server::{config, grpc, p2p};
-use crate::server::grpc::{TariBaseNodeGrpc, TonicError};
+use crate::server::grpc::base_node::{TariBaseNodeGrpc, TonicError};
 use crate::server::p2p::{ServerNetworkBehaviour, ServerNetworkBehaviourEvent};
 
 #[derive(Error, Debug)]
@@ -22,7 +24,7 @@ pub enum Error {
     #[error("LibP2P error: {0}")]
     LibP2P(#[from] LibP2PError),
     #[error("gRPC error: {0}")]
-    GRPC(#[from] grpc::Error),
+    GRPC(#[from] grpc::error::Error),
     #[error("Socket address parse error: {0}")]
     AddrParse(#[from] AddrParseError),
 }
@@ -45,16 +47,19 @@ pub enum LibP2PError {
 pub struct Server {
     config: config::Config,
     swarm: Swarm<ServerNetworkBehaviour>,
-    grpc_server: BaseNodeServer<TariBaseNodeGrpc>,
+    base_node_grpc_server: BaseNodeServer<TariBaseNodeGrpc>,
 }
 
 impl Server {
     pub async fn new(config: config::Config) -> Result<Self, Error> {
         let swarm = p2p::swarm(&config)?;
-        let grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
-        let grpc_server = BaseNodeServer::new(grpc_service);
+        let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
+        let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
-        Ok(Self { config, swarm, grpc_server })
+        // TODO: continue
+        // let p2pool_server = ShaP2PoolServer::new()
+
+        Ok(Self { config, swarm, base_node_grpc_server })
     }
 
     pub async fn start_grpc(service: BaseNodeServer<TariBaseNodeGrpc>, grpc_port: u64) -> Result<(), Error> {
@@ -70,7 +75,7 @@ impl Server {
             .await
             .map_err(|err| {
                 error!("GRPC encountered an error: {:?}", err);
-                Error::GRPC(grpc::Error::Tonic(TonicError::Transport(err)))
+                Error::GRPC(grpc::error::Error::Tonic(TonicError::Transport(err)))
             })?;
 
         info!("gRPC server stopped!");
@@ -90,7 +95,7 @@ impl Server {
         info!("Starting Tari SHA-3 mining P2Pool...");
 
         // grpc serve
-        let grpc_service = self.grpc_server.clone();
+        let grpc_service = self.base_node_grpc_server.clone();
         let grpc_port = self.config.grpc_port;
         tokio::spawn(async move {
             Self::start_grpc(grpc_service, grpc_port).await;
@@ -109,6 +114,12 @@ impl Server {
                             for (peer, addr) in peers {
                                 info!("Discovered new peer {} at {}", peer, addr);
                                 self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                                match self.swarm.dial(addr) {
+                                    Ok(_) => {
+                                            info!("Dial success!");
+                                        },
+                                    Err(_) => {},
+                                }
                             }
                           },
                             mdns::Event::Expired(peers) => {

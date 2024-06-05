@@ -1,28 +1,25 @@
-use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::sync::Arc;
 
 use libp2p::futures::channel::mpsc;
-use log::info;
+use libp2p::futures::channel::mpsc::SendError;
+use libp2p::futures::SinkExt;
+use log::{error, info, warn};
 use minotari_app_grpc::tari_rpc;
-use minotari_app_grpc::tari_rpc::{Block, BlockBlobRequest, BlockGroupRequest, BlockGroupResponse, BlockHeaderResponse, BlockHeight, BlockTimingResponse, ConsensusConstants, Empty, FetchMatchingUtxosRequest, GetActiveValidatorNodesRequest, GetBlocksRequest, GetHeaderByHashRequest, GetMempoolTransactionsRequest, GetNewBlockBlobResult, GetNewBlockResult, GetNewBlockTemplateWithCoinbasesRequest, GetNewBlockWithCoinbasesRequest, GetPeersRequest, GetShardKeyRequest, GetShardKeyResponse, GetSideChainUtxosRequest, GetTemplateRegistrationsRequest, HeightRequest, ListConnectedPeersResponse, ListHeadersRequest, MempoolStatsResponse, NetworkStatusResponse, NewBlockTemplate, NewBlockTemplateRequest, NewBlockTemplateResponse, NodeIdentity, SearchKernelsRequest, SearchUtxosRequest, SoftwareUpdate, StringValue, SubmitBlockResponse, SubmitTransactionRequest, SubmitTransactionResponse, SyncInfoResponse, SyncProgressResponse, TipInfoResponse, TransactionStateRequest, TransactionStateResponse};
+use minotari_app_grpc::tari_rpc::{Block, BlockBlobRequest, BlockGroupRequest, BlockGroupResponse, BlockHeaderResponse, BlockHeight, BlockTimingResponse, ConsensusConstants, Empty, FetchMatchingUtxosRequest, GetActiveValidatorNodesRequest, GetBlocksRequest, GetHeaderByHashRequest, GetMempoolTransactionsRequest, GetNewBlockBlobResult, GetNewBlockResult, GetNewBlockTemplateWithCoinbasesRequest, GetNewBlockWithCoinbasesRequest, GetPeersRequest, GetShardKeyRequest, GetShardKeyResponse, GetSideChainUtxosRequest, GetTemplateRegistrationsRequest, HeightRequest, ListConnectedPeersResponse, ListHeadersRequest, MempoolStatsResponse, NetworkStatusResponse, NewBlockCoinbase, NewBlockTemplate, NewBlockTemplateRequest, NewBlockTemplateResponse, NodeIdentity, PowAlgo, SearchKernelsRequest, SearchUtxosRequest, SoftwareUpdate, StringValue, SubmitBlockResponse, SubmitTransactionRequest, SubmitTransactionResponse, SyncInfoResponse, SyncProgressResponse, TipInfoResponse, TransactionStateRequest, TransactionStateResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
+use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
-use thiserror::Error;
+use tari_common_types::tari_address::TariAddress;
+use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
+
+use crate::server::grpc::error::{Error, TonicError};
+
+const LIST_HEADERS_PAGE_SIZE: usize = 10;
 
 pub struct TariBaseNodeGrpc {
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
-}
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Tonic error: {0}")]
-    Tonic(#[from] TonicError),
-}
-
-#[derive(Error, Debug)]
-pub enum TonicError {
-    #[error("Transport error: {0}")]
-    Transport(#[from] tonic::transport::Error),
 }
 
 impl TariBaseNodeGrpc {
@@ -52,23 +49,72 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
 
     async fn get_new_block_template(&self, request: Request<NewBlockTemplateRequest>) -> Result<Response<NewBlockTemplateResponse>, Status> {
         info!("get_new_block_template called!");
-        if let Ok(mut client) = self.client.lock() {
-            let result = client
-                .get_new_block_template(request.into_inner().clone())
-                .await;
-        }
-
-        Err(Status::internal(""))
+        self.client.lock().await.get_new_block_template(request.into_inner()).await
     }
 
     async fn get_new_block(&self, request: Request<NewBlockTemplate>) -> Result<Response<GetNewBlockResult>, Status> {
         info!("get_new_block called!");
+        // TODO: remove extra logic and only proxy, move logic to the new p2pool grpc handler
+        let origin_block_template = request.into_inner();
+        let origin = origin_block_template.clone();
+        if let Some(header) = origin_block_template.header {
+            if let Some(body) = origin_block_template.body {
+                if let Some(pow) = header.pow {
+
+                    // simply proxy the request if pow algo is not supported
+                    if pow.pow_algo != PowAlgos::Sha3x as u64 {
+                        warn!("Only SHA3x PoW supported!");
+                        return self.client.lock().await.get_new_block(origin).await;
+                    }
+
+                    // requesting new block template which includes all shares
+                    let mut new_block_template_req = GetNewBlockTemplateWithCoinbasesRequest::default();
+                    let mut new_pow_algo = PowAlgo::default();
+                    new_pow_algo.set_pow_algo(PowAlgos::Sha3x);
+                    new_block_template_req.algo = Some(new_pow_algo);
+                    new_block_template_req.coinbases = vec![
+                        NewBlockCoinbase {
+                            address: TariAddress::from_hex("30a815df7b8d7f653ce3252f08a21d570b1ac44958cb4d7af0e0ef124f89b11943")
+                                .unwrap()
+                                .to_hex(),
+                            value: 1,
+                            stealth_payment: false,
+                            revealed_value_proof: true,
+                            coinbase_extra: Vec::new(),
+                        },
+                    ];
+                    if let Ok(response) = self.client.lock().await
+                        .get_new_block_template_with_coinbases(new_block_template_req).await {}
+                }
+            }
+        }
         todo!()
+        // self.client.lock().await.get_new_block(request.into_inner()).await
     }
 
+    async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
+        info!("submit_block called!");
+        self.client.lock().await.submit_block(request.into_inner()).await
+    }
 
     async fn list_headers(&self, request: Request<ListHeadersRequest>) -> Result<Response<Self::ListHeadersStream>, Status> {
-        todo!()
+        match self.client.lock().await.list_headers(request.into_inner()).await {
+            Ok(response) => {
+                let (mut tx, rx) = mpsc::channel(LIST_HEADERS_PAGE_SIZE);
+                tokio::spawn(async move {
+                    let mut stream = response.into_inner();
+                    tokio::spawn(async move {
+                        while let Ok(Some(next_message)) = stream.message().await {
+                            if let Err(e) = tx.send(Ok(next_message)).await {
+                                error!("failed to send 'list_headers' response message: {e}");
+                            }
+                        }
+                    });
+                });
+                Ok(Response::new(rx))
+            }
+            Err(status) => Err(status)
+        }
     }
 
     async fn get_header_by_hash(&self, request: Request<GetHeaderByHashRequest>) -> Result<Response<BlockHeaderResponse>, Status> {
@@ -123,10 +169,6 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         todo!()
     }
 
-    async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
-        todo!()
-    }
-
     async fn submit_block_blob(&self, request: Request<BlockBlobRequest>) -> Result<Response<SubmitBlockResponse>, Status> {
         todo!()
     }
@@ -144,7 +186,7 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
     }
 
     async fn get_tip_info(&self, request: Request<Empty>) -> Result<Response<TipInfoResponse>, Status> {
-        todo!()
+        self.client.lock().await.get_tip_info(request.into_inner()).await
     }
 
     async fn search_kernels(&self, request: Request<SearchKernelsRequest>) -> Result<Response<Self::SearchKernelsStream>, Status> {

@@ -14,7 +14,7 @@ impl Default for Config {
         Self {
             base_node_address: String::from("http://127.0.0.1:18142"),
             p2p_port: 0, // bind to any free port
-            grpc_port: 18143, // default local base node port + 1
+            grpc_port: 18145,
             idle_connection_timeout: Duration::from_secs(30),
         }
     }
