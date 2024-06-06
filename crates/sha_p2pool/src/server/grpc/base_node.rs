@@ -24,6 +24,7 @@ pub struct TariBaseNodeGrpc {
 
 impl TariBaseNodeGrpc {
     pub async fn new(base_node_address: String) -> Result<Self, Error> {
+        // TODO: add retry mechanism to try at least 3 times before failing
         let client = BaseNodeGrpcClient::connect(base_node_address)
             .await
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
@@ -55,41 +56,41 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
     async fn get_new_block(&self, request: Request<NewBlockTemplate>) -> Result<Response<GetNewBlockResult>, Status> {
         info!("get_new_block called!");
         // TODO: remove extra logic and only proxy, move logic to the new p2pool grpc handler
-        let origin_block_template = request.into_inner();
-        let origin = origin_block_template.clone();
-        if let Some(header) = origin_block_template.header {
-            if let Some(body) = origin_block_template.body {
-                if let Some(pow) = header.pow {
-
-                    // simply proxy the request if pow algo is not supported
-                    if pow.pow_algo != PowAlgos::Sha3x as u64 {
-                        warn!("Only SHA3x PoW supported!");
-                        return self.client.lock().await.get_new_block(origin).await;
-                    }
-
-                    // requesting new block template which includes all shares
-                    let mut new_block_template_req = GetNewBlockTemplateWithCoinbasesRequest::default();
-                    let mut new_pow_algo = PowAlgo::default();
-                    new_pow_algo.set_pow_algo(PowAlgos::Sha3x);
-                    new_block_template_req.algo = Some(new_pow_algo);
-                    new_block_template_req.coinbases = vec![
-                        NewBlockCoinbase {
-                            address: TariAddress::from_hex("30a815df7b8d7f653ce3252f08a21d570b1ac44958cb4d7af0e0ef124f89b11943")
-                                .unwrap()
-                                .to_hex(),
-                            value: 1,
-                            stealth_payment: false,
-                            revealed_value_proof: true,
-                            coinbase_extra: Vec::new(),
-                        },
-                    ];
-                    if let Ok(response) = self.client.lock().await
-                        .get_new_block_template_with_coinbases(new_block_template_req).await {}
-                }
-            }
-        }
-        todo!()
-        // self.client.lock().await.get_new_block(request.into_inner()).await
+        // let origin_block_template = request.into_inner();
+        // let origin = origin_block_template.clone();
+        // if let Some(header) = origin_block_template.header {
+        //     if let Some(body) = origin_block_template.body {
+        //         if let Some(pow) = header.pow {
+        //
+        //             // simply proxy the request if pow algo is not supported
+        //             if pow.pow_algo != PowAlgos::Sha3x as u64 {
+        //                 warn!("Only SHA3x PoW supported!");
+        //                 return self.client.lock().await.get_new_block(origin).await;
+        //             }
+        //
+        //             // requesting new block template which includes all shares
+        //             let mut new_block_template_req = GetNewBlockTemplateWithCoinbasesRequest::default();
+        //             let mut new_pow_algo = PowAlgo::default();
+        //             new_pow_algo.set_pow_algo(PowAlgos::Sha3x);
+        //             new_block_template_req.algo = Some(new_pow_algo);
+        //             new_block_template_req.coinbases = vec![
+        //                 NewBlockCoinbase {
+        //                     address: TariAddress::from_hex("30a815df7b8d7f653ce3252f08a21d570b1ac44958cb4d7af0e0ef124f89b11943")
+        //                         .unwrap()
+        //                         .to_hex(),
+        //                     value: 1,
+        //                     stealth_payment: false,
+        //                     revealed_value_proof: true,
+        //                     coinbase_extra: Vec::new(),
+        //                 },
+        //             ];
+        //             if let Ok(response) = self.client.lock().await
+        //                 .get_new_block_template_with_coinbases(new_block_template_req).await {}
+        //         }
+        //     }
+        // }
+        // todo!()
+        self.client.lock().await.get_new_block(request.into_inner()).await
     }
 
     async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {

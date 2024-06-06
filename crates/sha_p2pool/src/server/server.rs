@@ -10,13 +10,14 @@ use libp2p::mdns::tokio::Tokio;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
+use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2PoolServer;
 use thiserror::Error;
 use tokio::{io, io::AsyncBufReadExt, select};
 
-use sha_p2pool_grpc::tari_sha_p2pool_rpc::tari::sha_p2pool::rpc::sha_p2_pool_server::ShaP2PoolServer;
-
 use crate::server::{config, grpc, p2p};
-use crate::server::grpc::base_node::{TariBaseNodeGrpc, TonicError};
+use crate::server::grpc::base_node::TariBaseNodeGrpc;
+use crate::server::grpc::error::TonicError;
+use crate::server::grpc::p2pool::ShaP2PoolGrpc;
 use crate::server::p2p::{ServerNetworkBehaviour, ServerNetworkBehaviourEvent};
 
 #[derive(Error, Debug)]
@@ -47,7 +48,8 @@ pub enum LibP2PError {
 pub struct Server {
     config: config::Config,
     swarm: Swarm<ServerNetworkBehaviour>,
-    base_node_grpc_server: BaseNodeServer<TariBaseNodeGrpc>,
+    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
+    p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc>,
 }
 
 impl Server {
@@ -56,17 +58,22 @@ impl Server {
         let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
-        // TODO: continue
-        // let p2pool_server = ShaP2PoolServer::new()
+        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
+        let p2pool_server = ShaP2PoolServer::new(p2pool_grpc_service);
 
-        Ok(Self { config, swarm, base_node_grpc_server })
+        Ok(Self { config, swarm, base_node_grpc_service: base_node_grpc_server, p2pool_grpc_service: p2pool_server })
     }
 
-    pub async fn start_grpc(service: BaseNodeServer<TariBaseNodeGrpc>, grpc_port: u64) -> Result<(), Error> {
+    pub async fn start_grpc(
+        base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
+        p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc>,
+        grpc_port: u64,
+    ) -> Result<(), Error> {
         info!("Starting gRPC server on port {}!", &grpc_port);
 
         tonic::transport::Server::builder()
-            .add_service(service)
+            .add_service(base_node_service)
+            .add_service(p2pool_service)
             .serve(
                 SocketAddr::from_str(
                     format!("0.0.0.0:{}", grpc_port).as_str()
@@ -95,10 +102,11 @@ impl Server {
         info!("Starting Tari SHA-3 mining P2Pool...");
 
         // grpc serve
-        let grpc_service = self.base_node_grpc_server.clone();
+        let base_node_grpc_service = self.base_node_grpc_service.clone();
+        let p2pool_grpc_service = self.p2pool_grpc_service.clone();
         let grpc_port = self.config.grpc_port;
         tokio::spawn(async move {
-            Self::start_grpc(grpc_service, grpc_port).await;
+            Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await;
         });
 
         // main loop

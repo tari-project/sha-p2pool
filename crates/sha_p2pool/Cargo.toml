@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sha_p2pool_grpc = { path = "../grpc" }
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git" }
+#sha_p2pool_grpc = { path = "../sha_p2pool_grpc" }
+#minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" }
+#minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" }
+#tari_common_types = { git = "https://github.com/tari-project/tari.git" }
+
+minotari_app_grpc = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
+minotari_node_grpc_client = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
+tari_common_types = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 
 libp2p = { version = "0.53.2", features = [
     "dns",
