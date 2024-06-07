@@ -4,8 +4,8 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct Config {
     pub base_node_address: String,
-    pub p2p_port: u64,
-    pub grpc_port: u64,
+    pub p2p_port: u16,
+    pub grpc_port: u16,
     pub idle_connection_timeout: Duration,
 }
 
@@ -14,7 +14,7 @@ impl Default for Config {
         Self {
             base_node_address: String::from("http://127.0.0.1:18142"),
             p2p_port: 0, // bind to any free port
-            grpc_port: 18145,
+            grpc_port: 18145, // to possibly not collide with any other ports
             idle_connection_timeout: Duration::from_secs(30),
         }
     }
@@ -33,12 +33,12 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
-    pub fn with_p2p_port(&mut self, port: u64) -> &mut Self {
+    pub fn with_p2p_port(&mut self, port: u16) -> &mut Self {
         self.config.p2p_port = port;
         self
     }
 
-    pub fn with_grpc_port(&mut self, port: u64) -> &mut Self {
+    pub fn with_grpc_port(&mut self, port: u16) -> &mut Self {
         self.config.grpc_port = port;
         self
     }

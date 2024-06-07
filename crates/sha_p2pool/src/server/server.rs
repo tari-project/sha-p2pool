@@ -67,7 +67,7 @@ impl Server {
     pub async fn start_grpc(
         base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
         p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc>,
-        grpc_port: u64,
+        grpc_port: u16,
     ) -> Result<(), Error> {
         info!("Starting gRPC server on port {}!", &grpc_port);
 
@@ -106,7 +106,12 @@ impl Server {
         let p2pool_grpc_service = self.p2pool_grpc_service.clone();
         let grpc_port = self.config.grpc_port;
         tokio::spawn(async move {
-            Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await;
+            match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
+                Ok(_) => {}
+                Err(error) => {
+                    error!("GRPC Server encountered an error: {:?}", error);
+                }
+            }
         });
 
         // main loop
@@ -122,12 +127,6 @@ impl Server {
                             for (peer, addr) in peers {
                                 info!("Discovered new peer {} at {}", peer, addr);
                                 self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                                match self.swarm.dial(addr) {
-                                    Ok(_) => {
-                                            info!("Dial success!");
-                                        },
-                                    Err(_) => {},
-                                }
                             }
                           },
                             mdns::Event::Expired(peers) => {

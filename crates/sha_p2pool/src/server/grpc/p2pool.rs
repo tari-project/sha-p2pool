@@ -29,23 +29,31 @@ impl ShaP2PoolGrpc {
 
     // TODO: complete implementation to find the right shares
     async fn generate_shares(&self, request: &GetNewBlockRequest, reward: u64) -> Vec<NewBlockCoinbase> {
-        let mut miners = HashMap::<String, u64>::new(); // target wallet address -> hash rate
+        let mut result = vec![];
+        let mut miners = HashMap::<String, f64>::new(); // target wallet address -> hash rate
 
         // TODO: remove, only for testing now, get miners from outside of this module using P2P network/sharechain
-        miners.insert(request.wallet_payment_address.clone(), 100);
-        miners.insert("6ee38cf177a8fbf818d93ba5bbca6078efd88cef5c57927ce65dd0716ca3ee655a".to_string(), 100);
+        miners.insert(request.wallet_payment_address.clone(), 100.0);
+        miners.insert("260304a3699f8911c3d949b2eb0394595c8041a36fa13320fa2395b4090ae573a430ac21c5d087ecfcd1922e6ef58cd3f2a1eef2fcbd17e2374a09e0c68036fe6c5f91".to_string(), 100.0);
 
         // calculate full hash rate and shares
-        let full_hash_rate: u64 = miners.iter()
-            .map(|(_, rate)| rate)
-            .sum();
+        let full_hash_rate: f64 = miners.values().sum();
         miners.iter()
             .map(|(addr, rate)| (addr, rate / full_hash_rate))
+            .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
-                info!("{addr} -> {share:?}");
+                let curr_reward = ((reward as f64) * share) as u64;
+                info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
+                result.push(NewBlockCoinbase {
+                    address: addr.clone(),
+                    value: curr_reward,
+                    stealth_payment: false,
+                    revealed_value_proof: true,
+                    coinbase_extra: vec![],
+                });
             });
 
-        todo!()
+        result
     }
 }
 
@@ -69,13 +77,19 @@ impl ShaP2Pool for ShaP2PoolGrpc {
         let reward = miner_data.reward;
 
         // request new block template with shares as coinbases
-        let mut new_block_template_req = GetNewBlockTemplateWithCoinbasesRequest::default();
-        new_block_template_req.algo = Some(pow_algo);
-        new_block_template_req.coinbases = self.generate_shares(&template_request, reward).await;
-        let response = self.client.lock().await
-            .get_new_block_template_with_coinbases(new_block_template_req).await?.into_inner();
-        let miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
-        let target_difficulty = miner_data.target_difficulty;
+        let shares = self.generate_shares(&template_request, reward).await;
+        let share_count = shares.len();
+        let mut response = self.client.lock().await
+            .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
+                algo: Some(pow_algo),
+                max_weight: 0,
+                coinbases: shares,
+            }).await?.into_inner();
+
+        // set target difficulty
+        let mut miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
+        // target difficulty is always: `original difficulty` / `number of shares` 
+        let target_difficulty = miner_data.target_difficulty / share_count as u64;
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
