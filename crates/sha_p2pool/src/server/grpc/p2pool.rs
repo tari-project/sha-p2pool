@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use log::info;
 use minotari_app_grpc::tari_rpc::{GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, NewBlockCoinbase, NewBlockTemplateRequest, PowAlgo};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
@@ -43,7 +42,8 @@ impl ShaP2PoolGrpc {
             .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
                 let curr_reward = ((reward as f64) * share) as u64;
-                info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
+                // TODO: check if still needed
+                // info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
@@ -79,7 +79,7 @@ impl ShaP2Pool for ShaP2PoolGrpc {
         // request new block template with shares as coinbases
         let shares = self.generate_shares(&template_request, reward).await;
         let share_count = shares.len();
-        let mut response = self.client.lock().await
+        let response = self.client.lock().await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
                 algo: Some(pow_algo),
                 max_weight: 0,
@@ -87,9 +87,10 @@ impl ShaP2Pool for ShaP2PoolGrpc {
             }).await?.into_inner();
 
         // set target difficulty
-        let mut miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
+        let miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
         // target difficulty is always: `original difficulty` / `number of shares` 
-        let target_difficulty = miner_data.target_difficulty / share_count as u64;
+        // let target_difficulty = miner_data.target_difficulty / share_count as u64; // TODO: uncomment this
+        let target_difficulty = miner_data.target_difficulty / (share_count as u64 * 10); // TODO: remove this
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
