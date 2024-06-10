@@ -52,6 +52,7 @@ pub struct Server {
     p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc>,
 }
 
+// TODO: add graceful shutdown
 impl Server {
     pub async fn new(config: config::Config) -> Result<Self, Error> {
         let swarm = p2p::swarm(&config)?;

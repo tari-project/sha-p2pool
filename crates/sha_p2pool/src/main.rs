@@ -1,4 +1,5 @@
 mod server;
+mod sharechain;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

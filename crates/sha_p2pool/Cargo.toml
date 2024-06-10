@@ -32,7 +32,14 @@ thiserror = "1.0"
 serde = "1.0.203"
 anyhow = "1.0"
 log = "0.4.21"
+prost = "0.11.9"
+prost-types = "0.11.9"
 env_logger = "0.11.3"
 tonic = { workspace = true }
+async-trait = "0.1.80"
+libp2p-grpc-rs = "0.1.2"
+
+[build-dependencies]
+tonic-build = "0.8.4"
 
 
