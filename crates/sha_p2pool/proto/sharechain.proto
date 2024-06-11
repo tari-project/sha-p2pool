@@ -5,19 +5,10 @@ package tari.p2pool.sharechain.rpc;
 import "block.proto";
 
 service ShareChain {
-  // Get tip height of share chain of the curren node.
-  rpc GetBlockHeightTip(GetBlockHeightTipRequest) returns(GetBlockHeightTipResponse);
-
   // Sync will return a stream of share chain blocks starting from `from_height`.
   rpc Sync(SyncRequest) returns(stream Block);
 }
 
 message SyncRequest {
   uint64 from_height = 1;
-}
-
-message GetBlockHeightTipRequest {}
-
-message GetBlockHeightTipResponse {
-  uint64 height = 1;
 }

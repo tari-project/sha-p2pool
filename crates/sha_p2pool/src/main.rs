@@ -1,3 +1,5 @@
+use crate::sharechain::in_memory::InMemoryShareChain;
+
 mod server;
 mod sharechain;
 
@@ -5,7 +7,8 @@ mod sharechain;
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let config = server::Config::builder().build();
-    let mut server = server::Server::new(config).await?;
+    let share_chain = InMemoryShareChain::new();
+    let mut server = server::Server::new(config, share_chain).await?;
     server.start().await?;
     Ok(())
 }

@@ -1,6 +1,7 @@
+use libp2p::futures::channel::mpsc;
 use tonic::{Request, Response, Status};
 
-use crate::sharechain::grpc::rpc::{GetBlockHeightTipRequest, GetBlockHeightTipResponse, SyncRequest};
+use crate::sharechain::grpc::rpc::{Block, SyncRequest};
 use crate::sharechain::grpc::rpc::share_chain_server::ShareChain as GrpcShareChain;
 use crate::sharechain::ShareChain;
 
@@ -15,17 +16,20 @@ pub struct ShareChainGrpc<T>
     blockchain: T,
 }
 
+impl<T> ShareChainGrpc<T>
+    where T: ShareChain + Send + Sync + 'static {
+    pub fn new(blockchain: T) -> Self {
+        Self {
+            blockchain
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl<T> GrpcShareChain for ShareChainGrpc<T>
     where T: ShareChain + Send + Sync + 'static,
 {
-    async fn get_block_height_tip(&self, request: Request<GetBlockHeightTipRequest>) -> Result<Response<GetBlockHeightTipResponse>, Status> {
-        Ok(Response::new(GetBlockHeightTipResponse {
-            height: self.blockchain.tip_height().await,
-        }))
-    }
-
-    type SyncStream = ();
+    type SyncStream = mpsc::Receiver<Result<Block, Status>>;
 
     async fn sync(&self, request: Request<SyncRequest>) -> Result<Response<Self::SyncStream>, Status> {
         todo!()

@@ -3,6 +3,6 @@ pub use server::*;
 
 mod config;
 mod server;
-mod p2p;
 
 pub mod grpc;
+mod p2p;

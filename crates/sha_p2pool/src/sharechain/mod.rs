@@ -1,13 +1,17 @@
 use async_trait::async_trait;
+use tari_common_types::types::BlockHash;
 use tari_core::blocks::BlockHeader;
 use thiserror::Error;
 
-mod grpc;
-mod in_memory;
+pub mod grpc;
+pub mod in_memory;
 
 pub struct Block {
-    original_header: BlockHeader,
-
+    hash: BlockHash,
+    prev_hash: BlockHash,
+    height: u64,
+    original_block_header: BlockHeader,
+    miners: Vec<String>,
 }
 
 #[derive(Error, Debug)]
@@ -16,11 +20,11 @@ pub enum Error {
     Internal(String),
 }
 
-pub type ShareChainError<T> = Result<T, Error>;
+pub type ShareChainResult<T> = Result<T, Error>;
 
 #[async_trait]
 pub trait ShareChain {
-    async fn submit_block(&self, block: Block) -> ShareChainError<()>;
+    async fn submit_block(&self, block: Block) -> ShareChainResult<()>;
 
-    async fn tip_height(&self) -> ShareChainError<u64>;
+    async fn tip_height(&self) -> ShareChainResult<u64>;
 }

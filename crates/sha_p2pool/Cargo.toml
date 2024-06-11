@@ -25,7 +25,9 @@ libp2p = { version = "0.53.2", features = [
     "yamux",
     "mdns",
     "gossipsub",
-    "kad"
+    "kad",
+    "request-response",
+    "json"
 ] }
 tokio = { version = "1.38.0", features = ["full"] }
 thiserror = "1.0"
@@ -37,9 +39,10 @@ prost-types = "0.11.9"
 env_logger = "0.11.3"
 tonic = { workspace = true }
 async-trait = "0.1.80"
-libp2p-grpc-rs = "0.1.2"
+serde_cbor = "0.11.2"
+rand = "0.8.5"
 
 [build-dependencies]
-tonic-build = "0.8.4"
+tonic-build = { workspace = true }
 
 
