@@ -39,9 +39,9 @@ pub struct Server<S>
     where S: ShareChain + Send + Sync + 'static
 {
     config: config::Config,
-    p2p_service: p2p::Service<S>,
+    p2p_service: Arc<p2p::Service<S>>,
     base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
-    p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc>,
+    p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
 }
 
 // TODO: add graceful shutdown
@@ -49,20 +49,23 @@ impl<S> Server<S>
     where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
+        let share_chain = Arc::new(share_chain);
+        let p2p_service: Arc<p2p::Service<S>> = Arc::new(
+            p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?
+        );
+
         let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
-        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
+        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), share_chain.clone()).await.map_err(Error::GRPC)?;
         let p2pool_server = ShaP2PoolServer::new(p2pool_grpc_service);
-
-        let p2p_service: p2p::Service<S> = p2p::Service::new(&config, Arc::new(share_chain)).map_err(Error::P2PService)?;
 
         Ok(Self { config, p2p_service, base_node_grpc_service: base_node_grpc_server, p2pool_grpc_service: p2pool_server })
     }
 
     pub async fn start_grpc(
         base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
-        p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc>,
+        p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
         grpc_port: u16,
     ) -> Result<(), Error> {
         info!("Starting gRPC server on port {}!", &grpc_port);

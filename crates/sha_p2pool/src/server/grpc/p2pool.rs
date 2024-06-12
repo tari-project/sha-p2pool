@@ -11,19 +11,25 @@ use tonic::{Request, Response, Status};
 
 use crate::server::grpc::error::Error;
 use crate::server::grpc::error::TonicError;
+use crate::sharechain::ShareChain;
 
-pub struct ShaP2PoolGrpc {
+pub struct ShaP2PoolGrpc<S>
+    where S: ShareChain + Send + Sync + 'static
+{
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
+    share_chain: Arc<S>,
 }
 
-impl ShaP2PoolGrpc {
-    pub async fn new(base_node_address: String) -> Result<Self, Error> {
+impl<S> ShaP2PoolGrpc<S>
+    where S: ShareChain + Send + Sync + 'static
+{
+    pub async fn new(base_node_address: String, share_chain: Arc<S>) -> Result<Self, Error> {
         // TODO: add retry mechanism to try at least 3 times before failing
         let client = BaseNodeGrpcClient::connect(base_node_address)
             .await
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
 
-        Ok(Self { client: Arc::new(Mutex::new(client)) })
+        Ok(Self { client: Arc::new(Mutex::new(client)), share_chain })
     }
 
     // TODO: complete implementation to find the right shares
@@ -58,7 +64,9 @@ impl ShaP2PoolGrpc {
 }
 
 #[tonic::async_trait]
-impl ShaP2Pool for ShaP2PoolGrpc {
+impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
+    where S: ShareChain + Send + Sync + 'static
+{
     async fn get_new_block(&self, request: Request<GetNewBlockRequest>) -> Result<Response<GetNewBlockResponse>, Status> {
         let template_request = request.into_inner();
         let mut pow_algo = PowAlgo::default();

@@ -16,6 +16,8 @@ use tokio::sync::Mutex;
 use tonic::{IntoRequest, Request, Response, Status, Streaming};
 
 use crate::server::grpc::error::{Error, TonicError};
+use crate::server::p2p;
+use crate::sharechain::ShareChain;
 
 const LIST_HEADERS_PAGE_SIZE: usize = 10;
 const GET_BLOCKS_PAGE_SIZE: usize = 10;
@@ -51,19 +53,23 @@ macro_rules! proxy_stream_result {
     };
 }
 
-pub struct TariBaseNodeGrpc {
+pub struct TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static
+{
     // TODO: check if 1 shared client is enough or we need a pool of clients to operate faster
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
+    p2p_service: Arc<p2p::ServiceClient<S>>,
 }
 
-impl TariBaseNodeGrpc {
-    pub async fn new(base_node_address: String) -> Result<Self, Error> {
+impl<S> TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static {
+    pub async fn new(base_node_address: String, p2p_service: Arc<p2p::ServiceClient<S>>) -> Result<Self, Error> {
         // TODO: add retry mechanism to try at least 3 times before failing
         let client = BaseNodeGrpcClient::connect(base_node_address)
             .await
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
 
-        Ok(Self { client: Arc::new(Mutex::new(client)) })
+        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_service })
     }
 
     async fn streaming_response<R>(
@@ -94,7 +100,9 @@ impl TariBaseNodeGrpc {
 }
 
 #[tonic::async_trait]
-impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
+impl<S> tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static
+{
     type ListHeadersStream = mpsc::Receiver<Result<BlockHeaderResponse, Status>>;
     async fn list_headers(&self, request: Request<ListHeadersRequest>) -> Result<Response<Self::ListHeadersStream>, Status> {
         proxy_stream_result!(self, list_headers, request, LIST_HEADERS_PAGE_SIZE)
@@ -158,7 +166,7 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
 
     async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
         // Check block's difficulty compared to the latest network one to increase the probability
-        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway). 
+        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
         let grpc_block = request.into_inner();
         let block = blocks::Block::try_from(grpc_block.clone())
             .map_err(|e| { Status::internal(e) })?;

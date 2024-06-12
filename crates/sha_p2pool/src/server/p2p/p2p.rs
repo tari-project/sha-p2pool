@@ -29,6 +29,11 @@ pub struct ServerNetworkBehaviour {
     // pub request_response: json::Behaviour<grpc::rpc::>,
 }
 
+// TODO: implement ServiceClient and wire into TariBaseNodeGrpc
+pub struct ServiceClient<S>
+    where S: ShareChain + Send + Sync + 'static
+{}
+
 pub struct Service<S>
     where S: ShareChain + Send + Sync + 'static,
 {
@@ -93,14 +98,14 @@ impl<S> Service<S>
     }
 
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
-        // get node info
+        // get peer info
         let share_chain = self.share_chain.clone();
         let current_height = share_chain.tip_height().await
             .map_err(Error::ShareChain)?;
-        let node_info = messages::serialize_message(&PeerInfo { current_height })?;
+        let peer_info_raw: Vec<u8> = PeerInfo::new(current_height).try_into()?;
 
-        // broadcast node info
-        self.swarm.behaviour_mut().gossipsub.publish(IdentTopic::new(PEER_INFO_TOPIC), node_info)
+        // broadcast peer info
+        self.swarm.behaviour_mut().gossipsub.publish(IdentTopic::new(PEER_INFO_TOPIC), peer_info_raw)
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         Ok(())
@@ -132,7 +137,7 @@ impl<S> Service<S>
                 }
             }
             &_ => {
-                warn!("Unknown message!");
+                warn!("Unknown topic {topic:?}!");
             }
         }
     }

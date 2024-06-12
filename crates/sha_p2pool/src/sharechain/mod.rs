@@ -3,7 +3,6 @@ use tari_common_types::types::BlockHash;
 use tari_core::blocks::BlockHeader;
 use thiserror::Error;
 
-pub mod grpc;
 pub mod in_memory;
 
 pub struct Block {
