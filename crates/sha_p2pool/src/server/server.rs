@@ -15,12 +15,13 @@ use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
 use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2PoolServer;
 use thiserror::Error;
 use tokio::{io, io::AsyncBufReadExt, select};
+use tokio::sync::Mutex;
 
 use crate::server::{config, grpc, p2p};
 use crate::server::grpc::base_node::TariBaseNodeGrpc;
 use crate::server::grpc::error::TonicError;
 use crate::server::grpc::p2pool::ShaP2PoolGrpc;
-use crate::server::p2p::{ServerNetworkBehaviour, ServerNetworkBehaviourEvent};
+use crate::server::p2p::{ServerNetworkBehaviour, ServerNetworkBehaviourEvent, ServiceClient};
 use crate::sharechain::in_memory::InMemoryShareChain;
 use crate::sharechain::ShareChain;
 
@@ -39,7 +40,7 @@ pub struct Server<S>
     where S: ShareChain + Send + Sync + 'static
 {
     config: config::Config,
-    p2p_service: Arc<p2p::Service<S>>,
+    p2p_service: p2p::Service<S>,
     base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
     p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
 }
@@ -50,11 +51,12 @@ impl<S> Server<S>
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
-        let p2p_service: Arc<p2p::Service<S>> = Arc::new(
-            p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?
-        );
+        let p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?;
 
-        let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::GRPC)?;
+        let base_node_grpc_service = TariBaseNodeGrpc::new(
+            config.base_node_address.clone(),
+            p2p_service.client(),
+        ).await.map_err(Error::GRPC)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
         let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), share_chain.clone()).await.map_err(Error::GRPC)?;

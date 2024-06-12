@@ -1,10 +1,12 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tari_common_types::types::BlockHash;
 use tari_core::blocks::BlockHeader;
 use thiserror::Error;
 
 pub mod in_memory;
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Block {
     hash: BlockHash,
     prev_hash: BlockHash,

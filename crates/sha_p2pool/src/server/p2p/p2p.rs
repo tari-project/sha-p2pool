@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,10 +14,10 @@ use log::{error, info, warn};
 use rand::random;
 use serde::{Deserialize, Serialize};
 use tokio::{io, select};
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{broadcast, Mutex, MutexGuard, oneshot};
 
 use crate::server::config;
-use crate::server::p2p::{Error, LibP2PError, messages};
+use crate::server::p2p::{Error, LibP2PError, messages, ServiceClient};
 use crate::server::p2p::messages::PeerInfo;
 use crate::server::p2p::peer_store::PeerStore;
 use crate::sharechain::ShareChain;
@@ -29,11 +31,6 @@ pub struct ServerNetworkBehaviour {
     // pub request_response: json::Behaviour<grpc::rpc::>,
 }
 
-// TODO: implement ServiceClient and wire into TariBaseNodeGrpc
-pub struct ServiceClient<S>
-    where S: ShareChain + Send + Sync + 'static
-{}
-
 pub struct Service<S>
     where S: ShareChain + Send + Sync + 'static,
 {
@@ -46,6 +43,15 @@ pub struct Service<S>
 impl<S> Service<S>
     where S: ShareChain + Send + Sync + 'static,
 {
+    pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
+        Ok(Self {
+            swarm: Self::new_swarm(config)?,
+            port: config.p2p_port,
+            share_chain,
+            peer_store: PeerStore::new(config.idle_connection_timeout),
+        })
+    }
+
     fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
         let swarm = libp2p::SwarmBuilder::with_new_identity()
             .with_tokio()
@@ -88,13 +94,10 @@ impl<S> Service<S>
 
         Ok(swarm)
     }
-    pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
-        Ok(Self {
-            swarm: Self::new_swarm(config)?,
-            port: config.p2p_port,
-            share_chain,
-            peer_store: PeerStore::new(config.idle_connection_timeout),
-        })
+
+    pub fn client(&self) -> ServiceClient {
+        // TODO: implement
+        todo!()
     }
 
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
@@ -176,6 +179,7 @@ impl<S> Service<S>
     async fn main_loop(&mut self) -> Result<(), Error> {
         // TODO: get from config
         let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(5));
+
         loop {
             select! {
                 _ = publish_peer_info_interval.tick() => {
@@ -190,8 +194,10 @@ impl<S> Service<S>
                             }
                         }
                     }
-                },
-                 next = self.swarm.select_next_some() => self.handle_event(next).await,
+                }
+                event = self.swarm.select_next_some() => {
+                    self.handle_event(event).await;
+                }
             }
         }
     }

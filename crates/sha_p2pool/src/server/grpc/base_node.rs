@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use libp2p::futures::channel::mpsc;
 use libp2p::futures::SinkExt;
+use libp2p::Swarm;
 use log::{error, info, warn};
 use minotari_app_grpc::conversions::*;
 use minotari_app_grpc::tari_rpc;
@@ -17,6 +18,7 @@ use tonic::{IntoRequest, Request, Response, Status, Streaming};
 
 use crate::server::grpc::error::{Error, TonicError};
 use crate::server::p2p;
+use crate::server::p2p::ServerNetworkBehaviour;
 use crate::sharechain::ShareChain;
 
 const LIST_HEADERS_PAGE_SIZE: usize = 10;
@@ -53,23 +55,21 @@ macro_rules! proxy_stream_result {
     };
 }
 
-pub struct TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static
+pub struct TariBaseNodeGrpc
 {
     // TODO: check if 1 shared client is enough or we need a pool of clients to operate faster
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
-    p2p_service: Arc<p2p::ServiceClient<S>>,
+    p2p_client: p2p::ServiceClient,
 }
 
-impl<S> TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static {
-    pub async fn new(base_node_address: String, p2p_service: Arc<p2p::ServiceClient<S>>) -> Result<Self, Error> {
+impl TariBaseNodeGrpc {
+    pub async fn new(base_node_address: String, p2p_client: p2p::ServiceClient) -> Result<Self, Error> {
         // TODO: add retry mechanism to try at least 3 times before failing
         let client = BaseNodeGrpcClient::connect(base_node_address)
             .await
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
 
-        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_service })
+        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client })
     }
 
     async fn streaming_response<R>(
@@ -100,8 +100,7 @@ impl<S> TariBaseNodeGrpc<S>
 }
 
 #[tonic::async_trait]
-impl<S> tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static
+impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
 {
     type ListHeadersStream = mpsc::Receiver<Result<BlockHeaderResponse, Status>>;
     async fn list_headers(&self, request: Request<ListHeadersRequest>) -> Result<Response<Self::ListHeadersStream>, Status> {

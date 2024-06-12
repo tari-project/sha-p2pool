@@ -2,6 +2,7 @@ use libp2p::gossipsub::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::server::p2p::Error;
+use crate::sharechain::Block;
 
 macro_rules! impl_conversions {
     ($type:ty) => {
@@ -44,3 +45,14 @@ impl PeerInfo {
         Self { current_height }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ValidateBlockRequest(Block);
+impl_conversions!(ValidateBlockRequest);
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ValidateBlockResult {
+    block: Block,
+    valid: bool,
+}
+impl_conversions!(ValidateBlockResult);
