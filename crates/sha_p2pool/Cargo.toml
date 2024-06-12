@@ -25,7 +25,6 @@ libp2p = { version = "0.53.2", features = [
     "yamux",
     "mdns",
     "gossipsub",
-    "kad",
     "request-response",
     "json"
 ] }
@@ -41,6 +40,7 @@ tonic = { workspace = true }
 async-trait = "0.1.80"
 serde_cbor = "0.11.2"
 rand = "0.8.5"
+dashmap = "5.5.3"
 
 [build-dependencies]
 tonic-build = { workspace = true }

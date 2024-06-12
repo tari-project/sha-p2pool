@@ -1,4 +1,5 @@
-use libp2p::{kad, multiaddr, noise, TransportError};
+use libp2p::{multiaddr, noise, TransportError};
+use libp2p::gossipsub::PublishError;
 use thiserror::Error;
 
 use crate::sharechain;
@@ -7,8 +8,8 @@ use crate::sharechain;
 pub enum Error {
     #[error("LibP2P error: {0}")]
     LibP2P(#[from] LibP2PError),
-    #[error("CBOR serialize error: {0}")]
-    Serialize(#[from] serde_cbor::Error),
+    #[error("CBOR serialize/deserialize error: {0}")]
+    SerializeDeserialize(#[from] serde_cbor::Error),
     #[error("Share chain error: {0}")]
     ShareChain(#[from] sharechain::Error),
 }
@@ -25,6 +26,6 @@ pub enum LibP2PError {
     IO(#[from] std::io::Error),
     #[error("Behaviour error: {0}")]
     Behaviour(String),
-    #[error("Kademlia record store error: {0}")]
-    KadRecord(#[from] kad::store::Error),
+    #[error("Gossip sub publish error: {0}")]
+    Publish(#[from] PublishError),
 }
