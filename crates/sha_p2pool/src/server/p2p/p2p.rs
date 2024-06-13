@@ -1,28 +1,26 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
-use libp2p::{gossipsub, mdns, noise, PeerId, Swarm, tcp, yamux};
-use libp2p::futures::{StreamExt, TryFutureExt};
+use libp2p::{gossipsub, mdns, noise, Swarm, tcp, yamux};
+use libp2p::futures::StreamExt;
 use libp2p::gossipsub::{Event, IdentTopic, Message, PublishError, Topic};
 use libp2p::mdns::tokio::Tokio;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{error, info, warn};
-use rand::random;
-use serde::{Deserialize, Serialize};
 use tokio::{io, select};
-use tokio::sync::{broadcast, Mutex, MutexGuard, oneshot};
+use tokio::sync::{broadcast, Mutex};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::server::config;
-use crate::server::p2p::{Error, LibP2PError, messages, ServiceClient};
-use crate::server::p2p::messages::PeerInfo;
+use crate::server::p2p::{Error, LibP2PError, messages, ServiceClient, ServiceClientChannels};
+use crate::server::p2p::messages::{PeerInfo, ValidateBlockRequest, ValidateBlockResult};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::sharechain::ShareChain;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
+const BLOCK_VALIDATION_REQUESTS_TOPIC: &str = "block_validation_requests";
+const BLOCK_VALIDATION_RESULTS_TOPIC: &str = "block_validation_results";
 
 #[derive(NetworkBehaviour)]
 pub struct ServerNetworkBehaviour {
@@ -37,18 +35,37 @@ pub struct Service<S>
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
     share_chain: Arc<S>,
-    peer_store: PeerStore,
+    peer_store: Arc<PeerStore>,
+
+    // service client related channels
+    client_validate_block_req_tx: broadcast::Sender<ValidateBlockRequest>,
+    client_validate_block_req_rx: broadcast::Receiver<ValidateBlockRequest>,
+    client_validate_block_res_tx: broadcast::Sender<ValidateBlockResult>,
+    client_validate_block_res_rx: broadcast::Receiver<ValidateBlockResult>,
 }
 
 impl<S> Service<S>
     where S: ShareChain + Send + Sync + 'static,
 {
     pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
+        let swarm = Self::new_swarm(config)?;
+        let peer_store = Arc::new(
+            PeerStore::new(config.idle_connection_timeout),
+        );
+
+        // client related channels
+        let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1);
+        let (validate_res_tx, validate_res_rx) = broadcast::channel::<ValidateBlockResult>(1);
+
         Ok(Self {
-            swarm: Self::new_swarm(config)?,
+            swarm,
             port: config.p2p_port,
             share_chain,
-            peer_store: PeerStore::new(config.idle_connection_timeout),
+            peer_store,
+            client_validate_block_req_tx: validate_req_tx,
+            client_validate_block_req_rx: validate_req_rx,
+            client_validate_block_res_tx: validate_res_tx,
+            client_validate_block_res_rx: validate_res_rx,
         })
     }
 
@@ -96,8 +113,60 @@ impl<S> Service<S>
     }
 
     pub fn client(&self) -> ServiceClient {
-        // TODO: implement
-        todo!()
+        ServiceClient::new(
+            ServiceClientChannels::new(
+                self.client_validate_block_req_tx.clone(),
+                self.client_validate_block_res_rx.resubscribe(),
+            ),
+            self.peer_store.clone(),
+        )
+    }
+
+    async fn handle_client_validate_block_request(&mut self, result: Result<ValidateBlockRequest, RecvError>) {
+        match result {
+            Ok(request) => {
+                let request_raw_result: Result<Vec<u8>, Error> = request.try_into();
+                match request_raw_result {
+                    Ok(request_raw) => {
+                        match self.swarm.behaviour_mut().gossipsub.publish(
+                            IdentTopic::new(BLOCK_VALIDATION_REQUESTS_TOPIC),
+                            request_raw,
+                        ) {
+                            Ok(_) => {}
+                            Err(error) => {
+                                error!("Failed to send block validation request: {error:?}");
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        error!("Failed to convert block validation request to bytes: {error:?}");
+                    }
+                }
+            }
+            Err(error) => {
+                error!("Block validation request receive error: {error:?}");
+            }
+        }
+    }
+
+    async fn send_block_validation_result(&mut self, result: ValidateBlockResult) {
+        let result_raw_result: Result<Vec<u8>, Error> = result.try_into();
+        match result_raw_result {
+            Ok(result_raw) => {
+                match self.swarm.behaviour_mut().gossipsub.publish(
+                    IdentTopic::new(BLOCK_VALIDATION_RESULTS_TOPIC),
+                    result_raw,
+                ) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        error!("Failed to publish block validation result: {error:?}");
+                    }
+                }
+            }
+            Err(error) => {
+                error!("Failed to convert block validation result to bytes: {error:?}");
+            }
+        }
     }
 
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
@@ -114,9 +183,15 @@ impl<S> Service<S>
         Ok(())
     }
 
-    async fn subscribe_to_peer_info(&mut self) {
-        self.swarm.behaviour_mut().gossipsub.subscribe(&IdentTopic::new(PEER_INFO_TOPIC))
-            .expect("must be subscribed to node_info topic");
+    fn subscribe(&mut self, topic: &str) {
+        self.swarm.behaviour_mut().gossipsub.subscribe(&IdentTopic::new(topic.clone()))
+            .expect("must be subscribed to topic");
+    }
+
+    fn subscribe_to_topics(&mut self) {
+        self.subscribe(PEER_INFO_TOPIC);
+        self.subscribe(BLOCK_VALIDATION_REQUESTS_TOPIC);
+        self.subscribe(BLOCK_VALIDATION_RESULTS_TOPIC);
     }
 
     async fn handle_new_message(&mut self, message: Message) {
@@ -133,9 +208,39 @@ impl<S> Service<S>
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
                         self.peer_store.add(peer, payload);
+                        info!("[PEER STORE] Number of peers: {:?}", self.peer_store.peer_count());
                     }
                     Err(error) => {
-                        error!("Can't deserialize node info payload: {:?}", error);
+                        error!("Can't deserialize peer info payload: {:?}", error);
+                    }
+                }
+            }
+            BLOCK_VALIDATION_REQUESTS_TOPIC => {
+                match messages::ValidateBlockRequest::try_from(message) {
+                    Ok(payload) => {
+                        info!("Block validation request: {payload:?}");
+                        // TODO: validate block
+                        let validate_result = ValidateBlockResult::new(
+                            self.swarm.local_peer_id().clone(),
+                            payload.block(),
+                            true, // TODO: validate block
+                        );
+                        self.send_block_validation_result(validate_result).await;
+                    }
+                    Err(error) => {
+                        error!("Can't deserialize block validation request payload: {:?}", error);
+                    }
+                }
+            }
+            BLOCK_VALIDATION_RESULTS_TOPIC => {
+                match messages::ValidateBlockResult::try_from(message) {
+                    Ok(payload) => {
+                        if let Err(error) = self.client_validate_block_res_tx.send(payload) {
+                            error!("Failed to send block validation result to clients: {error:?}");
+                        }
+                    }
+                    Err(error) => {
+                        error!("Can't deserialize block validation request payload: {:?}", error);
                     }
                 }
             }
@@ -179,6 +284,7 @@ impl<S> Service<S>
     async fn main_loop(&mut self) -> Result<(), Error> {
         // TODO: get from config
         let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(5));
+        let mut client_validate_block_req_rx = self.client_validate_block_req_rx.resubscribe();
 
         loop {
             select! {
@@ -194,6 +300,9 @@ impl<S> Service<S>
                             }
                         }
                     }
+                }
+                result = client_validate_block_req_rx.recv() => {
+                    self.handle_client_validate_block_request(result).await;
                 }
                 event = self.swarm.select_next_some() => {
                     self.handle_event(event).await;
@@ -211,7 +320,7 @@ impl<S> Service<S>
             )
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
-        self.subscribe_to_peer_info().await;
+        self.subscribe_to_topics();
 
         self.main_loop().await
     }

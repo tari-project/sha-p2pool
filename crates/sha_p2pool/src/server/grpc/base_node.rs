@@ -18,7 +18,7 @@ use tonic::{IntoRequest, Request, Response, Status, Streaming};
 
 use crate::server::grpc::error::{Error, TonicError};
 use crate::server::p2p;
-use crate::server::p2p::ServerNetworkBehaviour;
+use crate::server::p2p::{ClientError, ServerNetworkBehaviour};
 use crate::sharechain::ShareChain;
 
 const LIST_HEADERS_PAGE_SIZE: usize = 10;
@@ -164,11 +164,19 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
     }
 
     async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
-        // Check block's difficulty compared to the latest network one to increase the probability
-        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
         let grpc_block = request.into_inner();
         let block = blocks::Block::try_from(grpc_block.clone())
             .map_err(|e| { Status::internal(e) })?;
+
+        // validate block
+        let validation_result = self.p2p_client.validate_block(block.clone().into()).await
+            .map_err(|error| Status::internal(error.to_string()))?;
+        if !validation_result {
+            return Err(Status::failed_precondition("invalid block")); // TODO: maybe another error would be better
+        }
+
+        // Check block's difficulty compared to the latest network one to increase the probability
+        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
         let request_block_difficulty = sha3x_difficulty(&block.header)
             .map_err(|error| { Status::internal(error.to_string()) })?;
         let mut network_difficulty_stream = self.client.lock().await.get_network_difficulty(HeightRequest {
@@ -191,6 +199,7 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
                 block_hash: vec![], // TODO: get from sharechain
             }));
         }
+
 
         let request = grpc_block.into_request();
         match proxy_simple_result!(self, submit_block, request) {

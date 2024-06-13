@@ -2,6 +2,7 @@ use libp2p::{multiaddr, noise, TransportError};
 use libp2p::gossipsub::PublishError;
 use thiserror::Error;
 
+use crate::server::p2p;
 use crate::sharechain;
 
 #[derive(Error, Debug)]
@@ -12,6 +13,8 @@ pub enum Error {
     SerializeDeserialize(#[from] serde_cbor::Error),
     #[error("Share chain error: {0}")]
     ShareChain(#[from] sharechain::Error),
+    #[error("Share chain error: {0}")]
+    Client(#[from] p2p::client::ClientError),
 }
 
 #[derive(Error, Debug)]

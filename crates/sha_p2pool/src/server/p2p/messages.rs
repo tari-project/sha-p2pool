@@ -1,4 +1,5 @@
 use libp2p::gossipsub::Message;
+use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
 use crate::server::p2p::Error;
@@ -13,10 +14,10 @@ macro_rules! impl_conversions {
                 deserialize_message::<$type>(message.data.as_slice())
             }
         }
-        
+
         impl TryInto<Vec<u8>> for $type {
             type Error = Error;
-        
+
             fn try_into(self) -> Result<Vec<u8>, Self::Error> {
                 serialize_message(&self)
             }
@@ -46,13 +47,36 @@ impl PeerInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ValidateBlockRequest(Block);
 impl_conversions!(ValidateBlockRequest);
+impl ValidateBlockRequest {
+    pub fn new(block: Block) -> Self {
+        Self(block)
+    }
+    
+    pub fn block(&self) -> Block {
+        self.0.clone()
+    }
+}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ValidateBlockResult {
-    block: Block,
-    valid: bool,
+    pub peer_id: PeerId,
+    pub block: Block,
+    pub valid: bool,
 }
 impl_conversions!(ValidateBlockResult);
+impl ValidateBlockResult {
+    pub fn new(
+        peer_id: PeerId,
+        block: Block,
+        valid: bool,
+    ) -> Self {
+        Self {
+            peer_id,
+            block,
+            valid,
+        }
+    }
+}
