@@ -38,6 +38,7 @@ pub struct Service<S>
     peer_store: Arc<PeerStore>,
 
     // service client related channels
+    // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
     client_validate_block_req_tx: broadcast::Sender<ValidateBlockRequest>,
     client_validate_block_req_rx: broadcast::Receiver<ValidateBlockRequest>,
     client_validate_block_res_tx: broadcast::Sender<ValidateBlockResult>,
@@ -54,8 +55,8 @@ impl<S> Service<S>
         );
 
         // client related channels
-        let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1);
-        let (validate_res_tx, validate_res_rx) = broadcast::channel::<ValidateBlockResult>(1);
+        let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1000);
+        let (validate_res_tx, validate_res_rx) = broadcast::channel::<ValidateBlockResult>(1000);
 
         Ok(Self {
             swarm,

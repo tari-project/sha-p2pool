@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use log::{info, warn};
+use log::{error, info, warn};
 use thiserror::Error;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -58,6 +58,8 @@ impl ServiceClient {
 
     pub async fn validate_block(&self, block: Block) -> Result<bool, ClientError> {
         info!("[CLIENT] Start block validation");
+        let start = Instant::now();
+
         // send request to validate block
         self.channels.validate_block_sender.send(ValidateBlockRequest::new(block.clone()))
             .map_err(|error|
@@ -65,35 +67,39 @@ impl ServiceClient {
             )?;
 
         // calculate how many validations we need (more than 2/3 of peers should validate)
-        let peer_count = self.peer_store.peer_count() + 1; // TODO: remove + 1
-        info!("[CLIENT] Peer count: {peer_count:?}");
-        // TODO: calculate well, if there are 3 peers (including us), then min validation count is:
-        // TODO: ((peer_count + 1 / 3) * 2) - 1 rounded to an int
-        let min_validation_count = (peer_count / 3) * 2;
+        let peer_count = self.peer_store.peer_count() as f64 + 1.0;
+        let min_validation_count = (peer_count / 3.0) * 2.0;
+        let min_validation_count = min_validation_count.round() as u64;
         info!("[CLIENT] Minimum validation count: {min_validation_count:?}");
 
         // wait for the validations to come
         let timeout = Duration::from_secs(30);
         let mut validate_receiver = self.channels.validate_block_receiver.resubscribe();
         let mut validation_count = 0;
-        loop {
+        while validation_count < min_validation_count {
             select! {
                 _ = sleep(timeout) => {
                     warn!("Timing out waiting for validations!");
                     break;
                 }
                 result = validate_receiver.recv() => {
-                    let validate_result = result.map_err(ClientError::ChannelReceive)?;
-                    info!("New validation: {validate_result:?}");
-                    if validate_result.valid && validate_result.block == block {
-                        validation_count+=1;
-                    }
-                    if validation_count >= min_validation_count {
-                        break;
+                    match result {
+                        Ok(validate_result) => {
+                            info!("New validation: {validate_result:?}");
+                            if validate_result.valid && validate_result.block == block {
+                                validation_count+=1;
+                            }
+                        }
+                        Err(error) => {
+                            error!("Error during receiving: {error:?}");
+                        }
                     }
                 }
             }
         }
+
+        let validation_time = Instant::now().duration_since(start);
+        info!("Validation took {:?}", validation_time);
 
         Ok(validation_count >= min_validation_count)
     }

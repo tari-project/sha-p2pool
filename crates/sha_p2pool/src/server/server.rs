@@ -41,7 +41,7 @@ pub struct Server<S>
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
-    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
+    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc<S>>,
     p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
 }
 
@@ -56,6 +56,7 @@ impl<S> Server<S>
         let base_node_grpc_service = TariBaseNodeGrpc::new(
             config.base_node_address.clone(),
             p2p_service.client(),
+            share_chain.clone(),
         ).await.map_err(Error::GRPC)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
@@ -66,7 +67,7 @@ impl<S> Server<S>
     }
 
     pub async fn start_grpc(
-        base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
+        base_node_service: BaseNodeServer<TariBaseNodeGrpc<S>>,
         p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
         grpc_port: u16,
     ) -> Result<(), Error> {

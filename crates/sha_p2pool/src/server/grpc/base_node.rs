@@ -10,9 +10,14 @@ use minotari_app_grpc::conversions::*;
 use minotari_app_grpc::tari_rpc;
 use minotari_app_grpc::tari_rpc::{Block, BlockBlobRequest, BlockGroupRequest, BlockGroupResponse, BlockHeaderResponse, BlockHeight, BlockTimingResponse, ConsensusConstants, Empty, FetchMatchingUtxosRequest, GetActiveValidatorNodesRequest, GetBlocksRequest, GetHeaderByHashRequest, GetMempoolTransactionsRequest, GetNewBlockBlobResult, GetNewBlockResult, GetNewBlockTemplateWithCoinbasesRequest, GetNewBlockWithCoinbasesRequest, GetPeersRequest, GetShardKeyRequest, GetShardKeyResponse, GetSideChainUtxosRequest, GetTemplateRegistrationsRequest, HeightRequest, HistoricalBlock, ListConnectedPeersResponse, ListHeadersRequest, MempoolStatsResponse, NetworkStatusResponse, NewBlockCoinbase, NewBlockTemplate, NewBlockTemplateRequest, NewBlockTemplateResponse, NodeIdentity, PowAlgo, SearchKernelsRequest, SearchUtxosRequest, SoftwareUpdate, StringValue, SubmitBlockResponse, SubmitTransactionRequest, SubmitTransactionResponse, SyncInfoResponse, SyncProgressResponse, TipInfoResponse, TransactionStateRequest, TransactionStateResponse, ValueAtHeightResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
+use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
+use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks;
 use tari_core::proof_of_work::sha3x_difficulty;
+use tari_core::transactions::generate_coinbase;
+use tari_core::transactions::key_manager::{create_memory_db_key_manager_with_range_proof_size, MemoryDbKeyManager};
+use tari_core::transactions::tari_amount::MicroMinotari;
 use tokio::sync::Mutex;
 use tonic::{IntoRequest, Request, Response, Status, Streaming};
 
@@ -41,66 +46,75 @@ macro_rules! proxy_simple_result {
 
 macro_rules! proxy_stream_result {
     ($self:ident, $call:ident, $request:ident, $page_size:ident) => {
-        TariBaseNodeGrpc::streaming_response(String::from(stringify!($call)),
+        streaming_response(String::from(stringify!($call)),
                                  $self.client.lock().await.$call($request.into_inner()).await,
                                  $page_size,
         ).await
     };
 
     ($self:ident, $call:ident, $request:ident, $page_size:expr) => {
-        TariBaseNodeGrpc::streaming_response(String::from(stringify!($call)),
+        streaming_response(String::from(stringify!($call)),
                                  $self.client.lock().await.$call($request.into_inner()).await,
                                  $page_size,
         ).await
     };
 }
 
-pub struct TariBaseNodeGrpc
+async fn streaming_response<R>(
+    call: String,
+    result: Result<Response<Streaming<R>>, Status>,
+    page_size: usize)
+    -> Result<Response<mpsc::Receiver<Result<R, Status>>>, Status>
+    where R: Send + Sync + 'static,
+{
+    match result {
+        Ok(response) => {
+            let (mut tx, rx) = mpsc::channel(page_size);
+            tokio::spawn(async move {
+                let mut stream = response.into_inner();
+                tokio::spawn(async move {
+                    while let Ok(Some(next_message)) = stream.message().await {
+                        if let Err(e) = tx.send(Ok(next_message)).await {
+                            error!("failed to send '{call}' response message: {e}");
+                        }
+                    }
+                });
+            });
+            Ok(Response::new(rx))
+        }
+        Err(status) => Err(status)
+    }
+}
+
+pub struct TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static,
 {
     // TODO: check if 1 shared client is enough or we need a pool of clients to operate faster
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
     p2p_client: p2p::ServiceClient,
+    share_chain: Arc<S>,
 }
 
-impl TariBaseNodeGrpc {
-    pub async fn new(base_node_address: String, p2p_client: p2p::ServiceClient) -> Result<Self, Error> {
+impl<S> TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static,
+{
+    pub async fn new(
+        base_node_address: String,
+        p2p_client: p2p::ServiceClient,
+        share_chain: Arc<S>,
+    ) -> Result<Self, Error> {
         // TODO: add retry mechanism to try at least 3 times before failing
         let client = BaseNodeGrpcClient::connect(base_node_address)
             .await
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
 
-        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client })
-    }
-
-    async fn streaming_response<R>(
-        call: String,
-        result: Result<Response<Streaming<R>>, Status>,
-        page_size: usize)
-        -> Result<Response<mpsc::Receiver<Result<R, Status>>>, Status>
-        where R: Send + Sync + 'static,
-    {
-        match result {
-            Ok(response) => {
-                let (mut tx, rx) = mpsc::channel(page_size);
-                tokio::spawn(async move {
-                    let mut stream = response.into_inner();
-                    tokio::spawn(async move {
-                        while let Ok(Some(next_message)) = stream.message().await {
-                            if let Err(e) = tx.send(Ok(next_message)).await {
-                                error!("failed to send '{call}' response message: {e}");
-                            }
-                        }
-                    });
-                });
-                Ok(Response::new(rx))
-            }
-            Err(status) => Err(status)
-        }
+        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client, share_chain })
     }
 }
 
 #[tonic::async_trait]
-impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
+impl<S> tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc<S>
+    where S: ShareChain + Send + Sync + 'static,
 {
     type ListHeadersStream = mpsc::Receiver<Result<BlockHeaderResponse, Status>>;
     async fn list_headers(&self, request: Request<ListHeadersRequest>) -> Result<Response<Self::ListHeadersStream>, Status> {
@@ -164,15 +178,15 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
     }
 
     async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
-        let grpc_block = request.into_inner();
+        let grpc_block = request.get_ref();
         let block = blocks::Block::try_from(grpc_block.clone())
             .map_err(|e| { Status::internal(e) })?;
 
-        // validate block
+        // validate block with other peers
         let validation_result = self.p2p_client.validate_block(block.clone().into()).await
             .map_err(|error| Status::internal(error.to_string()))?;
         if !validation_result {
-            return Err(Status::failed_precondition("invalid block")); // TODO: maybe another error would be better
+            return Err(Status::invalid_argument("invalid block"));
         }
 
         // Check block's difficulty compared to the latest network one to increase the probability
@@ -200,8 +214,6 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
             }));
         }
 
-
-        let request = grpc_block.into_request();
         match proxy_simple_result!(self, submit_block, request) {
             Ok(resp) => {
                 info!("Block found and sent successfully! (rewards will be paid out)");

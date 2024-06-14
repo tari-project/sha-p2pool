@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
@@ -43,4 +44,6 @@ pub trait ShareChain {
     async fn submit_block(&self, block: Block) -> ShareChainResult<()>;
 
     async fn tip_height(&self) -> ShareChainResult<u64>;
+
+    fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase>;
 }
