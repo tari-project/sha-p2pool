@@ -1,29 +1,17 @@
-use std::future::Future;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use libp2p::futures::channel::mpsc;
 use libp2p::futures::SinkExt;
-use libp2p::Swarm;
-use log::{error, info, warn};
-use minotari_app_grpc::conversions::*;
+use log::{error, warn};
 use minotari_app_grpc::tari_rpc;
 use minotari_app_grpc::tari_rpc::{Block, BlockBlobRequest, BlockGroupRequest, BlockGroupResponse, BlockHeaderResponse, BlockHeight, BlockTimingResponse, ConsensusConstants, Empty, FetchMatchingUtxosRequest, GetActiveValidatorNodesRequest, GetBlocksRequest, GetHeaderByHashRequest, GetMempoolTransactionsRequest, GetNewBlockBlobResult, GetNewBlockResult, GetNewBlockTemplateWithCoinbasesRequest, GetNewBlockWithCoinbasesRequest, GetPeersRequest, GetShardKeyRequest, GetShardKeyResponse, GetSideChainUtxosRequest, GetTemplateRegistrationsRequest, HeightRequest, HistoricalBlock, ListConnectedPeersResponse, ListHeadersRequest, MempoolStatsResponse, NetworkStatusResponse, NewBlockCoinbase, NewBlockTemplate, NewBlockTemplateRequest, NewBlockTemplateResponse, NodeIdentity, PowAlgo, SearchKernelsRequest, SearchUtxosRequest, SoftwareUpdate, StringValue, SubmitBlockResponse, SubmitTransactionRequest, SubmitTransactionResponse, SyncInfoResponse, SyncProgressResponse, TipInfoResponse, TransactionStateRequest, TransactionStateResponse, ValueAtHeightResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
-use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
-use tari_common_types::tari_address::TariAddress;
-use tari_core::blocks;
-use tari_core::proof_of_work::sha3x_difficulty;
-use tari_core::transactions::generate_coinbase;
-use tari_core::transactions::key_manager::{create_memory_db_key_manager_with_range_proof_size, MemoryDbKeyManager};
-use tari_core::transactions::tari_amount::MicroMinotari;
 use tokio::sync::Mutex;
-use tonic::{IntoRequest, Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status, Streaming};
 
 use crate::server::grpc::error::{Error, TonicError};
 use crate::server::p2p;
-use crate::server::p2p::{ClientError, ServerNetworkBehaviour};
 use crate::sharechain::ShareChain;
 
 const LIST_HEADERS_PAGE_SIZE: usize = 10;
@@ -32,6 +20,7 @@ const GET_TOKENS_IN_CIRCULATION_PAGE_SIZE: usize = 1_000;
 
 const GET_DIFFICULTY_PAGE_SIZE: usize = 1_000;
 
+#[macro_export]
 macro_rules! proxy_simple_result {
     ($self:ident, $call:ident, $request:ident) => {
         match $self.client.lock().await.$call($request.into_inner()).await {
@@ -178,57 +167,7 @@ impl<S> tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc<S>
     }
 
     async fn submit_block(&self, request: Request<Block>) -> Result<Response<SubmitBlockResponse>, Status> {
-        let grpc_block = request.get_ref();
-        let block = blocks::Block::try_from(grpc_block.clone())
-            .map_err(|e| { Status::internal(e) })?;
-
-        // validate block with other peers
-        let validation_result = self.p2p_client.validate_block(block.clone().into()).await
-            .map_err(|error| Status::internal(error.to_string()))?;
-        if !validation_result {
-            return Err(Status::invalid_argument("invalid block"));
-        }
-
-        // Check block's difficulty compared to the latest network one to increase the probability
-        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
-        let request_block_difficulty = sha3x_difficulty(&block.header)
-            .map_err(|error| { Status::internal(error.to_string()) })?;
-        let mut network_difficulty_stream = self.client.lock().await.get_network_difficulty(HeightRequest {
-            from_tip: 0,
-            start_height: block.header.height - 1,
-            end_height: block.header.height,
-        }).await?.into_inner();
-        let mut network_difficulty_matches = false;
-        while let Ok(Some(diff_resp)) = network_difficulty_stream.message().await {
-            if block.header.height == diff_resp.height + 1
-                && request_block_difficulty.as_u64() > diff_resp.difficulty {
-                network_difficulty_matches = true;
-            }
-        }
-
-        if !network_difficulty_matches {
-            // TODO: simply append new block if valid to sharechain showing that it is not accepted by base node
-            // TODO: but still need to present on sharechain
-            return Ok(Response::new(SubmitBlockResponse {
-                block_hash: vec![], // TODO: get from sharechain
-            }));
-        }
-
-        match proxy_simple_result!(self, submit_block, request) {
-            Ok(resp) => {
-                info!("Block found and sent successfully! (rewards will be paid out)");
-                // TODO: append new block if valid to sharechain with a flag or something that shows
-                // TODO: that this block is accepted, so paid out
-                Ok(resp)
-            }
-            Err(_) => {
-                // TODO: simply append new block if valid to sharechain showing that it is not accepted by base node
-                // TODO: but still need to present on sharechain
-                Ok(Response::new(SubmitBlockResponse {
-                    block_hash: vec![], // TODO: get from sharechain
-                }))
-            }
-        }
+        proxy_simple_result!(self, submit_block, request)
     }
 
     async fn submit_block_blob(&self, request: Request<BlockBlobRequest>) -> Result<Response<SubmitBlockResponse>, Status> {

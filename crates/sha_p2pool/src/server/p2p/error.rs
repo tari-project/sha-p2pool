@@ -12,7 +12,7 @@ pub enum Error {
     #[error("CBOR serialize/deserialize error: {0}")]
     SerializeDeserialize(#[from] serde_cbor::Error),
     #[error("Share chain error: {0}")]
-    ShareChain(#[from] sharechain::Error),
+    ShareChain(#[from] sharechain::error::Error),
     #[error("Share chain error: {0}")]
     Client(#[from] p2p::client::ClientError),
 }

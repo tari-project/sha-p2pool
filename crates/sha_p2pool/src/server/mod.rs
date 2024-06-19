@@ -5,4 +5,4 @@ mod config;
 mod server;
 
 pub mod grpc;
-mod p2p;
+pub mod p2p;

@@ -1,26 +1,28 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use libp2p::{gossipsub, mdns, noise, Swarm, tcp, yamux};
 use libp2p::futures::StreamExt;
-use libp2p::gossipsub::{Event, IdentTopic, Message, PublishError, Topic};
+use libp2p::gossipsub::{Event, IdentTopic, Message, MessageId, PublishError, Topic};
 use libp2p::mdns::tokio::Tokio;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{error, info, warn};
 use tokio::{io, select};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::server::config;
 use crate::server::p2p::{Error, LibP2PError, messages, ServiceClient, ServiceClientChannels};
 use crate::server::p2p::messages::{PeerInfo, ValidateBlockRequest, ValidateBlockResult};
 use crate::server::p2p::peer_store::PeerStore;
-use crate::sharechain::ShareChain;
+use crate::sharechain::{ShareChain, ShareChainResult};
+use crate::sharechain::block::Block;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_VALIDATION_REQUESTS_TOPIC: &str = "block_validation_requests";
 const BLOCK_VALIDATION_RESULTS_TOPIC: &str = "block_validation_results";
+const NEW_BLOCK_TOPIC: &str = "new_block";
 
 #[derive(NetworkBehaviour)]
 pub struct ServerNetworkBehaviour {
@@ -43,6 +45,8 @@ pub struct Service<S>
     client_validate_block_req_rx: broadcast::Receiver<ValidateBlockRequest>,
     client_validate_block_res_tx: broadcast::Sender<ValidateBlockResult>,
     client_validate_block_res_rx: broadcast::Receiver<ValidateBlockResult>,
+    client_broadcast_block_tx: broadcast::Sender<Block>,
+    client_broadcast_block_rx: broadcast::Receiver<Block>,
 }
 
 impl<S> Service<S>
@@ -57,6 +61,7 @@ impl<S> Service<S>
         // client related channels
         let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1000);
         let (validate_res_tx, validate_res_rx) = broadcast::channel::<ValidateBlockResult>(1000);
+        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
 
         Ok(Self {
             swarm,
@@ -67,6 +72,8 @@ impl<S> Service<S>
             client_validate_block_req_rx: validate_req_rx,
             client_validate_block_res_tx: validate_res_tx,
             client_validate_block_res_rx: validate_res_rx,
+            client_broadcast_block_tx: broadcast_block_tx,
+            client_broadcast_block_rx: broadcast_block_rx,
         })
     }
 
@@ -83,7 +90,11 @@ impl<S> Service<S>
                 // gossipsub
                 let message_id_fn = |message: &gossipsub::Message| {
                     let mut s = DefaultHasher::new();
+                    if let Some(soure_peer) = message.source {
+                        soure_peer.to_bytes().hash(&mut s);
+                    }
                     message.data.hash(&mut s);
+                    Instant::now().hash(&mut s);
                     gossipsub::MessageId::from(s.finish().to_string())
                 };
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -118,6 +129,7 @@ impl<S> Service<S>
             ServiceClientChannels::new(
                 self.client_validate_block_req_tx.clone(),
                 self.client_validate_block_res_rx.resubscribe(),
+                self.client_broadcast_block_tx.clone(),
             ),
             self.peer_store.clone(),
         )
@@ -184,6 +196,25 @@ impl<S> Service<S>
         Ok(())
     }
 
+    async fn broadcast_block(&mut self, result: Result<Block, RecvError>) {
+        match result {
+            Ok(block) => {
+                let block_raw_result: Result<Vec<u8>, Error> = block.try_into();
+                match block_raw_result {
+                    Ok(block_raw) => {
+                        match self.swarm.behaviour_mut().gossipsub.publish(IdentTopic::new(NEW_BLOCK_TOPIC), block_raw)
+                            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error))) {
+                            Ok(_) => {}
+                            Err(error) => error!("Failed to broadcast new block: {error:?}"),
+                        }
+                    }
+                    Err(error) => error!("Failed to convert block to bytes: {error:?}"),
+                }
+            }
+            Err(error) => error!("Failed to receive new block: {error:?}"),
+        }
+    }
+
     fn subscribe(&mut self, topic: &str) {
         self.swarm.behaviour_mut().gossipsub.subscribe(&IdentTopic::new(topic.clone()))
             .expect("must be subscribed to topic");
@@ -193,6 +224,7 @@ impl<S> Service<S>
         self.subscribe(PEER_INFO_TOPIC);
         self.subscribe(BLOCK_VALIDATION_REQUESTS_TOPIC);
         self.subscribe(BLOCK_VALIDATION_RESULTS_TOPIC);
+        self.subscribe(NEW_BLOCK_TOPIC);
     }
 
     async fn handle_new_message(&mut self, message: Message) {
@@ -245,6 +277,19 @@ impl<S> Service<S>
                     }
                 }
             }
+            NEW_BLOCK_TOPIC => {
+                match Block::try_from(message) {
+                    Ok(payload) => {
+                        info!("New block from broadcast: {:?}", &payload);
+                        if let Err(error) = self.share_chain.submit_block(&payload).await {
+                            error!("Could not add new block to local share chain: {error:?}");
+                        }
+                    }
+                    Err(error) => {
+                        error!("Can't deserialize broadcast block payload: {:?}", error);
+                    }
+                }
+            }
             &_ => {
                 warn!("Unknown topic {topic:?}!");
             }
@@ -285,30 +330,33 @@ impl<S> Service<S>
     async fn main_loop(&mut self) -> Result<(), Error> {
         // TODO: get from config
         let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(5));
-        let mut client_validate_block_req_rx = self.client_validate_block_req_rx.resubscribe();
 
         loop {
             select! {
-                _ = publish_peer_info_interval.tick() => {
-                    self.peer_store.cleanup();
-                    if let Err(error) = self.broadcast_peer_info().await {
-                        match error {
-                            Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
-                                warn!("No peers to broadcast peer info!");
-                            }
-                            _ => {
-                                error!("Failed to publish node info: {error:?}");
-                            }
+            _ = publish_peer_info_interval.tick() => {
+                self.peer_store.cleanup();
+                if let Err(error) = self.broadcast_peer_info().await {
+                    match error {
+                        Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
+                            warn!("No peers to broadcast peer info!");
+                        }
+                        Error::LibP2P(LibP2PError::Publish(PublishError::Duplicate)) => {}
+                        _ => {
+                            error!("Failed to publish node info: {error:?}");
                         }
                     }
                 }
-                result = client_validate_block_req_rx.recv() => {
-                    self.handle_client_validate_block_request(result).await;
-                }
-                event = self.swarm.select_next_some() => {
-                    self.handle_event(event).await;
-                }
             }
+            event = self.swarm.select_next_some() => {
+               self.handle_event(event).await;
+            }
+            result = self.client_validate_block_req_rx.recv() => {
+                self.handle_client_validate_block_request(result).await;
+            }
+            block = self.client_broadcast_block_rx.recv() => {
+                self.broadcast_block(block).await;
+            }
+        }
         }
     }
 

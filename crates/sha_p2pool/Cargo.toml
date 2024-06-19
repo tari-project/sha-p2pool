@@ -14,6 +14,7 @@ minotari_node_grpc_client = { git = "https://github.com/ksrichard/tari.git", bra
 tari_common_types = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 tari_core = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 
+tari_utilities = { version = "0.7", features = ["borsh"] }
 libp2p = { version = "0.53.2", features = [
     "dns",
     "identify",
@@ -41,5 +42,7 @@ async-trait = "0.1.80"
 serde_cbor = "0.11.2"
 rand = "0.8.5"
 dashmap = "5.5.3"
+blake2 = "0.10.6"
+digest = "0.10.7"
 
 

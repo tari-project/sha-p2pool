@@ -1,25 +1,25 @@
-use libp2p::gossipsub::Message;
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
 use crate::server::p2p::Error;
-use crate::sharechain::Block;
+use crate::sharechain::block::Block;
 
+#[macro_export]
 macro_rules! impl_conversions {
     ($type:ty) => {
-        impl TryFrom<Message> for $type {
-            type Error = Error;
+        impl TryFrom<libp2p::gossipsub::Message> for $type {
+            type Error = $crate::server::p2p::Error;
 
-            fn try_from(message: Message) -> Result<Self, Self::Error> {
-                deserialize_message::<$type>(message.data.as_slice())
+            fn try_from(message: libp2p::gossipsub::Message) -> Result<Self, Self::Error> {
+                $crate::server::p2p::messages::deserialize_message::<$type>(message.data.as_slice())
             }
         }
 
         impl TryInto<Vec<u8>> for $type {
-            type Error = Error;
+            type Error = $crate::server::p2p::Error;
 
             fn try_into(self) -> Result<Vec<u8>, Self::Error> {
-                serialize_message(&self)
+                $crate::server::p2p::messages::serialize_message(&self)
             }
         }
     };
@@ -54,7 +54,7 @@ impl ValidateBlockRequest {
     pub fn new(block: Block) -> Self {
         Self(block)
     }
-    
+
     pub fn block(&self) -> Block {
         self.0.clone()
     }

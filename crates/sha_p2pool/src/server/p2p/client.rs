@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 use log::{error, info, warn};
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::time::sleep;
 
 use crate::server::p2p::messages::{ValidateBlockRequest, ValidateBlockResult};
 use crate::server::p2p::peer_store::PeerStore;
-use crate::sharechain::Block;
+use crate::sharechain::block::Block;
 
 #[derive(Error, Debug)]
 pub enum ClientError {
@@ -24,21 +24,26 @@ pub enum ClientError {
 pub enum ChannelSendError {
     #[error("Send ValidateBlockRequest error: {0}")]
     SendValidateBlockRequest(#[from] SendError<ValidateBlockRequest>),
+    #[error("Send broadcast block error: {0}")]
+    SendBroadcastBlock(#[from] SendError<Block>),
 }
 
 pub struct ServiceClientChannels {
     validate_block_sender: broadcast::Sender<ValidateBlockRequest>,
     validate_block_receiver: broadcast::Receiver<ValidateBlockResult>,
+    broadcast_block_sender: broadcast::Sender<Block>,
 }
 
 impl ServiceClientChannels {
     pub fn new(
         validate_block_sender: broadcast::Sender<ValidateBlockRequest>,
         validate_block_receiver: broadcast::Receiver<ValidateBlockResult>,
+        broadcast_block_sender: broadcast::Sender<Block>,
     ) -> Self {
         Self {
             validate_block_sender,
             validate_block_receiver,
+            broadcast_block_sender,
         }
     }
 }
@@ -56,7 +61,16 @@ impl ServiceClient {
         Self { channels, peer_store }
     }
 
-    pub async fn validate_block(&self, block: Block) -> Result<bool, ClientError> {
+    pub async fn broadcast_block(&self, block: &Block) -> Result<(), ClientError> {
+        self.channels.broadcast_block_sender.send(block.clone())
+            .map_err(|error|
+                ClientError::ChannelSend(Box::new(ChannelSendError::SendBroadcastBlock(error)))
+            )?;
+
+        Ok(())
+    }
+
+    pub async fn validate_block(&self, block: &Block) -> Result<bool, ClientError> {
         info!("[CLIENT] Start block validation");
         let start = Instant::now();
 
@@ -76,6 +90,7 @@ impl ServiceClient {
         let timeout = Duration::from_secs(30);
         let mut validate_receiver = self.channels.validate_block_receiver.resubscribe();
         let mut validation_count = 0;
+        let block = block.clone();
         while validation_count < min_validation_count {
             select! {
                 _ = sleep(timeout) => {
@@ -86,7 +101,7 @@ impl ServiceClient {
                     match result {
                         Ok(validate_result) => {
                             info!("New validation: {validate_result:?}");
-                            if validate_result.valid && validate_result.block == block {
+                            if validate_result.valid && validate_result.block == block.clone() {
                                 validation_count+=1;
                             }
                         }

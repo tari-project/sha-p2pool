@@ -1,39 +1,138 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
-use rand::random;
+use log::{info, warn};
+use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use tari_common_types::tari_address::TariAddress;
+use tari_core::blocks::BlockHeader;
+use tari_utilities::epoch_time::EpochTime;
+use tokio::sync::RwLock;
 
 use crate::sharechain::{Block, ShareChain, ShareChainResult};
+use crate::sharechain::error::{BlockConvertError, Error};
 
-pub struct InMemoryShareChain {}
+const DEFAULT_MAX_BLOCKS_COUNT: usize = 5000;
+
+pub struct InMemoryShareChain {
+    max_blocks_count: usize,
+    blocks: Arc<RwLock<Vec<Block>>>,
+}
+
+impl Default for InMemoryShareChain {
+    fn default() -> Self {
+        Self {
+            max_blocks_count: DEFAULT_MAX_BLOCKS_COUNT,
+            blocks: Arc::new(
+                RwLock::new(
+                    vec![
+                        // genesis block
+                        Block::builder()
+                            .with_height(0)
+                            .build()
+                    ],
+                ),
+            ),
+        }
+    }
+}
 
 impl InMemoryShareChain {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(max_blocks_count: usize) -> Self {
+        Self {
+            max_blocks_count,
+            blocks: Arc::new(
+                RwLock::new(
+                    vec![
+                        // genesis block
+                        Block::builder()
+                            .with_height(0)
+                            .build()
+                    ],
+                ),
+            ),
+        }
+    }
+
+    async fn miners_with_hash_rates(&self) -> HashMap<String, f64> {
+        let mut result: HashMap<String, f64> = HashMap::new(); // target wallet address -> hash rate
+        let blocks_read_lock = self.blocks.read().await;
+        blocks_read_lock.iter().for_each(|block| {
+            if let Some(miner_wallet_address) = block.miner_wallet_address() {
+                let addr = miner_wallet_address.to_hex();
+                if let Some(curr_hash_rate) = result.get(&addr) {
+                    result.insert(addr, curr_hash_rate + 1.0);
+                } else {
+                    result.insert(addr, 1.0);
+                }
+            }
+        });
+
+        result
+    }
+
+    async fn validate_block(&self, last_block: &Block, block: &Block) -> ShareChainResult<bool> {
+        // check if we have this block as last
+        if last_block == block {
+            warn!("This block already added, skip");
+            return Ok(false);
+        }
+
+        // validate hash
+        if block.hash() != block.generate_hash() {
+            warn!("Invalid block, hashes do not match");
+            return Ok(false);
+        }
+
+        // validate height
+        info!("VALIDATION - Last block: {:?}", last_block);
+        if last_block.height() + 1 != block.height() {
+            warn!("Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 }
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: Block) -> ShareChainResult<()> {
-        //TODO: implement
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
+        let mut blocks_write_lock = self.blocks.write().await;
+
+        let block = block.clone();
+
+        let last_block = blocks_write_lock.last().ok_or_else(|| Error::Empty)?;
+
+        // validate
+        if !self.validate_block(last_block, &block).await? {
+            return Err(Error::InvalidBlock(block));
+        }
+
+        if blocks_write_lock.len() >= self.max_blocks_count {
+            // remove first element to keep the maximum vector size
+            blocks_write_lock.remove(0);
+        }
+
+        info!("New block added: {:?}", block.clone());
+
+        blocks_write_lock.push(block);
+
+        let last_block = blocks_write_lock.last().ok_or_else(|| Error::Empty)?;
+        info!("Current height: {:?}", last_block.height());
+
         Ok(())
     }
 
     async fn tip_height(&self) -> ShareChainResult<u64> {
-        //TODO: implement
-        Ok(random())
+        let blocks_read_lock = self.blocks.read().await;
+        let last_block = blocks_read_lock.last().ok_or_else(|| Error::Empty)?;
+        Ok(last_block.height())
     }
 
-    fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
+    async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
-        // TODO: get miners with hashrates from chain
-        let mut miners = HashMap::<String, f64>::new(); // target wallet address -> hash rate
-
-        // TODO: remove, only for testing now, get miners from chain
-        miners.insert("260396abcc66770f67ca4cdd296cc133e63b88578f3c362d4fa0ff7b05da1bc5a74c78a415009fa49eda8fd8721c20fb4617a833aa630c9790157b6b6f716f0ac72e2e".to_string(), 100.0);
-        miners.insert("260304a3699f8911c3d949b2eb0394595c8041a36fa13320fa2395b4090ae573a430ac21c5d087ecfcd1922e6ef58cd3f2a1eef2fcbd17e2374a09e0c68036fe6c5f91".to_string(), 100.0);
+        let miners = self.miners_with_hash_rates().await;
 
         // calculate full hash rate and shares
         let full_hash_rate: f64 = miners.values().sum();
@@ -42,8 +141,7 @@ impl ShareChain for InMemoryShareChain {
             .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
                 let curr_reward = ((reward as f64) * share) as u64;
-                // TODO: check if still needed
-                // info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
+                info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
@@ -54,5 +152,30 @@ impl ShareChain for InMemoryShareChain {
             });
 
         result
+    }
+
+    async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block> {
+        let origin_block_grpc = request.block.as_ref()
+            .ok_or_else(|| BlockConvertError::MissingField("block".to_string()))?;
+        let origin_block_header_grpc = origin_block_grpc.header.as_ref()
+            .ok_or_else(|| BlockConvertError::MissingField("header".to_string()))?;
+        let origin_block_header = BlockHeader::try_from(origin_block_header_grpc.clone())
+            .map_err(BlockConvertError::GrpcBlockHeaderConvert)?;
+
+        let blocks_read_lock = self.blocks.read().await;
+        let last_block = blocks_read_lock.last().ok_or_else(|| Error::Empty)?;
+
+        Ok(
+            Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_prev_hash(last_block.generate_hash())
+                .with_height(last_block.height() + 1)
+                .with_original_block_header(origin_block_header)
+                .with_miner_wallet_address(
+                    TariAddress::from_hex(request.wallet_payment_address.as_str())
+                        .map_err(Error::TariAddress)?
+                )
+                .build()
+        )
     }
 }

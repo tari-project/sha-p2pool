@@ -60,7 +60,7 @@ impl<S> Server<S>
         ).await.map_err(Error::GRPC)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
-        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), share_chain.clone()).await.map_err(Error::GRPC)?;
+        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), p2p_service.client(), share_chain.clone()).await.map_err(Error::GRPC)?;
         let p2pool_server = ShaP2PoolServer::new(p2pool_grpc_service);
 
         Ok(Self { config, p2p_service, base_node_grpc_service: base_node_grpc_server, p2pool_grpc_service: p2pool_server })
