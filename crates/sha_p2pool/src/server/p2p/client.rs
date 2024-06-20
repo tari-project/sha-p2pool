@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +9,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::time::sleep;
 
-use crate::server::p2p::messages::{ValidateBlockRequest, ValidateBlockResult};
+use crate::server::p2p::messages::{ShareChainSyncResponse, ValidateBlockRequest, ValidateBlockResult};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::sharechain::block::Block;
 
@@ -18,14 +19,41 @@ pub enum ClientError {
     ChannelSend(#[from] Box<ChannelSendError>),
     #[error("Channel receive error: {0}")]
     ChannelReceive(#[from] RecvError),
+    #[error("No response for share chain sync request!")]
+    NoSyncShareChainResponse,
 }
 
 #[derive(Error, Debug)]
 pub enum ChannelSendError {
     #[error("Send ValidateBlockRequest error: {0}")]
-    SendValidateBlockRequest(#[from] SendError<ValidateBlockRequest>),
+    ValidateBlockRequest(#[from] SendError<ValidateBlockRequest>),
     #[error("Send broadcast block error: {0}")]
-    SendBroadcastBlock(#[from] SendError<Block>),
+    BroadcastBlock(#[from] SendError<Block>),
+    #[error("Send sync share chain request error: {0}")]
+    ClientSyncShareChainRequest(#[from] SendError<ClientSyncShareChainRequest>),
+}
+
+#[derive(Clone, Debug)]
+pub struct ClientSyncShareChainRequest {
+    pub request_id: String,
+}
+
+impl ClientSyncShareChainRequest {
+    pub fn new(request_id: String) -> Self {
+        Self { request_id }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ClientSyncShareChainResponse {
+    pub request_id: String,
+    pub success: bool,
+}
+
+impl ClientSyncShareChainResponse {
+    pub fn new(request_id: String, success: bool) -> Self {
+        Self { request_id, success }
+    }
 }
 
 pub struct ServiceClientChannels {
@@ -64,7 +92,7 @@ impl ServiceClient {
     pub async fn broadcast_block(&self, block: &Block) -> Result<(), ClientError> {
         self.channels.broadcast_block_sender.send(block.clone())
             .map_err(|error|
-                ClientError::ChannelSend(Box::new(ChannelSendError::SendBroadcastBlock(error)))
+                ClientError::ChannelSend(Box::new(ChannelSendError::BroadcastBlock(error)))
             )?;
 
         Ok(())
@@ -77,7 +105,7 @@ impl ServiceClient {
         // send request to validate block
         self.channels.validate_block_sender.send(ValidateBlockRequest::new(block.clone()))
             .map_err(|error|
-                ClientError::ChannelSend(Box::new(ChannelSendError::SendValidateBlockRequest(error)))
+                ClientError::ChannelSend(Box::new(ChannelSendError::ValidateBlockRequest(error)))
             )?;
 
         // calculate how many validations we need (more than 2/3 of peers should validate)

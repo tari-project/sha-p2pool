@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::info;
+use log::{error, info, warn};
 use minotari_app_grpc::tari_rpc::{GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest, SubmitBlockResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
@@ -8,14 +8,16 @@ use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2Pool;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tokio::sync::Mutex;
-use tonic::{Request, Response, Status};
+use tonic::{IntoRequest, Request, Response, Status};
 
 use crate::server::grpc::error::Error;
 use crate::server::grpc::error::TonicError;
 use crate::server::p2p;
-use crate::sharechain::ShareChain;
+use crate::server::p2p::ClientError;
+use crate::sharechain::{ShareChain, ShareChainResult};
+use crate::sharechain::block::Block;
 
-const MIN_SHARE_COUNT: usize = 10;
+const MIN_SHARE_COUNT: usize = 1_000;
 
 pub struct ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
@@ -35,6 +37,20 @@ impl<S> ShaP2PoolGrpc<S>
             .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
 
         Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client, share_chain })
+    }
+
+    pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
+        if let Err(error) = self.share_chain.submit_block(&block).await {
+            error!("Failed to add new block: {error:?}");
+            // match self.p2p_client.sync_share_chain().await {
+            //     Ok(true) => info!("Successfully synced share chain!"),
+            //     Ok(false) => warn!("Failed to sync share chain!"),
+            //     Err(error) => error!("Failed to sync share chain: {error:?}"),
+            // }
+        }
+        info!("Broadcast block with height: {:?}", block.height());
+        self.p2p_client.broadcast_block(&block).await
+            .map_err(|error| Status::internal(error.to_string()))
     }
 }
 
@@ -117,48 +133,26 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
         }
 
         if !network_difficulty_matches {
-            // TODO: simply append new block if valid to sharechain showing that it is not accepted by base node
-            // TODO: but still need to present on sharechain
             block.set_sent_to_main_chain(false);
-            self.share_chain.submit_block(&block).await
-                .map_err(|error| Status::internal(error.to_string()))?;
-            info!("Broadcast block with height: {:?}", block.height());
-            self.p2p_client.broadcast_block(&block).await
-                .map_err(|error| Status::internal(error.to_string()))?;
-
+            self.submit_share_chain_block(&block).await?;
             return Ok(Response::new(SubmitBlockResponse {
                 block_hash: block.hash().to_vec(),
             }));
         }
 
         // submit block to base node
-        let grpc_request = Request::new(grpc_request_payload);
+        let (metadata, extensions, _inner) = request.into_parts();
+        let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
         match self.client.lock().await.submit_block(grpc_request).await {
             Ok(resp) => {
                 info!("Block found and sent successfully! (rewards will be paid out)");
-
-                // TODO: append new block if valid to sharechain with a flag or something that shows
-                // TODO: that this block is accepted, so paid out
                 block.set_sent_to_main_chain(true);
-                self.share_chain.submit_block(&block).await
-                    .map_err(|error| Status::internal(error.to_string()))?;
-                info!("Broadcast block with height: {:?}", block.height());
-                self.p2p_client.broadcast_block(&block).await
-                    .map_err(|error| Status::internal(error.to_string()))?;
-
+                self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             }
             Err(_) => {
-                info!("submit_block stop - block send failure");
-                // TODO: simply append new block if valid to sharechain showing that it is not accepted by base node
-                // TODO: but still need to present on sharechain
                 block.set_sent_to_main_chain(false);
-                self.share_chain.submit_block(&block).await
-                    .map_err(|error| Status::internal(error.to_string()))?;
-                info!("Broadcast block with height: {:?}", block.height());
-                self.p2p_client.broadcast_block(&block).await
-                    .map_err(|error| Status::internal(error.to_string()))?;
-
+                self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))

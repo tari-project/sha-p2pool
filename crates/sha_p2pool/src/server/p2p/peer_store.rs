@@ -22,8 +22,8 @@ impl PeerStoreRecord {
 
 #[derive(Copy, Clone, Debug)]
 pub struct PeerStoreBlockHeightTip {
-    peer_id: PeerId,
-    height: u64,
+    pub peer_id: PeerId,
+    pub height: u64,
 }
 
 impl PeerStoreBlockHeightTip {

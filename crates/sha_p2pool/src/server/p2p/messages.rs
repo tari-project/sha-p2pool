@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
@@ -48,15 +50,19 @@ impl PeerInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ValidateBlockRequest(Block);
+pub struct ValidateBlockRequest {
+    block: Block,
+    timestamp: u64,
+}
 impl_conversions!(ValidateBlockRequest);
 impl ValidateBlockRequest {
     pub fn new(block: Block) -> Self {
-        Self(block)
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        Self { block, timestamp }
     }
 
     pub fn block(&self) -> Block {
-        self.0.clone()
+        self.block.clone()
     }
 }
 
@@ -78,5 +84,29 @@ impl ValidateBlockResult {
             block,
             valid,
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ShareChainSyncRequest {
+    pub request_id: String,
+    pub from_height: u64,
+}
+
+impl ShareChainSyncRequest {
+    pub fn new(request_id: String, from_height: u64) -> Self {
+        Self { request_id, from_height }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ShareChainSyncResponse {
+    pub request_id: String,
+    pub blocks: Vec<Block>,
+}
+
+impl ShareChainSyncResponse {
+    pub fn new(request_id: String, blocks: Vec<Block>) -> Self {
+        Self { request_id, blocks }
     }
 }

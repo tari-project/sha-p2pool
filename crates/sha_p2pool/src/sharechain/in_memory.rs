@@ -1,13 +1,16 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use log::{info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use prost::Message;
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
 use tari_utilities::epoch_time::EpochTime;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{Block, ShareChain, ShareChainResult};
 use crate::sharechain::error::{BlockConvertError, Error};
@@ -93,33 +96,45 @@ impl InMemoryShareChain {
 
         Ok(true)
     }
-}
 
-#[async_trait]
-impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
-        let mut blocks_write_lock = self.blocks.write().await;
-
+    async fn submit_block_with_lock(&self, blocks: &mut RwLockWriteGuard<'_, Vec<Block>>, block: &Block) -> ShareChainResult<()> {
         let block = block.clone();
 
-        let last_block = blocks_write_lock.last().ok_or_else(|| Error::Empty)?;
+        let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
 
         // validate
         if !self.validate_block(last_block, &block).await? {
             return Err(Error::InvalidBlock(block));
         }
 
-        if blocks_write_lock.len() >= self.max_blocks_count {
+        if blocks.len() >= self.max_blocks_count {
             // remove first element to keep the maximum vector size
-            blocks_write_lock.remove(0);
+            blocks.remove(0);
         }
 
         info!("New block added: {:?}", block.clone());
 
-        blocks_write_lock.push(block);
+        blocks.push(block);
 
-        let last_block = blocks_write_lock.last().ok_or_else(|| Error::Empty)?;
+        let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
         info!("Current height: {:?}", last_block.height());
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ShareChain for InMemoryShareChain {
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
+        let mut blocks_write_lock = self.blocks.write().await;
+        self.submit_block_with_lock(&mut blocks_write_lock, block).await
+    }
+
+    async fn submit_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()> {
+        let mut blocks_write_lock = self.blocks.write().await;
+        for block in blocks {
+            self.submit_block_with_lock(&mut blocks_write_lock, &block).await?;
+        }
 
         Ok(())
     }
@@ -176,6 +191,15 @@ impl ShareChain for InMemoryShareChain {
                         .map_err(Error::TariAddress)?
                 )
                 .build()
+        )
+    }
+
+    async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>> {
+        let blocks_read_lock = self.blocks.read().await;
+        Ok(
+            blocks_read_lock.iter()
+                .filter(|block| block.height() > from_height).cloned()
+                .collect()
         )
     }
 }

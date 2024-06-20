@@ -5,8 +5,6 @@ use crate::sharechain::block::Block;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Internal error: {0}")]
-    Internal(String),
     #[error("gRPC Block conversion error: {0}")]
     BlockConvert(#[from] BlockConvertError),
     #[error("Share chain is empty, no genesis block found as well!")]

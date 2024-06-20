@@ -27,7 +27,8 @@ libp2p = { version = "0.53.2", features = [
     "mdns",
     "gossipsub",
     "request-response",
-    "json"
+    "json",
+    "cbor"
 ] }
 tokio = { version = "1.38.0", features = ["full"] }
 thiserror = "1.0"
@@ -44,5 +45,6 @@ rand = "0.8.5"
 dashmap = "5.5.3"
 blake2 = "0.10.6"
 digest = "0.10.7"
+clap = { version = "4.5.7", features = ["derive"] }
 
 
