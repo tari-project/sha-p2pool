@@ -392,7 +392,7 @@ impl<S> Service<S>
 
     async fn main_loop(&mut self) -> Result<(), Error> {
         // TODO: get from config
-        let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(5));
+        let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(10));
 
         loop {
             select! {
