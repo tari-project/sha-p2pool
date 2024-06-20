@@ -1,11 +1,14 @@
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use dashmap::DashMap;
 use libp2p::PeerId;
+use log::info;
+use moka::future::{Cache, CacheBuilder};
 
 use crate::server::p2p::messages::PeerInfo;
 
+#[derive(Copy, Clone, Debug)]
 pub struct PeerStoreRecord {
     peer_info: PeerInfo,
     created: Instant,
@@ -36,7 +39,7 @@ impl PeerStoreBlockHeightTip {
 }
 
 pub struct PeerStore {
-    inner: Arc<DashMap<PeerId, PeerStoreRecord>>,
+    inner: Cache<PeerId, PeerStoreRecord>,
     // Max time to live for the items to avoid non-existing peers in list.
     ttl: Duration,
     tip_of_block_height: RwLock<Option<PeerStoreBlockHeightTip>>,
@@ -45,46 +48,48 @@ pub struct PeerStore {
 impl PeerStore {
     pub fn new(ttl: Duration) -> Self {
         Self {
-            inner: Arc::new(DashMap::new()),
+            inner: CacheBuilder::new(100_000)
+                .time_to_live(Duration::from_secs(10))
+                .build(),
             ttl,
             tip_of_block_height: RwLock::new(None),
         }
     }
 
-    pub fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
-        self.inner.insert(peer_id, PeerStoreRecord::new(peer_info));
-        self.set_tip_of_block_height();
+    pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
+        self.inner.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+        self.set_tip_of_block_height().await;
     }
 
-    pub fn peer_count(&self) -> usize {
-        self.inner.len()
+    pub async fn peer_count(&self) -> u64 {
+        self.inner.entry_count()
     }
 
-    fn set_tip_of_block_height(&self) {
-        if let Some(result) =
+    async fn set_tip_of_block_height(&self) {
+        if let Some((k, v)) =
             self.inner.iter()
-                .max_by(|r1, r2| {
-                    r1.peer_info.current_height.cmp(&r2.peer_info.current_height)
+                .max_by(|(k1, v1), (k2, v2)| {
+                    v1.peer_info.current_height.cmp(&v2.peer_info.current_height)
                 }) {
             // save result
             if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
                 if tip_height_opt.is_none() {
                     let _ = tip_height_opt.insert(
                         PeerStoreBlockHeightTip::new(
-                            *result.key(),
-                            result.peer_info.current_height,
+                            *k,
+                            v.peer_info.current_height,
                         )
                     );
                 } else {
                     let mut tip_height = tip_height_opt.unwrap();
-                    tip_height.peer_id = *result.key();
-                    tip_height.height = result.peer_info.current_height;
+                    tip_height.peer_id = *k;
+                    tip_height.height = v.peer_info.current_height;
                 }
             }
         }
     }
 
-    pub fn tip_of_block_height(&self) -> Option<PeerStoreBlockHeightTip> {
+    pub async fn tip_of_block_height(&self) -> Option<PeerStoreBlockHeightTip> {
         if let Ok(result) = self.tip_of_block_height.read() {
             if result.is_some() {
                 return Some(result.unwrap());
@@ -93,14 +98,29 @@ impl PeerStore {
         None
     }
 
-    pub fn cleanup(&self) {
-        self.inner.iter()
-            .filter(|record| {
-                let elapsed = record.created.elapsed();
-                elapsed.gt(&self.ttl)
-            }).for_each(|record| {
-            self.inner.remove(record.key());
-        });
-        self.set_tip_of_block_height();
+    pub async fn cleanup(&self) -> Vec<PeerId> {
+        info!("PEER STORE - cleanup");
+        let mut expired_peers = vec![];
+
+        for (k, v) in self.inner.iter() {
+            info!("PEER STORE - {:?} -> {:?}", k, v);
+            let elapsed = v.created.elapsed();
+            let expired = elapsed.gt(&self.ttl);
+            info!("{:?} ttl elapsed: {:?} <-> {:?}, Expired: {:?}", k, elapsed, &self.ttl, expired);
+            if expired {
+                expired_peers.push(*k);
+                self.inner.remove(k.as_ref()).await;
+                info!("PEER STORE - removed!");
+            }
+        }
+
+        // for exp_peer in expired_peers.clone() {
+        //     lock.remove(exp_peer);
+        //     info!("PEER STORE - {:?} removed", exp_peer);
+        // }
+
+        self.set_tip_of_block_height().await;
+
+        expired_peers
     }
 }

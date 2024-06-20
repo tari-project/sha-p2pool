@@ -57,7 +57,7 @@ impl<S> Service<S>
     pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config)?;
         let peer_store = Arc::new(
-            PeerStore::new(config.idle_connection_timeout),
+            PeerStore::new(Duration::from_secs(5)),
         );
 
         // client related channels
@@ -96,7 +96,7 @@ impl<S> Service<S>
                         soure_peer.to_bytes().hash(&mut s);
                     }
                     message.data.hash(&mut s);
-                    // Instant::now().hash(&mut s);
+                    Instant::now().hash(&mut s);
                     gossipsub::MessageId::from(s.finish().to_string())
                 };
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -145,16 +145,20 @@ impl<S> Service<S>
     }
 
     async fn handle_client_validate_block_request(&mut self, result: Result<ValidateBlockRequest, RecvError>) {
+        info!("handle_client_validate_block_request - hit!");
         match result {
             Ok(request) => {
                 let request_raw_result: Result<Vec<u8>, Error> = request.try_into();
                 match request_raw_result {
                     Ok(request_raw) => {
+                        info!("handle_client_validate_block_request - before publish!");
                         match self.swarm.behaviour_mut().gossipsub.publish(
                             IdentTopic::new(BLOCK_VALIDATION_REQUESTS_TOPIC),
                             request_raw,
                         ) {
-                            Ok(_) => {}
+                            Ok(res) => {
+                                info!("handle_client_validate_block_request - published!");
+                            }
                             Err(error) => {
                                 error!("Failed to send block validation request: {error:?}");
                             }
@@ -244,16 +248,12 @@ impl<S> Service<S>
         }
         let peer = peer.unwrap();
 
-        if peer == *self.swarm.local_peer_id() {
-            return;
-        }
-
         let topic = message.topic.as_str();
         match topic {
             PEER_INFO_TOPIC => {
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
-                        self.peer_store.add(peer, payload);
+                        self.peer_store.add(peer, payload).await;
                         self.sync_share_chain(ClientSyncShareChainRequest::new(format!("{:p}", self))).await;
                     }
                     Err(error) => {
@@ -328,8 +328,8 @@ impl<S> Service<S>
     }
 
     async fn sync_share_chain(&mut self, request: ClientSyncShareChainRequest) {
-        while self.peer_store.tip_of_block_height().is_none() {} // waiting for the highest blockchain
-        match self.peer_store.tip_of_block_height() {
+        while self.peer_store.tip_of_block_height().await.is_none() {} // waiting for the highest blockchain
+        match self.peer_store.tip_of_block_height().await {
             Some(result) => {
                 match self.share_chain.tip_height().await {
                     Ok(tip) => {
@@ -392,12 +392,24 @@ impl<S> Service<S>
 
     async fn main_loop(&mut self) -> Result<(), Error> {
         // TODO: get from config
-        let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(10));
+        let mut publish_peer_info_interval = tokio::time::interval(Duration::from_secs(5));
 
         loop {
             select! {
+            event = self.swarm.select_next_some() => {
+               self.handle_event(event).await;
+            }
+            result = self.client_validate_block_req_rx.recv() => {
+                self.handle_client_validate_block_request(result).await;
+            }
+            block = self.client_broadcast_block_rx.recv() => {
+                self.broadcast_block(block).await;
+            }
             _ = publish_peer_info_interval.tick() => {
-                self.peer_store.cleanup();
+                let expired_peers = self.peer_store.cleanup().await;
+                for exp_peer in expired_peers {
+                    self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
+                }
                 if let Err(error) = self.broadcast_peer_info().await {
                     match error {
                         Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
@@ -409,15 +421,6 @@ impl<S> Service<S>
                         }
                     }
                 }
-            }
-            result = self.client_validate_block_req_rx.recv() => {
-                self.handle_client_validate_block_request(result).await;
-            }
-            block = self.client_broadcast_block_rx.recv() => {
-                self.broadcast_block(block).await;
-            }
-            event = self.swarm.select_next_some() => {
-               self.handle_event(event).await;
             }
         }
         }

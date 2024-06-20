@@ -109,12 +109,13 @@ impl ServiceClient {
             )?;
 
         // calculate how many validations we need (more than 2/3 of peers should validate)
-        let peer_count = self.peer_store.peer_count() as f64 + 1.0;
+        let peer_count = self.peer_store.peer_count().await as f64 + 1.0;
         let min_validation_count = (peer_count / 3.0) * 2.0;
         let min_validation_count = min_validation_count.round() as u64;
         info!("[CLIENT] Minimum validation count: {min_validation_count:?}");
 
         // wait for the validations to come
+        // TODO: listen here for peer_store changes, so we can recalculate min validation count and restart validation flow here
         let timeout = Duration::from_secs(30);
         let mut validate_receiver = self.channels.validate_block_receiver.resubscribe();
         let mut validation_count = 0;

@@ -38,7 +38,7 @@ pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct PeerInfo {
     pub current_height: u64,
 }

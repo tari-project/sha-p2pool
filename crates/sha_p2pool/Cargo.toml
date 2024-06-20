@@ -42,9 +42,9 @@ tonic = { workspace = true }
 async-trait = "0.1.80"
 serde_cbor = "0.11.2"
 rand = "0.8.5"
-dashmap = "5.5.3"
 blake2 = "0.10.6"
 digest = "0.10.7"
 clap = { version = "4.5.7", features = ["derive"] }
+moka = { version = "0.12.7", features = ["future"] }
 
 
