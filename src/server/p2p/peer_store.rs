@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use libp2p::PeerId;
-use log::info;
+use log::{debug, info};
 use moka::future::{Cache, CacheBuilder};
 
 use crate::server::p2p::messages::PeerInfo;
@@ -99,18 +99,17 @@ impl PeerStore {
     }
 
     pub async fn cleanup(&self) -> Vec<PeerId> {
-        info!("PEER STORE - cleanup");
+        debug!("PEER STORE - cleanup");
         let mut expired_peers = vec![];
 
         for (k, v) in self.inner.iter() {
-            info!("PEER STORE - {:?} -> {:?}", k, v);
+            debug!("PEER STORE - {:?} -> {:?}", k, v);
             let elapsed = v.created.elapsed();
             let expired = elapsed.gt(&self.ttl);
-            info!("{:?} ttl elapsed: {:?} <-> {:?}, Expired: {:?}", k, elapsed, &self.ttl, expired);
+            debug!("{:?} ttl elapsed: {:?} <-> {:?}, Expired: {:?}", k, elapsed, &self.ttl, expired);
             if expired {
                 expired_peers.push(*k);
                 self.inner.remove(k.as_ref()).await;
-                info!("PEER STORE - removed!");
             }
         }
 

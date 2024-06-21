@@ -47,7 +47,7 @@ impl<S> ShaP2PoolGrpc<S>
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
 {
-    /// Returns a new block (that can be mined) which contains all the shares generated 
+    /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
     async fn get_new_block(&self, _request: Request<GetNewBlockRequest>) -> Result<Response<GetNewBlockResponse>, Status> {
         let mut pow_algo = PowAlgo::default();
@@ -67,7 +67,11 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // request new block template with shares as coinbases
         let shares = self.share_chain.generate_shares(reward).await;
-        let share_count = shares.len();
+        let share_count = if shares.is_empty() {
+            1
+        } else {
+            shares.len()
+        };
 
         let response = self.client.lock().await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
@@ -91,7 +95,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
         }))
     }
 
-    /// Validates the submitted block with the p2pool network, checks for difficulty matching 
+    /// Validates the submitted block with the p2pool network, checks for difficulty matching
     /// with network (using base node), submits mined block to base node and submits new p2pool block
     /// to p2pool network.
     async fn submit_block(&self, request: Request<SubmitBlockRequest>) -> Result<Response<SubmitBlockResponse>, Status> {
