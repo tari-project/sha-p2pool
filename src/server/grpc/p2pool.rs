@@ -1,23 +1,21 @@
 use std::sync::Arc;
 
-use log::{error, info, warn};
+use log::{debug, error, info};
 use minotari_app_grpc::tari_rpc::{GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest, SubmitBlockResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2Pool;
-use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tokio::sync::Mutex;
-use tonic::{IntoRequest, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 use crate::server::grpc::error::Error;
-use crate::server::grpc::error::TonicError;
+use crate::server::grpc::util;
 use crate::server::p2p;
-use crate::server::p2p::ClientError;
-use crate::sharechain::{ShareChain, ShareChainResult};
 use crate::sharechain::block::Block;
+use crate::sharechain::ShareChain;
 
-const MIN_SHARE_COUNT: usize = 1_000;
+const MIN_DIFFICULTY: u64 = 100_000;
 
 pub struct ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
@@ -31,25 +29,16 @@ impl<S> ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(base_node_address: String, p2p_client: p2p::ServiceClient, share_chain: Arc<S>) -> Result<Self, Error> {
-        // TODO: add retry mechanism to try at least 3 times before failing
-        let client = BaseNodeGrpcClient::connect(base_node_address)
-            .await
-            .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
-
-        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client, share_chain })
+        Ok(Self { client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)), p2p_client, share_chain })
     }
 
+    /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        if let Err(error) = self.share_chain.submit_block(&block).await {
+        if let Err(error) = self.share_chain.submit_block(block).await {
             error!("Failed to add new block: {error:?}");
-            // match self.p2p_client.sync_share_chain().await {
-            //     Ok(true) => info!("Successfully synced share chain!"),
-            //     Ok(false) => warn!("Failed to sync share chain!"),
-            //     Err(error) => error!("Failed to sync share chain: {error:?}"),
-            // }
         }
-        info!("Broadcast block with height: {:?}", block.height());
-        self.p2p_client.broadcast_block(&block).await
+        debug!("Broadcast new block with height: {:?}", block.height());
+        self.p2p_client.broadcast_block(block).await
             .map_err(|error| Status::internal(error.to_string()))
     }
 }
@@ -58,6 +47,8 @@ impl<S> ShaP2PoolGrpc<S>
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
 {
+    /// Returns a new block (that can be mined) which contains all the shares generated 
+    /// from the current share chain as coinbase transactions.
     async fn get_new_block(&self, _request: Request<GetNewBlockRequest>) -> Result<Response<GetNewBlockResponse>, Status> {
         let mut pow_algo = PowAlgo::default();
         pow_algo.set_pow_algo(PowAlgos::Sha3x);
@@ -76,11 +67,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // request new block template with shares as coinbases
         let shares = self.share_chain.generate_shares(reward).await;
-        let share_count = if shares.len() < MIN_SHARE_COUNT {
-            MIN_SHARE_COUNT
-        } else {
-            shares.len()
-        };
+        let share_count = shares.len();
 
         let response = self.client.lock().await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
@@ -92,6 +79,11 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
         // set target difficulty
         let miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
         let target_difficulty = miner_data.target_difficulty / share_count as u64;
+        let target_difficulty = if target_difficulty < MIN_DIFFICULTY {
+            MIN_DIFFICULTY
+        } else {
+            target_difficulty
+        };
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
@@ -99,6 +91,9 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
         }))
     }
 
+    /// Validates the submitted block with the p2pool network, checks for difficulty matching 
+    /// with network (using base node), submits mined block to base node and submits new p2pool block
+    /// to p2pool network.
     async fn submit_block(&self, request: Request<SubmitBlockRequest>) -> Result<Response<SubmitBlockResponse>, Status> {
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block.block.clone()
@@ -117,7 +112,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
-        let request_block_difficulty = sha3x_difficulty(&origin_block_header)
+        let request_block_difficulty = sha3x_difficulty(origin_block_header)
             .map_err(|error| { Status::internal(error.to_string()) })?;
         let mut network_difficulty_stream = self.client.lock().await.get_network_difficulty(HeightRequest {
             from_tip: 0,
@@ -145,7 +140,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
         match self.client.lock().await.submit_block(grpc_request).await {
             Ok(resp) => {
-                info!("Block found and sent successfully! (rewards will be paid out)");
+                info!("💰 New matching block found and sent to network!");
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)

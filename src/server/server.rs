@@ -1,28 +1,16 @@
-use std::convert::Infallible;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::{AddrParseError, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
-use libp2p::{gossipsub, mdns, multiaddr, noise, PeerId, Swarm, tcp, TransportError, yamux};
-use libp2p::futures::StreamExt;
-use libp2p::gossipsub::Topic;
-use libp2p::mdns::tokio::Tokio;
-use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
 use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2PoolServer;
 use thiserror::Error;
-use tokio::{io, io::AsyncBufReadExt, select};
-use tokio::sync::Mutex;
 
 use crate::server::{config, grpc, p2p};
 use crate::server::grpc::base_node::TariBaseNodeGrpc;
 use crate::server::grpc::error::TonicError;
 use crate::server::grpc::p2pool::ShaP2PoolGrpc;
-use crate::server::p2p::{ServerNetworkBehaviour, ServerNetworkBehaviourEvent, ServiceClient};
-use crate::sharechain::in_memory::InMemoryShareChain;
 use crate::sharechain::ShareChain;
 
 #[derive(Error, Debug)]
@@ -30,7 +18,7 @@ pub enum Error {
     #[error("P2P service error: {0}")]
     P2PService(#[from] p2p::Error),
     #[error("gRPC error: {0}")]
-    GRPC(#[from] grpc::error::Error),
+    Grpc(#[from] grpc::error::Error),
     #[error("Socket address parse error: {0}")]
     AddrParse(#[from] AddrParseError),
 }
@@ -41,7 +29,7 @@ pub struct Server<S>
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
-    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc<S>>,
+    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
     p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
 }
 
@@ -51,23 +39,19 @@ impl<S> Server<S>
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
-        let p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?;
+        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?;
 
-        let base_node_grpc_service = TariBaseNodeGrpc::new(
-            config.base_node_address.clone(),
-            p2p_service.client(),
-            share_chain.clone(),
-        ).await.map_err(Error::GRPC)?;
+        let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::Grpc)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
 
-        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), p2p_service.client(), share_chain.clone()).await.map_err(Error::GRPC)?;
+        let p2pool_grpc_service = ShaP2PoolGrpc::new(config.base_node_address.clone(), p2p_service.client(), share_chain.clone()).await.map_err(Error::Grpc)?;
         let p2pool_server = ShaP2PoolServer::new(p2pool_grpc_service);
 
         Ok(Self { config, p2p_service, base_node_grpc_service: base_node_grpc_server, p2pool_grpc_service: p2pool_server })
     }
 
     pub async fn start_grpc(
-        base_node_service: BaseNodeServer<TariBaseNodeGrpc<S>>,
+        base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
         p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
         grpc_port: u16,
     ) -> Result<(), Error> {
@@ -84,7 +68,7 @@ impl<S> Server<S>
             .await
             .map_err(|err| {
                 error!("GRPC encountered an error: {:?}", err);
-                Error::GRPC(grpc::error::Error::Tonic(TonicError::Transport(err)))
+                Error::Grpc(grpc::error::Error::Tonic(TonicError::Transport(err)))
             })?;
 
         info!("gRPC server stopped!");

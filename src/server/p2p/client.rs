@@ -1,11 +1,12 @@
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::{error, info, warn};
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::time::sleep;
 
@@ -19,8 +20,6 @@ pub enum ClientError {
     ChannelSend(#[from] Box<ChannelSendError>),
     #[error("Channel receive error: {0}")]
     ChannelReceive(#[from] RecvError),
-    #[error("No response for share chain sync request!")]
-    NoSyncShareChainResponse,
 }
 
 #[derive(Error, Debug)]
@@ -36,11 +35,13 @@ pub enum ChannelSendError {
 #[derive(Clone, Debug)]
 pub struct ClientSyncShareChainRequest {
     pub request_id: String,
+    timestamp: u64,
 }
 
 impl ClientSyncShareChainRequest {
     pub fn new(request_id: String) -> Self {
-        Self { request_id }
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        Self { request_id, timestamp }
     }
 }
 
@@ -58,20 +59,23 @@ impl ClientSyncShareChainResponse {
 
 pub struct ServiceClientChannels {
     validate_block_sender: broadcast::Sender<ValidateBlockRequest>,
-    validate_block_receiver: broadcast::Receiver<ValidateBlockResult>,
+    validate_block_receiver: Arc<Mutex<mpsc::UnboundedReceiver<ValidateBlockResult>>>,
     broadcast_block_sender: broadcast::Sender<Block>,
+    peer_changes_receiver: broadcast::Receiver<()>,
 }
 
 impl ServiceClientChannels {
     pub fn new(
         validate_block_sender: broadcast::Sender<ValidateBlockRequest>,
-        validate_block_receiver: broadcast::Receiver<ValidateBlockResult>,
+        validate_block_receiver: mpsc::UnboundedReceiver<ValidateBlockResult>,
         broadcast_block_sender: broadcast::Sender<Block>,
+        peer_changes_receiver: broadcast::Receiver<()>,
     ) -> Self {
         Self {
             validate_block_sender,
-            validate_block_receiver,
+            validate_block_receiver: Arc::new(Mutex::new(validate_block_receiver)),
             broadcast_block_sender,
+            peer_changes_receiver,
         }
     }
 }
@@ -115,31 +119,36 @@ impl ServiceClient {
         info!("[CLIENT] Minimum validation count: {min_validation_count:?}");
 
         // wait for the validations to come
-        // TODO: listen here for peer_store changes, so we can recalculate min validation count and restart validation flow here
         let timeout = Duration::from_secs(30);
-        let mut validate_receiver = self.channels.validate_block_receiver.resubscribe();
+        let mut validate_block_receiver = self.channels.validate_block_receiver.lock().await;
+        let mut peer_changes_receiver = self.channels.peer_changes_receiver.resubscribe();
+        let mut peers_changed = false;
         let mut validation_count = 0;
-        let block = block.clone();
         while validation_count < min_validation_count {
             select! {
                 _ = sleep(timeout) => {
                     warn!("Timing out waiting for validations!");
                     break;
                 }
-                result = validate_receiver.recv() => {
-                    match result {
-                        Ok(validate_result) => {
-                            info!("New validation: {validate_result:?}");
-                            if validate_result.valid && validate_result.block == block.clone() {
-                                validation_count+=1;
-                            }
+                _ = peer_changes_receiver.recv() => {
+                    peers_changed = true;
+                    break;
+                }
+                result = validate_block_receiver.recv() => {
+                    if let Some(validate_result) = result {
+                        info!("New validation: {validate_result:?}");
+                        if validate_result.valid && validate_result.block == *block {
+                            validation_count+=1;
                         }
-                        Err(error) => {
-                            error!("Error during receiving: {error:?}");
-                        }
+                    } else {
+                        break;
                     }
                 }
             }
+        }
+
+        if peers_changed {
+            return Box::pin(self.validate_block(block)).await;
         }
 
         let validation_time = Instant::now().duration_since(start);

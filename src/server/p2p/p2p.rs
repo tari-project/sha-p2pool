@@ -9,7 +9,7 @@ use libp2p::gossipsub::{IdentTopic, Message, MessageId, PublishError, Topic};
 use libp2p::mdns::tokio::Tokio;
 use libp2p::request_response::{cbor, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use tokio::{io, select};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
@@ -45,10 +45,11 @@ pub struct Service<S>
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
     client_validate_block_req_tx: broadcast::Sender<ValidateBlockRequest>,
     client_validate_block_req_rx: broadcast::Receiver<ValidateBlockRequest>,
-    client_validate_block_res_tx: broadcast::Sender<ValidateBlockResult>,
-    client_validate_block_res_rx: broadcast::Receiver<ValidateBlockResult>,
+    client_validate_block_res_txs: Vec<mpsc::UnboundedSender<ValidateBlockResult>>,
     client_broadcast_block_tx: broadcast::Sender<Block>,
     client_broadcast_block_rx: broadcast::Receiver<Block>,
+    client_peer_changes_tx: broadcast::Sender<()>,
+    client_peer_changes_rx: broadcast::Receiver<()>,
 }
 
 impl<S> Service<S>
@@ -57,13 +58,14 @@ impl<S> Service<S>
     pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config)?;
         let peer_store = Arc::new(
-            PeerStore::new(Duration::from_secs(5)),
+            PeerStore::new(Duration::from_secs(10)), // TODO: get from config
         );
 
         // client related channels
         let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1000);
-        let (validate_res_tx, validate_res_rx) = broadcast::channel::<ValidateBlockResult>(1000);
+
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
+        let (peer_changes_tx, peer_changes_rx) = broadcast::channel::<()>(1000);
 
         Ok(Self {
             swarm,
@@ -72,10 +74,11 @@ impl<S> Service<S>
             peer_store,
             client_validate_block_req_tx: validate_req_tx,
             client_validate_block_req_rx: validate_req_rx,
-            client_validate_block_res_tx: validate_res_tx,
-            client_validate_block_res_rx: validate_res_rx,
+            client_validate_block_res_txs: vec![],
             client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
+            client_peer_changes_tx: peer_changes_tx,
+            client_peer_changes_rx: peer_changes_rx,
         })
     }
 
@@ -96,7 +99,6 @@ impl<S> Service<S>
                         soure_peer.to_bytes().hash(&mut s);
                     }
                     message.data.hash(&mut s);
-                    Instant::now().hash(&mut s);
                     gossipsub::MessageId::from(s.finish().to_string())
                 };
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -133,12 +135,16 @@ impl<S> Service<S>
         Ok(swarm)
     }
 
-    pub fn client(&self) -> ServiceClient {
+    pub fn client(&mut self) -> ServiceClient {
+        let (validate_res_tx, validate_res_rx) = mpsc::unbounded_channel::<ValidateBlockResult>();
+        self.client_validate_block_res_txs.push(validate_res_tx);
+
         ServiceClient::new(
             ServiceClientChannels::new(
                 self.client_validate_block_req_tx.clone(),
-                self.client_validate_block_res_rx.resubscribe(),
+                validate_res_rx,
                 self.client_broadcast_block_tx.clone(),
+                self.client_peer_changes_rx.resubscribe(),
             ),
             self.peer_store.clone(),
         )
@@ -254,7 +260,13 @@ impl<S> Service<S>
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
                         self.peer_store.add(peer, payload).await;
-                        self.sync_share_chain(ClientSyncShareChainRequest::new(format!("{:p}", self))).await;
+                        if let Some(tip) = self.peer_store.tip_of_block_height().await {
+                            if let Ok(curr_height) = self.share_chain.tip_height().await {
+                                if curr_height < tip.height {
+                                    self.sync_share_chain(ClientSyncShareChainRequest::new(format!("{:p}", self))).await;
+                                }
+                            }
+                        }
                     }
                     Err(error) => {
                         error!("Can't deserialize peer info payload: {:?}", error);
@@ -264,12 +276,23 @@ impl<S> Service<S>
             BLOCK_VALIDATION_REQUESTS_TOPIC => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
-                        info!("Block validation request: {payload:?}");
-                        // TODO: validate block
+                        debug!("Block validation request: {payload:?}");
+
+                        let validate_result = self.share_chain.validate_block(&payload.block()).await;
+                        let mut valid = false;
+                        if let Ok(is_valid) = validate_result {
+                            valid = is_valid;
+                        }
+
+                        // TODO: Generate partial schnorr signature to prove that current peer validated the block (using peer's private key and broadcast public key vie PeerInfo)
+                        // TODO: to be able to verify at other peers.
+                        // TODO: Validate whether new block includes all the shares (generate shares until height of new_block.height - 1) 
+                        // TODO: by generating a new block and check kernels/outputs whether they are the same or not.
+
                         let validate_result = ValidateBlockResult::new(
                             *self.swarm.local_peer_id(),
                             payload.block(),
-                            true, // TODO: validate block
+                            valid,
                         );
                         self.send_block_validation_result(validate_result).await;
                     }
@@ -281,9 +304,14 @@ impl<S> Service<S>
             BLOCK_VALIDATION_RESULTS_TOPIC => {
                 match messages::ValidateBlockResult::try_from(message) {
                     Ok(payload) => {
-                        if let Err(error) = self.client_validate_block_res_tx.send(payload) {
-                            error!("Failed to send block validation result to clients: {error:?}");
+                        let mut senders_to_delete = vec![];
+                        for (i, sender) in self.client_validate_block_res_txs.iter().enumerate() {
+                            if let Err(error) = sender.send(payload.clone()) {
+                                error!("Failed to send block validation result to client: {error:?}");
+                                senders_to_delete.push(i);
+                            }
                         }
+                        senders_to_delete.iter().for_each(|i| { self.client_validate_block_res_txs.remove(*i); });
                     }
                     Err(error) => {
                         error!("Can't deserialize block validation request payload: {:?}", error);
@@ -406,10 +434,15 @@ impl<S> Service<S>
                 self.broadcast_block(block).await;
             }
             _ = publish_peer_info_interval.tick() => {
+                // handle case when we have some peers removed
                 let expired_peers = self.peer_store.cleanup().await;
                 for exp_peer in expired_peers {
                     self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
                 }
+                if let Err(error) = self.client_peer_changes_tx.send(()) {
+                        error!("Failed to send peer changes trigger: {error:?}");
+                }
+
                 if let Err(error) = self.broadcast_peer_info().await {
                     match error {
                         Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {

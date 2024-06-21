@@ -2,17 +2,16 @@ use std::sync::Arc;
 
 use libp2p::futures::channel::mpsc;
 use libp2p::futures::SinkExt;
-use log::{error, warn};
+use log::error;
 use minotari_app_grpc::tari_rpc;
 use minotari_app_grpc::tari_rpc::{Block, BlockBlobRequest, BlockGroupRequest, BlockGroupResponse, BlockHeaderResponse, BlockHeight, BlockTimingResponse, ConsensusConstants, Empty, FetchMatchingUtxosRequest, GetActiveValidatorNodesRequest, GetBlocksRequest, GetHeaderByHashRequest, GetMempoolTransactionsRequest, GetNewBlockBlobResult, GetNewBlockResult, GetNewBlockTemplateWithCoinbasesRequest, GetNewBlockWithCoinbasesRequest, GetPeersRequest, GetShardKeyRequest, GetShardKeyResponse, GetSideChainUtxosRequest, GetTemplateRegistrationsRequest, HeightRequest, HistoricalBlock, ListConnectedPeersResponse, ListHeadersRequest, MempoolStatsResponse, NetworkStatusResponse, NewBlockCoinbase, NewBlockTemplate, NewBlockTemplateRequest, NewBlockTemplateResponse, NodeIdentity, PowAlgo, SearchKernelsRequest, SearchUtxosRequest, SoftwareUpdate, StringValue, SubmitBlockResponse, SubmitTransactionRequest, SubmitTransactionResponse, SyncInfoResponse, SyncProgressResponse, TipInfoResponse, TransactionStateRequest, TransactionStateResponse, ValueAtHeightResponse};
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
-use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, Streaming};
+use tonic::transport::Channel;
 
-use crate::server::grpc::error::{Error, TonicError};
-use crate::server::p2p;
-use crate::sharechain::ShareChain;
+use crate::server::grpc::error::Error;
+use crate::server::grpc::util;
 
 const LIST_HEADERS_PAGE_SIZE: usize = 10;
 const GET_BLOCKS_PAGE_SIZE: usize = 10;
@@ -49,6 +48,7 @@ macro_rules! proxy_stream_result {
     };
 }
 
+/// Returns a streaming response for any gRPC methods.
 async fn streaming_response<R>(
     call: String,
     result: Result<Response<Streaming<R>>, Status>,
@@ -75,35 +75,24 @@ async fn streaming_response<R>(
     }
 }
 
-pub struct TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static,
+/// Base node gRPC service that proxies all the requests to base node when miner calls them.
+/// This makes sure that any extra call towards base node is served.
+pub struct TariBaseNodeGrpc
 {
-    // TODO: check if 1 shared client is enough or we need a pool of clients to operate faster
-    client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
-    p2p_client: p2p::ServiceClient,
-    share_chain: Arc<S>,
+    client: Arc<Mutex<BaseNodeClient<Channel>>>,
 }
 
-impl<S> TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static,
+impl TariBaseNodeGrpc
 {
     pub async fn new(
         base_node_address: String,
-        p2p_client: p2p::ServiceClient,
-        share_chain: Arc<S>,
     ) -> Result<Self, Error> {
-        // TODO: add retry mechanism to try at least 3 times before failing
-        let client = BaseNodeGrpcClient::connect(base_node_address)
-            .await
-            .map_err(|e| Error::Tonic(TonicError::Transport(e)))?;
-
-        Ok(Self { client: Arc::new(Mutex::new(client)), p2p_client, share_chain })
+        Ok(Self { client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)) })
     }
 }
 
 #[tonic::async_trait]
-impl<S> tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc<S>
-    where S: ShareChain + Send + Sync + 'static,
+impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc
 {
     type ListHeadersStream = mpsc::Receiver<Result<BlockHeaderResponse, Status>>;
     async fn list_headers(&self, request: Request<ListHeadersRequest>) -> Result<Response<Self::ListHeadersStream>, Status> {

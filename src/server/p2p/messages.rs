@@ -41,11 +41,13 @@ pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct PeerInfo {
     pub current_height: u64,
+    timestamp: u64,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(current_height: u64) -> Self {
-        Self { current_height }
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        Self { current_height, timestamp }
     }
 }
 

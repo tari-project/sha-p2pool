@@ -4,7 +4,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::{info, warn};
+use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use prost::Message;
 use tari_common_types::tari_address::TariAddress;
@@ -156,7 +156,7 @@ impl ShareChain for InMemoryShareChain {
             .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
                 let curr_reward = ((reward as f64) * share) as u64;
-                info!("{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
+                debug!("{addr} -> SHARE: {share:?} T, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
@@ -201,5 +201,11 @@ impl ShareChain for InMemoryShareChain {
                 .filter(|block| block.height() > from_height).cloned()
                 .collect()
         )
+    }
+
+    async fn validate_block(&self, block: &Block) -> ShareChainResult<bool> {
+        let blocks_read_lock = self.blocks.read().await;
+        let last_block = blocks_read_lock.last().ok_or_else(|| Error::Empty)?;
+        self.validate_block(last_block, block).await
     }
 }

@@ -49,7 +49,7 @@ impl PeerStore {
     pub fn new(ttl: Duration) -> Self {
         Self {
             inner: CacheBuilder::new(100_000)
-                .time_to_live(Duration::from_secs(10))
+                .time_to_live(ttl)
                 .build(),
             ttl,
             tip_of_block_height: RwLock::new(None),
@@ -113,11 +113,6 @@ impl PeerStore {
                 info!("PEER STORE - removed!");
             }
         }
-
-        // for exp_peer in expired_peers.clone() {
-        //     lock.remove(exp_peer);
-        //     info!("PEER STORE - {:?} removed", exp_peer);
-        // }
 
         self.set_tip_of_block_height().await;
 
