@@ -1,18 +1,18 @@
-use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use log::{error, info, warn};
+use log::{debug, error, warn};
 use thiserror::Error;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::time::sleep;
 
-use crate::server::p2p::messages::{ShareChainSyncResponse, ValidateBlockRequest, ValidateBlockResult};
+use crate::server::p2p::messages::{ValidateBlockRequest, ValidateBlockResult};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::sharechain::block::Block;
+
+const LOG_TARGET: &str = "p2p_service_client";
 
 #[derive(Error, Debug)]
 pub enum ClientError {
@@ -28,35 +28,22 @@ pub enum ChannelSendError {
     ValidateBlockRequest(#[from] SendError<ValidateBlockRequest>),
     #[error("Send broadcast block error: {0}")]
     BroadcastBlock(#[from] SendError<Block>),
-    #[error("Send sync share chain request error: {0}")]
-    ClientSyncShareChainRequest(#[from] SendError<ClientSyncShareChainRequest>),
 }
 
 #[derive(Clone, Debug)]
-pub struct ClientSyncShareChainRequest {
-    pub request_id: String,
-    timestamp: u64,
+pub struct ClientConfig {
+    pub block_validation_timeout: Duration,
 }
 
-impl ClientSyncShareChainRequest {
-    pub fn new(request_id: String) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        Self { request_id, timestamp }
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            block_validation_timeout: Duration::from_secs(30),
+        }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ClientSyncShareChainResponse {
-    pub request_id: String,
-    pub success: bool,
-}
-
-impl ClientSyncShareChainResponse {
-    pub fn new(request_id: String, success: bool) -> Self {
-        Self { request_id, success }
-    }
-}
-
+/// Contains all the channels a client needs to operate successfully.
 pub struct ServiceClientChannels {
     validate_block_sender: broadcast::Sender<ValidateBlockRequest>,
     validate_block_receiver: Arc<Mutex<mpsc::UnboundedReceiver<ValidateBlockResult>>>,
@@ -80,19 +67,23 @@ impl ServiceClientChannels {
     }
 }
 
+/// P2P service client.
 pub struct ServiceClient {
     channels: ServiceClientChannels,
     peer_store: Arc<PeerStore>,
+    config: ClientConfig,
 }
 
 impl ServiceClient {
     pub fn new(
         channels: ServiceClientChannels,
         peer_store: Arc<PeerStore>,
+        config: ClientConfig,
     ) -> Self {
-        Self { channels, peer_store }
+        Self { channels, peer_store, config }
     }
 
+    /// Triggering broadcasting of a new block to p2pool network.
     pub async fn broadcast_block(&self, block: &Block) -> Result<(), ClientError> {
         self.channels.broadcast_block_sender.send(block.clone())
             .map_err(|error|
@@ -102,8 +93,8 @@ impl ServiceClient {
         Ok(())
     }
 
+    /// Triggers validation of a new block and waits for the result.
     pub async fn validate_block(&self, block: &Block) -> Result<bool, ClientError> {
-        info!("[CLIENT] Start block validation");
         let start = Instant::now();
 
         // send request to validate block
@@ -116,17 +107,16 @@ impl ServiceClient {
         let peer_count = self.peer_store.peer_count().await as f64 + 1.0;
         let min_validation_count = (peer_count / 3.0) * 2.0;
         let min_validation_count = min_validation_count.round() as u64;
-        info!("[CLIENT] Minimum validation count: {min_validation_count:?}");
+        debug!(target: LOG_TARGET, "Minimum validation count: {min_validation_count:?}");
 
         // wait for the validations to come
-        let timeout = Duration::from_secs(30);
         let mut validate_block_receiver = self.channels.validate_block_receiver.lock().await;
         let mut peer_changes_receiver = self.channels.peer_changes_receiver.resubscribe();
         let mut peers_changed = false;
         let mut validation_count = 0;
         while validation_count < min_validation_count {
             select! {
-                _ = sleep(timeout) => {
+                _ = sleep(self.config.block_validation_timeout) => {
                     warn!("Timing out waiting for validations!");
                     break;
                 }
@@ -136,8 +126,8 @@ impl ServiceClient {
                 }
                 result = validate_block_receiver.recv() => {
                     if let Some(validate_result) = result {
-                        info!("New validation: {validate_result:?}");
                         if validate_result.valid && validate_result.block == *block {
+                            debug!(target: LOG_TARGET, "New validation result: {validate_result:?}");
                             validation_count+=1;
                         }
                     } else {
@@ -147,12 +137,13 @@ impl ServiceClient {
             }
         }
 
+        // TODO: add max number of retry times
         if peers_changed {
             return Box::pin(self.validate_block(block)).await;
         }
 
         let validation_time = Instant::now().duration_since(start);
-        info!("Validation took {:?}", validation_time);
+        debug!(target: LOG_TARGET, "Validation took {:?}", validation_time);
 
         Ok(validation_count >= min_validation_count)
     }

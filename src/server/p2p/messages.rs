@@ -91,24 +91,22 @@ impl ValidateBlockResult {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncRequest {
-    pub request_id: String,
     pub from_height: u64,
 }
 
 impl ShareChainSyncRequest {
-    pub fn new(request_id: String, from_height: u64) -> Self {
-        Self { request_id, from_height }
+    pub fn new(from_height: u64) -> Self {
+        Self { from_height }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
-    pub request_id: String,
     pub blocks: Vec<Block>,
 }
 
 impl ShareChainSyncResponse {
-    pub fn new(request_id: String, blocks: Vec<Block>) -> Self {
-        Self { request_id, blocks }
+    pub fn new(blocks: Vec<Block>) -> Self {
+        Self { blocks }
     }
 }

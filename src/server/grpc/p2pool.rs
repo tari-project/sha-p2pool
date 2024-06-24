@@ -13,15 +13,18 @@ use crate::server::grpc::error::Error;
 use crate::server::grpc::util;
 use crate::server::p2p;
 use crate::sharechain::block::Block;
+use crate::sharechain::SHARE_COUNT;
 use crate::sharechain::ShareChain;
 
-const MIN_DIFFICULTY: u64 = 100_000;
-
+/// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
     where S: ShareChain + Send + Sync + 'static
 {
+    /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
+    /// P2P service client
     p2p_client: p2p::ServiceClient,
+    /// Current share chain
     share_chain: Arc<S>,
 }
 
@@ -67,11 +70,6 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // request new block template with shares as coinbases
         let shares = self.share_chain.generate_shares(reward).await;
-        let share_count = if shares.is_empty() {
-            1
-        } else {
-            shares.len()
-        };
 
         let response = self.client.lock().await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
@@ -82,12 +80,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // set target difficulty
         let miner_data = response.clone().miner_data.ok_or_else(|| Status::internal("missing miner data"))?;
-        let target_difficulty = miner_data.target_difficulty / share_count as u64;
-        let target_difficulty = if target_difficulty < MIN_DIFFICULTY {
-            MIN_DIFFICULTY
-        } else {
-            target_difficulty
-        };
+        let target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),

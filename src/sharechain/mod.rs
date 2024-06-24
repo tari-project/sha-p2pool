@@ -4,6 +4,10 @@ use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use crate::sharechain::block::Block;
 use crate::sharechain::error::Error;
 
+pub const MAX_BLOCKS_COUNT: usize = 80;
+
+pub const SHARE_COUNT: u64 = 100;
+
 pub mod in_memory;
 pub mod block;
 pub mod error;

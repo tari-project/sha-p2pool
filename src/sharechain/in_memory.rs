@@ -1,21 +1,18 @@
 use std::collections::HashMap;
-use std::fmt::Debug;
-use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use prost::Message;
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
 use tari_utilities::epoch_time::EpochTime;
-use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{Block, ShareChain, ShareChainResult};
+use crate::sharechain::{Block, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult};
 use crate::sharechain::error::{BlockConvertError, Error};
 
-const DEFAULT_MAX_BLOCKS_COUNT: usize = 5000;
+const LOG_TARGET: &str = "in_memory_share_chain";
 
 pub struct InMemoryShareChain {
     max_blocks_count: usize,
@@ -25,7 +22,7 @@ pub struct InMemoryShareChain {
 impl Default for InMemoryShareChain {
     fn default() -> Self {
         Self {
-            max_blocks_count: DEFAULT_MAX_BLOCKS_COUNT,
+            max_blocks_count: MAX_BLOCKS_COUNT,
             blocks: Arc::new(
                 RwLock::new(
                     vec![
@@ -57,8 +54,8 @@ impl InMemoryShareChain {
         }
     }
 
-    async fn miners_with_hash_rates(&self) -> HashMap<String, f64> {
-        let mut result: HashMap<String, f64> = HashMap::new(); // target wallet address -> hash rate
+    async fn miners_with_shares(&self) -> HashMap<String, f64> {
+        let mut result: HashMap<String, f64> = HashMap::new(); // target wallet address -> number of shares
         let blocks_read_lock = self.blocks.read().await;
         blocks_read_lock.iter().for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
@@ -77,20 +74,19 @@ impl InMemoryShareChain {
     async fn validate_block(&self, last_block: &Block, block: &Block) -> ShareChainResult<bool> {
         // check if we have this block as last
         if last_block == block {
-            warn!("This block already added, skip");
+            warn!(target: LOG_TARGET, "This block already added, skip");
             return Ok(false);
         }
 
         // validate hash
         if block.hash() != block.generate_hash() {
-            warn!("Invalid block, hashes do not match");
+            warn!(target: LOG_TARGET, "Invalid block, hashes do not match");
             return Ok(false);
         }
 
         // validate height
-        info!("VALIDATION - Last block: {:?}", last_block);
         if last_block.height() + 1 != block.height() {
-            warn!("Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
+            warn!(target: LOG_TARGET, "Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
             return Ok(false);
         }
 
@@ -112,12 +108,12 @@ impl InMemoryShareChain {
             blocks.remove(0);
         }
 
-        info!("New block added: {:?}", block.clone());
+        info!(target: LOG_TARGET, "New block added: {:?}", block.clone());
 
         blocks.push(block);
 
         let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
-        info!("Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "Current share chain height: {:?}", last_block.height());
 
         Ok(())
     }
@@ -147,16 +143,15 @@ impl ShareChain for InMemoryShareChain {
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
-        let miners = self.miners_with_hash_rates().await;
+        let miners = self.miners_with_shares().await;
 
         // calculate full hash rate and shares
-        let full_hash_rate: f64 = miners.values().sum();
         miners.iter()
-            .map(|(addr, rate)| (addr, rate / full_hash_rate))
+            .map(|(addr, rate)| (addr, rate / SHARE_COUNT as f64))
             .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
                 let curr_reward = ((reward as f64) * share) as u64;
-                debug!("{addr} -> SHARE: {share:?} T, REWARD: {curr_reward:?}");
+                debug!(target: LOG_TARGET, "{addr} -> SHARE: {share:?} T, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
