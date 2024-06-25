@@ -2,9 +2,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
-use libp2p::{gossipsub, mdns, noise, request_response, StreamProtocol, Swarm, tcp, yamux};
+use libp2p::{gossipsub, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux};
 use libp2p::futures::StreamExt;
-use libp2p::gossipsub::{IdentTopic, Message, MessageId, PublishError, Topic};
+use libp2p::gossipsub::{IdentTopic, Message, PublishError};
 use libp2p::mdns::tokio::Tokio;
 use libp2p::request_response::{cbor, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
@@ -29,6 +29,7 @@ const LOG_TARGET: &str = "p2p_service";
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub seed_peers: Vec<String>,
     pub client: client::ClientConfig,
     pub peer_info_publish_interval: Duration,
 }
@@ -36,6 +37,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            seed_peers: vec![],
             client: client::ClientConfig::default(),
             peer_info_publish_interval: Duration::from_secs(5),
         }
@@ -473,7 +475,7 @@ impl<S> Service<S>
                     if let Err(error) = self.client_peer_changes_tx.send(()) {
                             error!("Failed to send peer changes trigger: {error:?}");
                     }
-    
+
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
@@ -490,6 +492,17 @@ impl<S> Service<S>
         }
     }
 
+    fn join_seed_peers(&mut self) -> Result<(), Error> {
+        for seed_peer in &self.config.seed_peers {
+            self.swarm.dial(seed_peer.parse::<Multiaddr>()
+                .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?
+            )
+                .map_err(|error| Error::LibP2P(LibP2PError::Dial(error)))?;
+        }
+
+        Ok(())
+    }
+
     /// Starts p2p service.
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -501,6 +514,7 @@ impl<S> Service<S>
             )
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
+        self.join_seed_peers()?;
         self.subscribe_to_topics();
 
         self.main_loop().await

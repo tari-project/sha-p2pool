@@ -1,5 +1,6 @@
 use libp2p::{multiaddr, noise, TransportError};
 use libp2p::gossipsub::PublishError;
+use libp2p::swarm::DialError;
 use thiserror::Error;
 
 use crate::server::p2p;
@@ -31,4 +32,6 @@ pub enum LibP2PError {
     Behaviour(String),
     #[error("Gossip sub publish error: {0}")]
     Publish(#[from] PublishError),
+    #[error("Dial error: {0}")]
+    Dial(#[from] DialError),
 }

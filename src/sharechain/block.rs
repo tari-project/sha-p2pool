@@ -21,6 +21,7 @@ pub struct Block {
 }
 impl_conversions!(Block);
 
+#[allow(dead_code)]
 impl Block {
     pub fn builder() -> BlockBuilder {
         BlockBuilder::new()

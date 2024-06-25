@@ -37,6 +37,7 @@ impl Default for InMemoryShareChain {
     }
 }
 
+#[allow(dead_code)]
 impl InMemoryShareChain {
     pub fn new(max_blocks_count: usize) -> Self {
         Self {
@@ -74,19 +75,19 @@ impl InMemoryShareChain {
     async fn validate_block(&self, last_block: &Block, block: &Block) -> ShareChainResult<bool> {
         // check if we have this block as last
         if last_block == block {
-            warn!(target: LOG_TARGET, "This block already added, skip");
+            warn!(target: LOG_TARGET, "↩️ This block already added, skip");
             return Ok(false);
         }
 
         // validate hash
         if block.hash() != block.generate_hash() {
-            warn!(target: LOG_TARGET, "Invalid block, hashes do not match");
+            warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
             return Ok(false);
         }
 
         // validate height
         if last_block.height() + 1 != block.height() {
-            warn!(target: LOG_TARGET, "Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
+            warn!(target: LOG_TARGET, "❌ Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
             return Ok(false);
         }
 
@@ -104,16 +105,16 @@ impl InMemoryShareChain {
         }
 
         if blocks.len() >= self.max_blocks_count {
-            // remove first element to keep the maximum vector size
-            blocks.remove(0);
+            let diff = blocks.len() - self.max_blocks_count;
+            blocks.drain(0..diff);
         }
 
-        info!(target: LOG_TARGET, "New block added: {:?}", block.clone());
+        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash());
 
         blocks.push(block);
 
         let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "Current share chain height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
 
         Ok(())
     }

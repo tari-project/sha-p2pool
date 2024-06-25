@@ -13,6 +13,8 @@ use crate::server::grpc::error::TonicError;
 use crate::server::grpc::p2pool::ShaP2PoolGrpc;
 use crate::sharechain::ShareChain;
 
+const LOG_TARGET: &str = "server";
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("P2P service error: {0}")]
@@ -55,7 +57,7 @@ impl<S> Server<S>
         p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
         grpc_port: u16,
     ) -> Result<(), Error> {
-        info!("Starting gRPC server on port {}!", &grpc_port);
+        info!(target: LOG_TARGET, "Starting gRPC server on port {}!", &grpc_port);
 
         tonic::transport::Server::builder()
             .add_service(base_node_service)
@@ -67,17 +69,17 @@ impl<S> Server<S>
             )
             .await
             .map_err(|err| {
-                error!("GRPC encountered an error: {:?}", err);
+                error!(target: LOG_TARGET, "GRPC encountered an error: {:?}", err);
                 Error::Grpc(grpc::error::Error::Tonic(TonicError::Transport(err)))
             })?;
 
-        info!("gRPC server stopped!");
+        info!(target: LOG_TARGET, "gRPC server stopped!");
 
         Ok(())
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        info!("Starting Tari SHA-3 mining P2Pool...");
+        info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
 
         // local base node and p2pool node grpc services
         let base_node_grpc_service = self.base_node_grpc_service.clone();
@@ -87,7 +89,7 @@ impl<S> Server<S>
             match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
                 Ok(_) => {}
                 Err(error) => {
-                    error!("GRPC Server encountered an error: {:?}", error);
+                    error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
                 }
             }
         });

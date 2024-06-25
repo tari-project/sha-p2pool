@@ -39,6 +39,7 @@ pub struct ConfigBuilder {
     config: Config,
 }
 
+#[allow(dead_code)]
 impl ConfigBuilder {
     pub fn with_p2p_port(&mut self, port: u16) -> &mut Self {
         self.config.p2p_port = port;
@@ -62,6 +63,11 @@ impl ConfigBuilder {
 
     pub fn with_p2p_service_config(&mut self, config: p2p::Config) -> &mut Self {
         self.config.p2p_service = config;
+        self
+    }
+
+    pub fn with_seed_peers(&mut self, config: Vec<String>) -> &mut Self {
+        self.config.p2p_service.seed_peers = config;
         self
     }
 

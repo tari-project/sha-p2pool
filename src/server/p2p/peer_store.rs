@@ -1,4 +1,4 @@
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use libp2p::PeerId;

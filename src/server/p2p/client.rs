@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use log::{debug, error, warn};
 use thiserror::Error;
@@ -33,12 +33,14 @@ pub enum ChannelSendError {
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub block_validation_timeout: Duration,
+    pub validate_block_max_retries: u64,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             block_validation_timeout: Duration::from_secs(30),
+            validate_block_max_retries: 5,
         }
     }
 }
@@ -93,8 +95,12 @@ impl ServiceClient {
         Ok(())
     }
 
-    /// Triggers validation of a new block and waits for the result.
-    pub async fn validate_block(&self, block: &Block) -> Result<bool, ClientError> {
+    async fn validate_block_with_retries(&self, block: &Block, mut retries: u64) -> Result<bool, ClientError> {
+        if retries >= self.config.validate_block_max_retries {
+            warn!(target: LOG_TARGET, "❗Too many validation retries!");
+            return Ok(false);
+        }
+
         let start = Instant::now();
 
         // send request to validate block
@@ -117,7 +123,7 @@ impl ServiceClient {
         while validation_count < min_validation_count {
             select! {
                 _ = sleep(self.config.block_validation_timeout) => {
-                    warn!("Timing out waiting for validations!");
+                    warn!(target: LOG_TARGET, "⏰ Timing out waiting for validations!");
                     break;
                 }
                 _ = peer_changes_receiver.recv() => {
@@ -137,14 +143,19 @@ impl ServiceClient {
             }
         }
 
-        // TODO: add max number of retry times
         if peers_changed {
-            return Box::pin(self.validate_block(block)).await;
+            retries += 1;
+            return Box::pin(self.validate_block_with_retries(block, retries)).await;
         }
 
         let validation_time = Instant::now().duration_since(start);
         debug!(target: LOG_TARGET, "Validation took {:?}", validation_time);
 
         Ok(validation_count >= min_validation_count)
+    }
+
+    /// Triggers validation of a new block and waits for the result.
+    pub async fn validate_block(&self, block: &Block) -> Result<bool, ClientError> {
+        self.validate_block_with_retries(block, 0).await
     }
 }
