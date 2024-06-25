@@ -40,7 +40,7 @@ struct Cli {
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
     /// Please note that these addresses must be in libp2p multi address format!
-    /// e.g.: 
+    /// e.g.: /dnsaddr/libp2p.io
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
 }
