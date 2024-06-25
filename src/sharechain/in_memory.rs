@@ -7,6 +7,7 @@ use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
 use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::hex::Hex;
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{Block, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult};
@@ -109,12 +110,12 @@ impl InMemoryShareChain {
             blocks.drain(0..diff);
         }
 
-        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash());
+        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
 
         blocks.push(block);
 
         let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
 
         Ok(())
     }

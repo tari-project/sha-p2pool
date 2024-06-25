@@ -9,6 +9,7 @@ use libp2p::mdns::tokio::Tokio;
 use libp2p::request_response::{cbor, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{debug, error, info, warn};
+use tari_utilities::hex::Hex;
 use tokio::{io, select};
 use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::error::RecvError;
@@ -150,6 +151,8 @@ impl<S> Service<S>
                         )],
                         request_response::Config::default(),
                     ),
+                    // rendezvous_server: rendezvous::server::Behaviour::new(rendezvous::server::Config::default()),
+                    // rendezvous_client: rendezvous::client::Behaviour::new(key_pair.clone()),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -349,7 +352,7 @@ impl<S> Service<S>
             NEW_BLOCK_TOPIC => {
                 match Block::try_from(message) {
                     Ok(payload) => {
-                        info!("New block from broadcast: {:?}", &payload);
+                        info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
                         if let Err(error) = self.share_chain.submit_block(&payload).await {
                             error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
                         }
@@ -445,8 +448,26 @@ impl<S> Service<S>
                     request_response::Event::OutboundFailure { .. } => {}
                     request_response::Event::InboundFailure { .. } => {}
                     request_response::Event::ResponseSent { .. } => {}
-                }
+                },
             },
+            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                // TODO: do some discovery somehow, possibly use rendezvous
+                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+            }
+            SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+            }
+            SwarmEvent::IncomingConnection { .. } => {}
+            SwarmEvent::IncomingConnectionError { .. } => {}
+            SwarmEvent::OutgoingConnectionError { .. } => {}
+            SwarmEvent::ExpiredListenAddr { .. } => {}
+            SwarmEvent::ListenerClosed { .. } => {}
+            SwarmEvent::ListenerError { .. } => {}
+            SwarmEvent::Dialing { .. } => {}
+            SwarmEvent::NewExternalAddrCandidate { .. } => {}
+            SwarmEvent::ExternalAddrConfirmed { .. } => {}
+            SwarmEvent::ExternalAddrExpired { .. } => {}
+            SwarmEvent::NewExternalAddrOfPeer { .. } => {}
             _ => {}
         };
     }
@@ -473,17 +494,17 @@ impl<S> Service<S>
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
                     }
                     if let Err(error) = self.client_peer_changes_tx.send(()) {
-                            error!("Failed to send peer changes trigger: {error:?}");
+                            error!(target: LOG_TARGET, "Failed to send peer changes trigger: {error:?}");
                     }
 
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
-                                warn!("No peers to broadcast peer info!");
+                                warn!(target: LOG_TARGET, "No peers to broadcast peer info!");
                             }
                             Error::LibP2P(LibP2PError::Publish(PublishError::Duplicate)) => {}
                             _ => {
-                                error!("Failed to publish node info: {error:?}");
+                                error!(target: LOG_TARGET, "Failed to publish node info: {error:?}");
                             }
                         }
                     }

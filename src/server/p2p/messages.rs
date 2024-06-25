@@ -73,6 +73,7 @@ pub struct ValidateBlockResult {
     pub peer_id: PeerId,
     pub block: Block,
     pub valid: bool,
+    pub timestamp: u64,
 }
 impl_conversions!(ValidateBlockResult);
 impl ValidateBlockResult {
@@ -81,10 +82,12 @@ impl ValidateBlockResult {
         block: Block,
         valid: bool,
     ) -> Self {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         Self {
             peer_id,
             block,
             valid,
+            timestamp,
         }
     }
 }
