@@ -53,7 +53,7 @@ impl Default for Config {
 
 #[derive(NetworkBehaviour)]
 pub struct ServerNetworkBehaviour {
-    // pub mdns: mdns::Behaviour<Tokio>,
+    pub mdns: mdns::Behaviour<Tokio>,
     pub gossipsub: gossipsub::Behaviour,
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
     pub kademlia: kad::Behaviour<MemoryStore>,
@@ -116,7 +116,7 @@ impl<S> Service<S>
     /// Creates a new swarm from the provided config
     fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
         let mut swarm_builder = libp2p::SwarmBuilder::with_new_identity();
-        
+
         // if config.p2p_service.stable_peer {
         //     let key_pair = Keypair::ed25519_from_bytes(vec![1, 2, 3])
         //         .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?;
@@ -154,11 +154,11 @@ impl<S> Service<S>
 
                 Ok(ServerNetworkBehaviour {
                     gossipsub,
-                    // mdns: mdns::Behaviour::new(
-                    //     mdns::Config::default(),
-                    //     key_pair.public().to_peer_id(),
-                    // )
-                    //     .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
+                    mdns: mdns::Behaviour::new(
+                        mdns::Config::default(),
+                        key_pair.public().to_peer_id(),
+                    )
+                        .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
                     share_chain_sync: cbor::Behaviour::<ShareChainSyncRequest, ShareChainSyncResponse>::new(
                         [(
                             StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
@@ -442,19 +442,19 @@ impl<S> Service<S>
                 info!(target: LOG_TARGET, "Listening on {address:?}");
             }
             SwarmEvent::Behaviour(event) => match event {
-                // ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
-                //     mdns::Event::Discovered(peers) => {
-                //         for (peer, addr) in peers {
-                //             self.swarm.add_peer_address(peer, addr);
-                //             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                //         }
-                //     }
-                //     mdns::Event::Expired(peers) => {
-                //         for (peer, _addr) in peers {
-                //             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
-                //         }
-                //     }
-                // },
+                ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
+                    mdns::Event::Discovered(peers) => {
+                        for (peer, addr) in peers {
+                            self.swarm.add_peer_address(peer, addr);
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                        }
+                    }
+                    mdns::Event::Expired(peers) => {
+                        for (peer, _addr) in peers {
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        }
+                    }
+                },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message { message, message_id: _message_id, propagation_source: _propagation_source } => {
                         self.handle_new_gossipsub_message(message).await;
