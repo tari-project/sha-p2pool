@@ -23,7 +23,7 @@ fn cli_styles() -> Styles {
 #[derive(Parser)]
 #[command(version)]
 #[command(styles = cli_styles())]
-#[command(about = "⛏ Decentralized pool mining for Tari network ⛏", long_about = None)]
+#[command(about = "⛏ Decentralized mining pool for Tari network ⛏", long_about = None)]
 struct Cli {
     /// Log level
     #[arg(short, long, value_name = "log-level", default_value = Some("info"))]
@@ -39,10 +39,15 @@ struct Cli {
 
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
-    /// Please note that these addresses must be in libp2p multi address format!
-    /// e.g.: /dnsaddr/libp2p.io
-    #[arg(short, long, value_name = "seed-peers")]
+    /// Please note that these addresses must be in libp2p multi address format and must contain peer ID!
+    /// e.g.: /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
+    #[arg(short = 'e', long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
+
+    // /// Stable peer.
+    // /// If set to true, then this peer will have always the same identity (key pair and peer ID).
+    // #[arg(short = 's', long, value_name = "stable-peer", default_value_t = false)]
+    // stable_peer: bool,
 }
 
 #[tokio::main]
@@ -59,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(seed_peers) = cli.seed_peers {
         config_builder.with_seed_peers(seed_peers);
     }
+    // config_builder.with_stable_peer(cli.stable_peer);
 
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();

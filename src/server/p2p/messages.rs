@@ -41,12 +41,12 @@ pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct PeerInfo {
     pub current_height: u64,
-    timestamp: u64,
+    timestamp: u128,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(current_height: u64) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self { current_height, timestamp }
     }
 }
@@ -54,12 +54,12 @@ impl PeerInfo {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ValidateBlockRequest {
     block: Block,
-    timestamp: u64,
+    timestamp: u128,
 }
 impl_conversions!(ValidateBlockRequest);
 impl ValidateBlockRequest {
     pub fn new(block: Block) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self { block, timestamp }
     }
 
@@ -73,7 +73,7 @@ pub struct ValidateBlockResult {
     pub peer_id: PeerId,
     pub block: Block,
     pub valid: bool,
-    pub timestamp: u64,
+    pub timestamp: u128,
 }
 impl_conversions!(ValidateBlockResult);
 impl ValidateBlockResult {
@@ -82,7 +82,7 @@ impl ValidateBlockResult {
         block: Block,
         valid: bool,
     ) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
             peer_id,
             block,

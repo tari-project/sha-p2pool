@@ -2,10 +2,14 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
-use libp2p::{gossipsub, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux};
+use libp2p::{gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, SwarmBuilder, tcp, yamux};
 use libp2p::futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message, PublishError};
+use libp2p::identity::Keypair;
+use libp2p::kad::{Event, Mode, NoKnownPeers, QueryId};
+use libp2p::kad::store::MemoryStore;
 use libp2p::mdns::tokio::Tokio;
+use libp2p::multiaddr::Protocol;
 use libp2p::request_response::{cbor, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{debug, error, info, warn};
@@ -33,6 +37,7 @@ pub struct Config {
     pub seed_peers: Vec<String>,
     pub client: client::ClientConfig,
     pub peer_info_publish_interval: Duration,
+    pub stable_peer: bool,
 }
 
 impl Default for Config {
@@ -41,15 +46,17 @@ impl Default for Config {
             seed_peers: vec![],
             client: client::ClientConfig::default(),
             peer_info_publish_interval: Duration::from_secs(5),
+            stable_peer: false,
         }
     }
 }
 
 #[derive(NetworkBehaviour)]
 pub struct ServerNetworkBehaviour {
-    pub mdns: mdns::Behaviour<Tokio>,
+    // pub mdns: mdns::Behaviour<Tokio>,
     pub gossipsub: gossipsub::Behaviour,
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
+    pub kademlia: kad::Behaviour<MemoryStore>,
 }
 
 /// Service is the implementation that holds every peer-to-peer related logic
@@ -108,7 +115,15 @@ impl<S> Service<S>
 
     /// Creates a new swarm from the provided config
     fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let swarm = libp2p::SwarmBuilder::with_new_identity()
+        let mut swarm_builder = libp2p::SwarmBuilder::with_new_identity();
+        
+        // if config.p2p_service.stable_peer {
+        //     let key_pair = Keypair::ed25519_from_bytes(vec![1, 2, 3])
+        //         .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?;
+        //     swarm_builder = libp2p::SwarmBuilder::with_existing_identity(key_pair);
+        // }
+
+        let mut swarm = swarm_builder
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -139,11 +154,11 @@ impl<S> Service<S>
 
                 Ok(ServerNetworkBehaviour {
                     gossipsub,
-                    mdns: mdns::Behaviour::new(
-                        mdns::Config::default(),
-                        key_pair.public().to_peer_id(),
-                    )
-                        .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
+                    // mdns: mdns::Behaviour::new(
+                    //     mdns::Config::default(),
+                    //     key_pair.public().to_peer_id(),
+                    // )
+                    //     .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
                     share_chain_sync: cbor::Behaviour::<ShareChainSyncRequest, ShareChainSyncResponse>::new(
                         [(
                             StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
@@ -151,13 +166,17 @@ impl<S> Service<S>
                         )],
                         request_response::Config::default(),
                     ),
-                    // rendezvous_server: rendezvous::server::Behaviour::new(rendezvous::server::Config::default()),
-                    // rendezvous_client: rendezvous::client::Behaviour::new(key_pair.clone()),
+                    kademlia: kad::Behaviour::new(
+                        key_pair.public().to_peer_id(),
+                        MemoryStore::new(key_pair.public().to_peer_id()),
+                    ),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
             .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
             .build();
+
+        swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
         Ok(swarm)
     }
@@ -288,6 +307,7 @@ impl<S> Service<S>
             PEER_INFO_TOPIC => {
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
+                        info!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                         self.peer_store.add(peer, payload).await;
                         if let Some(tip) = self.peer_store.tip_of_block_height().await {
                             if let Ok(curr_height) = self.share_chain.tip_height().await {
@@ -305,7 +325,7 @@ impl<S> Service<S>
             BLOCK_VALIDATION_REQUESTS_TOPIC => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
-                        debug!(target: LOG_TARGET, "Block validation request: {payload:?}");
+                        info!(target: LOG_TARGET, "Block validation request: {payload:?}");
 
                         let validate_result = self.share_chain.validate_block(&payload.block()).await;
                         let mut valid = false;
@@ -370,6 +390,7 @@ impl<S> Service<S>
 
     /// Handles share chain sync request (coming from other peer).
     async fn handle_share_chain_sync_request(&mut self, channel: ResponseChannel<ShareChainSyncResponse>, request: ShareChainSyncRequest) {
+        info!(target: LOG_TARGET, "Incoming Share chain sync request: {request:?}");
         match self.share_chain.blocks(request.from_height).await {
             Ok(blocks) => {
                 if self.swarm.behaviour_mut().share_chain_sync.send_response(channel, ShareChainSyncResponse::new(blocks.clone()))
@@ -384,6 +405,7 @@ impl<S> Service<S>
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
+        info!(target: LOG_TARGET, "Share chain sync response: {response:?}");
         if let Err(error) = self.share_chain.submit_blocks(response.blocks).await {
             error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
         }
@@ -391,11 +413,16 @@ impl<S> Service<S>
 
     /// Trigger share chai sync with another peer with the highest known block height.
     async fn sync_share_chain(&mut self) {
-        while self.peer_store.tip_of_block_height().await.is_none() {} // waiting for the highest blockchain
+        info!(target: LOG_TARGET, "Syncing share chain...");
+        while self.peer_store.tip_of_block_height().await.is_none() {
+            info!(target: LOG_TARGET, "Waiting for highest block height...");
+        } // waiting for the highest blockchain
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
+                info!(target: LOG_TARGET, "Found highet block height: {result:?}");
                 match self.share_chain.tip_height().await {
                     Ok(tip) => {
+                        info!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
                         self.swarm.behaviour_mut().share_chain_sync.send_request(
                             &result.peer_id,
                             ShareChainSyncRequest::new(tip),
@@ -415,19 +442,19 @@ impl<S> Service<S>
                 info!(target: LOG_TARGET, "Listening on {address:?}");
             }
             SwarmEvent::Behaviour(event) => match event {
-                ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
-                    mdns::Event::Discovered(peers) => {
-                        for (peer, addr) in peers {
-                            self.swarm.add_peer_address(peer, addr);
-                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                        }
-                    }
-                    mdns::Event::Expired(peers) => {
-                        for (peer, _addr) in peers {
-                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
-                        }
-                    }
-                },
+                // ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
+                //     mdns::Event::Discovered(peers) => {
+                //         for (peer, addr) in peers {
+                //             self.swarm.add_peer_address(peer, addr);
+                //             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                //         }
+                //     }
+                //     mdns::Event::Expired(peers) => {
+                //         for (peer, _addr) in peers {
+                //             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                //         }
+                //     }
+                // },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message { message, message_id: _message_id, propagation_source: _propagation_source } => {
                         self.handle_new_gossipsub_message(message).await;
@@ -445,29 +472,32 @@ impl<S> Service<S>
                             self.handle_share_chain_sync_response(response).await;
                         }
                     }
-                    request_response::Event::OutboundFailure { .. } => {}
-                    request_response::Event::InboundFailure { .. } => {}
+                    request_response::Event::OutboundFailure { peer, error, .. } => {
+                        error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                    }
+                    request_response::Event::InboundFailure { peer, error, .. } => {
+                        error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                    }
                     request_response::Event::ResponseSent { .. } => {}
                 },
+                ServerNetworkBehaviourEvent::Kademlia(event) => {
+                    match event {
+                        Event::RoutingUpdated { peer, old_peer, addresses, .. } => {
+                            addresses.iter().for_each(|addr| {
+                                self.swarm.add_peer_address(peer, addr.clone());
+                            });
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                            if let Some(old_peer) = old_peer {
+                                self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
+                                if let Err(error) = self.client_peer_changes_tx.send(()) {
+                                    error!(target: LOG_TARGET, "Failed to send peer changes trigger: {error:?}");
+                                }
+                            }
+                        }
+                        _ => info!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
+                    }
+                }
             },
-            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                // TODO: do some discovery somehow, possibly use rendezvous
-                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-            }
-            SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-            }
-            SwarmEvent::IncomingConnection { .. } => {}
-            SwarmEvent::IncomingConnectionError { .. } => {}
-            SwarmEvent::OutgoingConnectionError { .. } => {}
-            SwarmEvent::ExpiredListenAddr { .. } => {}
-            SwarmEvent::ListenerClosed { .. } => {}
-            SwarmEvent::ListenerError { .. } => {}
-            SwarmEvent::Dialing { .. } => {}
-            SwarmEvent::NewExternalAddrCandidate { .. } => {}
-            SwarmEvent::ExternalAddrConfirmed { .. } => {}
-            SwarmEvent::ExternalAddrExpired { .. } => {}
-            SwarmEvent::NewExternalAddrOfPeer { .. } => {}
             _ => {}
         };
     }
@@ -491,12 +521,15 @@ impl<S> Service<S>
                     // handle case when we have some peers removed
                     let expired_peers = self.peer_store.cleanup().await;
                     for exp_peer in expired_peers {
+                        self.swarm.behaviour_mut().kademlia.remove_peer(&exp_peer);
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
-                    }
-                    if let Err(error) = self.client_peer_changes_tx.send(()) {
+                        if let Err(error) = self.client_peer_changes_tx.send(()) {
                             error!(target: LOG_TARGET, "Failed to send peer changes trigger: {error:?}");
+                        }
                     }
 
+                    // broadcast peer info
+                    info!(target: LOG_TARGET, "Peer count: {:?}", self.peer_store.peer_count().await);
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
@@ -514,12 +547,25 @@ impl<S> Service<S>
     }
 
     fn join_seed_peers(&mut self) -> Result<(), Error> {
-        for seed_peer in &self.config.seed_peers {
-            self.swarm.dial(seed_peer.parse::<Multiaddr>()
-                .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?
-            )
-                .map_err(|error| Error::LibP2P(LibP2PError::Dial(error)))?;
+        if self.config.seed_peers.is_empty() {
+            return Ok(());
         }
+
+        for seed_peer in &self.config.seed_peers {
+            let addr = seed_peer.parse::<Multiaddr>()
+                .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?;
+            let peer_id = match addr.iter().last() {
+                Some(Protocol::P2p(peer_id)) => Some(peer_id),
+                _ => None,
+            };
+            if peer_id.is_none() {
+                return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
+            }
+            self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
+        }
+
+        self.swarm.behaviour_mut().kademlia.bootstrap()
+            .map_err(|error| Error::LibP2P(LibP2PError::KademliaNoKnownPeers(error)))?;
 
         Ok(())
     }

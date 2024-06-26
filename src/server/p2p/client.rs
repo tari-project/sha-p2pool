@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -113,7 +113,7 @@ impl ServiceClient {
         let peer_count = self.peer_store.peer_count().await as f64 + 1.0;
         let min_validation_count = (peer_count / 3.0) * 2.0;
         let min_validation_count = min_validation_count.round() as u64;
-        debug!(target: LOG_TARGET, "Minimum validation count: {min_validation_count:?}");
+        info!(target: LOG_TARGET, "Minimum validation count: {min_validation_count:?}");
 
         // wait for the validations to come
         let mut validate_block_receiver = self.channels.validate_block_receiver.lock().await;
@@ -127,16 +127,18 @@ impl ServiceClient {
                     break;
                 }
                 _ = peer_changes_receiver.recv() => {
+                    warn!(target: LOG_TARGET, "Peers list has been changed, retry!");
                     peers_changed = true;
                     break;
                 }
                 result = validate_block_receiver.recv() => {
                     if let Some(validate_result) = result {
                         if validate_result.valid && validate_result.block == *block {
-                            debug!(target: LOG_TARGET, "New validation result: {validate_result:?}");
+                            info!(target: LOG_TARGET, "New validation result: {validate_result:?}");
                             validation_count+=1;
                         }
                     } else {
+                        error!(target: LOG_TARGET, "Validate block receiver got None!");
                         break;
                     }
                 }
@@ -144,12 +146,13 @@ impl ServiceClient {
         }
 
         if peers_changed {
+            drop(validate_block_receiver);
             retries += 1;
             return Box::pin(self.validate_block_with_retries(block, retries)).await;
         }
 
         let validation_time = Instant::now().duration_since(start);
-        debug!(target: LOG_TARGET, "Validation took {:?}", validation_time);
+        info!(target: LOG_TARGET, "Validation took {:?}", validation_time);
 
         Ok(validation_count >= min_validation_count)
     }

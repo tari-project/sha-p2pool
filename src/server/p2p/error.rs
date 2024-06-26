@@ -1,5 +1,7 @@
 use libp2p::{multiaddr, noise, TransportError};
 use libp2p::gossipsub::PublishError;
+use libp2p::identity::DecodingError;
+use libp2p::kad::NoKnownPeers;
 use libp2p::swarm::DialError;
 use thiserror::Error;
 
@@ -34,4 +36,10 @@ pub enum LibP2PError {
     Publish(#[from] PublishError),
     #[error("Dial error: {0}")]
     Dial(#[from] DialError),
+    #[error("Kademlia: No known peers error: {0}")]
+    KademliaNoKnownPeers(#[from] NoKnownPeers),
+    #[error("Missing peer ID from address: {0}")]
+    MissingPeerId(String),
+    #[error("Key decode error: {0}")]
+    KeyDecoding(#[from] DecodingError),
 }
