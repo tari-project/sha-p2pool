@@ -71,11 +71,6 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_stable_peer(&mut self, config: bool) -> &mut Self {
-        self.config.p2p_service.stable_peer = config;
-        self
-    }
-
     pub fn build(&self) -> Config {
         self.config.clone()
     }

@@ -2,11 +2,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
-use libp2p::{gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, SwarmBuilder, tcp, yamux};
+use libp2p::{gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux};
 use libp2p::futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message, PublishError};
-use libp2p::identity::Keypair;
-use libp2p::kad::{Event, Mode, NoKnownPeers, QueryId};
+use libp2p::kad::{Event, Mode};
 use libp2p::kad::store::MemoryStore;
 use libp2p::mdns::tokio::Tokio;
 use libp2p::multiaddr::Protocol;
@@ -37,7 +36,6 @@ pub struct Config {
     pub seed_peers: Vec<String>,
     pub client: client::ClientConfig,
     pub peer_info_publish_interval: Duration,
-    pub stable_peer: bool,
 }
 
 impl Default for Config {
@@ -46,7 +44,6 @@ impl Default for Config {
             seed_peers: vec![],
             client: client::ClientConfig::default(),
             peer_info_publish_interval: Duration::from_secs(5),
-            stable_peer: false,
         }
     }
 }
@@ -115,15 +112,7 @@ impl<S> Service<S>
 
     /// Creates a new swarm from the provided config
     fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let mut swarm_builder = libp2p::SwarmBuilder::with_new_identity();
-
-        // if config.p2p_service.stable_peer {
-        //     let key_pair = Keypair::ed25519_from_bytes(vec![1, 2, 3])
-        //         .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?;
-        //     swarm_builder = libp2p::SwarmBuilder::with_existing_identity(key_pair);
-        // }
-
-        let mut swarm = swarm_builder
+        let mut swarm = libp2p::SwarmBuilder::with_new_identity()
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -307,7 +296,7 @@ impl<S> Service<S>
             PEER_INFO_TOPIC => {
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
-                        info!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
+                        debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                         self.peer_store.add(peer, payload).await;
                         if let Some(tip) = self.peer_store.tip_of_block_height().await {
                             if let Ok(curr_height) = self.share_chain.tip_height().await {
@@ -325,7 +314,7 @@ impl<S> Service<S>
             BLOCK_VALIDATION_REQUESTS_TOPIC => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
-                        info!(target: LOG_TARGET, "Block validation request: {payload:?}");
+                        debug!(target: LOG_TARGET, "Block validation request: {payload:?}");
 
                         let validate_result = self.share_chain.validate_block(&payload.block()).await;
                         let mut valid = false;
@@ -390,7 +379,7 @@ impl<S> Service<S>
 
     /// Handles share chain sync request (coming from other peer).
     async fn handle_share_chain_sync_request(&mut self, channel: ResponseChannel<ShareChainSyncResponse>, request: ShareChainSyncRequest) {
-        info!(target: LOG_TARGET, "Incoming Share chain sync request: {request:?}");
+        debug!(target: LOG_TARGET, "Incoming Share chain sync request: {request:?}");
         match self.share_chain.blocks(request.from_height).await {
             Ok(blocks) => {
                 if self.swarm.behaviour_mut().share_chain_sync.send_response(channel, ShareChainSyncResponse::new(blocks.clone()))
@@ -405,7 +394,7 @@ impl<S> Service<S>
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
-        info!(target: LOG_TARGET, "Share chain sync response: {response:?}");
+        debug!(target: LOG_TARGET, "Share chain sync response: {response:?}");
         if let Err(error) = self.share_chain.submit_blocks(response.blocks).await {
             error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
         }
@@ -413,16 +402,14 @@ impl<S> Service<S>
 
     /// Trigger share chai sync with another peer with the highest known block height.
     async fn sync_share_chain(&mut self) {
-        info!(target: LOG_TARGET, "Syncing share chain...");
-        while self.peer_store.tip_of_block_height().await.is_none() {
-            info!(target: LOG_TARGET, "Waiting for highest block height...");
-        } // waiting for the highest blockchain
+        debug!(target: LOG_TARGET, "Syncing share chain...");
+        while self.peer_store.tip_of_block_height().await.is_none() {} // waiting for the highest blockchain
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
-                info!(target: LOG_TARGET, "Found highet block height: {result:?}");
+                debug!(target: LOG_TARGET, "Found highet block height: {result:?}");
                 match self.share_chain.tip_height().await {
                     Ok(tip) => {
-                        info!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
+                        debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
                         self.swarm.behaviour_mut().share_chain_sync.send_request(
                             &result.peer_id,
                             ShareChainSyncRequest::new(tip),
@@ -494,7 +481,7 @@ impl<S> Service<S>
                                 }
                             }
                         }
-                        _ => info!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
+                        _ => debug!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
                     }
                 }
             },
