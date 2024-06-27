@@ -61,7 +61,7 @@ impl InMemoryShareChain {
         let blocks_read_lock = self.blocks.read().await;
         blocks_read_lock.iter().for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
-                let addr = miner_wallet_address.to_hex();
+                let addr = miner_wallet_address.to_base58();
                 if let Some(curr_hash_rate) = result.get(&addr) {
                     result.insert(addr, curr_hash_rate + 1.0);
                 } else {
@@ -157,7 +157,7 @@ impl ShareChain for InMemoryShareChain {
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
-                    stealth_payment: false,
+                    stealth_payment: true,
                     revealed_value_proof: true,
                     coinbase_extra: vec![],
                 });
