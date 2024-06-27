@@ -1,10 +1,12 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use libp2p::{gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux};
 use libp2p::futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message, PublishError};
+use libp2p::identity::Keypair;
 use libp2p::kad::{Event, Mode};
 use libp2p::kad::store::MemoryStore;
 use libp2p::mdns::tokio::Tokio;
@@ -14,6 +16,8 @@ use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{debug, error, info, warn};
 use tari_utilities::hex::Hex;
 use tokio::{io, select};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -30,12 +34,15 @@ const BLOCK_VALIDATION_RESULTS_TOPIC: &str = "block_validation_results";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "p2p_service";
+const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug)]
 pub struct Config {
     pub seed_peers: Vec<String>,
     pub client: client::ClientConfig,
     pub peer_info_publish_interval: Duration,
+    pub stable_peer: bool,
+    pub private_key_folder: PathBuf,
 }
 
 impl Default for Config {
@@ -44,6 +51,8 @@ impl Default for Config {
             seed_peers: vec![],
             client: client::ClientConfig::default(),
             peer_info_publish_interval: Duration::from_secs(5),
+            stable_peer: false,
+            private_key_folder: PathBuf::from("."),
         }
     }
 }
@@ -83,8 +92,8 @@ impl<S> Service<S>
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
-    pub fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
-        let swarm = Self::new_swarm(config)?;
+    pub async fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
+        let swarm = Self::new_swarm(config).await?;
         let peer_store = Arc::new(
             PeerStore::new(&config.peer_store),
         );
@@ -110,9 +119,44 @@ impl<S> Service<S>
         })
     }
 
+    /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
+    /// Using this method we can be sure that our Peer ID remains the same across restarts in case of
+    /// stable_peer is set to true.
+    async fn keypair(config: &Config) -> Result<Keypair, Error> {
+        if !config.stable_peer {
+            return Ok(Keypair::generate_ed25519());
+        }
+
+        // if we have a saved private key, just use it
+        let mut content = vec![];
+        let mut key_path = config.private_key_folder.clone();
+        key_path.push(STABLE_PRIVATE_KEY_FILE);
+
+        if let Ok(mut file) = File::open(key_path.clone()).await {
+            if file.read_to_end(&mut content).await.is_ok() {
+                return Keypair::from_protobuf_encoding(content.as_slice())
+                    .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)));
+            }
+        }
+
+        // otherwise create a new one
+        let key_pair = Keypair::generate_ed25519();
+        let mut new_private_key_file = File::create_new(key_path).await
+            .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
+        new_private_key_file.write_all(
+            key_pair.to_protobuf_encoding()
+                .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?.as_slice()
+        ).await
+            .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
+
+        Ok(key_pair)
+    }
+
     /// Creates a new swarm from the provided config
-    fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let mut swarm = libp2p::SwarmBuilder::with_new_identity()
+    async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(
+            Self::keypair(&config.p2p_service).await?
+        )
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::server::p2p;
@@ -68,6 +69,16 @@ impl ConfigBuilder {
 
     pub fn with_seed_peers(&mut self, config: Vec<String>) -> &mut Self {
         self.config.p2p_service.seed_peers = config;
+        self
+    }
+
+    pub fn with_stable_peer(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.stable_peer = config;
+        self
+    }
+
+    pub fn with_private_key_folder(&mut self, config: PathBuf) -> &mut Self {
+        self.config.p2p_service.private_key_folder = config;
         self
     }
 

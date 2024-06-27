@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::builder::Styles;
 use clap::builder::styling::AnsiColor;
 use clap::Parser;
@@ -39,14 +41,30 @@ struct Cli {
 
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
+    ///
     /// Please note that these addresses must be in libp2p multi address format and must contain peer ID!
+    ///
     /// e.g.: /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
+
+    /// Starts the node as a stable peer.
+    ///
+    /// Identity of the peer will be saved locally (to --private-key-location)
+    /// and ID of the Peer remains the same.
+    #[arg(long, value_name = "stable-peer", default_value_t = false)]
+    stable_peer: bool,
+
+    /// Private key folder.
+    ///
+    /// Needs --stable-peer to be used.
+    #[arg(long, value_name = "private-key-location", requires = "stable_peer", default_value = ".")]
+    private_key_folder: PathBuf,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // cli
     let cli = Cli::parse();
     Builder::new().filter_level(cli.log_level).init();
     let mut config_builder = server::Config::builder();
@@ -59,7 +77,10 @@ async fn main() -> anyhow::Result<()> {
     if let Some(seed_peers) = cli.seed_peers {
         config_builder.with_seed_peers(seed_peers);
     }
+    config_builder.with_stable_peer(cli.stable_peer);
+    config_builder.with_private_key_folder(cli.private_key_folder);
 
+    // server start
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();
     let mut server = server::Server::new(config, share_chain).await?;

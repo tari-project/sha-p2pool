@@ -45,7 +45,7 @@ impl<S> Server<S>
         // TODO: have base node's network here and pass to p2p_service to be able to subscribe to the right gossipsub topics
         // TODO: se we are not mixing main net and test net blocks.
 
-        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone()).map_err(Error::P2PService)?;
+        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone()).await.map_err(Error::P2PService)?;
 
         let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone()).await.map_err(Error::Grpc)?;
         let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
