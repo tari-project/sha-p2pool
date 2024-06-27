@@ -57,8 +57,8 @@ struct Cli {
 
     /// Private key folder.
     ///
-    /// Needs --stable-peer to be used.
-    #[arg(long, value_name = "private-key-location", requires = "stable_peer", default_value = ".")]
+    /// Needs --stable-peer to be set.
+    #[arg(long, value_name = "private-key-folder", requires = "stable_peer", default_value = ".")]
     private_key_folder: PathBuf,
 }
 

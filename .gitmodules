@@ -1,3 +1,0 @@
-[submodule "crates/grpc/submodules/tari"]
-	path = crates/grpc/submodules/tari
-	url = https://github.com/tari-project/tari
