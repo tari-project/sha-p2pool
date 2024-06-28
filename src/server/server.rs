@@ -32,8 +32,8 @@ where
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
-    base_node_grpc_service: BaseNodeServer<TariBaseNodeGrpc>,
-    p2pool_grpc_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
+    base_node_grpc_service: Option<BaseNodeServer<TariBaseNodeGrpc>>,
+    p2pool_grpc_service: Option<ShaP2PoolServer<ShaP2PoolGrpc<S>>>,
 }
 
 // TODO: add graceful shutdown
@@ -51,19 +51,23 @@ where
             .await
             .map_err(Error::P2PService)?;
 
-        let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone())
+        let mut base_node_grpc_server = None;
+        let mut p2pool_server = None;
+        if config.mining_enabled {
+            let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone())
+                .await
+                .map_err(Error::Grpc)?;
+            base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
+
+            let p2pool_grpc_service = ShaP2PoolGrpc::new(
+                config.base_node_address.clone(),
+                p2p_service.client(),
+                share_chain.clone(),
+            )
             .await
             .map_err(Error::Grpc)?;
-        let base_node_grpc_server = BaseNodeServer::new(base_node_grpc_service);
-
-        let p2pool_grpc_service = ShaP2PoolGrpc::new(
-            config.base_node_address.clone(),
-            p2p_service.client(),
-            share_chain.clone(),
-        )
-        .await
-        .map_err(Error::Grpc)?;
-        let p2pool_server = ShaP2PoolServer::new(p2pool_grpc_service);
+            p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
+        }
 
         Ok(Self {
             config,
@@ -101,18 +105,21 @@ where
     pub async fn start(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
 
-        // local base node and p2pool node grpc services
-        let base_node_grpc_service = self.base_node_grpc_service.clone();
-        let p2pool_grpc_service = self.p2pool_grpc_service.clone();
-        let grpc_port = self.config.grpc_port;
-        tokio::spawn(async move {
-            match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
-                Ok(_) => {}
-                Err(error) => {
-                    error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
+        if self.config.mining_enabled {
+            // local base node and p2pool node grpc services
+            let base_node_grpc_service = self.base_node_grpc_service.clone().unwrap();
+            let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();
+            let grpc_port = self.config.grpc_port;
+            tokio::spawn(async move {
+                match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await
+                {
+                    Ok(_) => {}
+                    Err(error) => {
+                        error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         self.p2p_service.start().await.map_err(Error::P2PService)
     }

@@ -13,6 +13,7 @@ pub struct Config {
     pub idle_connection_timeout: Duration,
     pub peer_store: PeerStoreConfig,
     pub p2p_service: p2p::Config,
+    pub mining_enabled: bool,
 }
 
 impl Default for Config {
@@ -24,6 +25,7 @@ impl Default for Config {
             idle_connection_timeout: Duration::from_secs(30),
             peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
+            mining_enabled: true,
         }
     }
 }
@@ -79,6 +81,11 @@ impl ConfigBuilder {
 
     pub fn with_private_key_folder(&mut self, config: PathBuf) -> &mut Self {
         self.config.p2p_service.private_key_folder = config;
+        self
+    }
+
+    pub fn with_mining_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.mining_enabled = config;
         self
     }
 

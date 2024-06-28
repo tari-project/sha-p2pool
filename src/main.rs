@@ -65,6 +65,14 @@ struct Cli {
         default_value = "."
     )]
     private_key_folder: PathBuf,
+
+    /// Mining enabled
+    ///
+    /// In case it is set to false, the node will only handle p2p operations,
+    /// will be syncing with share chain, but not starting gRPC services and no Tari base node needed.
+    /// By setting this to, false it can be used as a stable node for routing only.
+    #[arg(long, value_name = "mining-enabled", default_value_t = true)]
+    mining_enabled: bool,
 }
 
 #[tokio::main]
@@ -84,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
     }
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder);
+    config_builder.with_mining_enabled(cli.mining_enabled);
 
     // server start
     let config = config_builder.build();
