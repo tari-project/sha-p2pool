@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use clap::builder::Styles;
 use clap::builder::styling::AnsiColor;
+use clap::builder::Styles;
 use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
@@ -58,7 +58,12 @@ struct Cli {
     /// Private key folder.
     ///
     /// Needs --stable-peer to be set.
-    #[arg(long, value_name = "private-key-folder", requires = "stable_peer", default_value = ".")]
+    #[arg(
+        long,
+        value_name = "private-key-folder",
+        requires = "stable_peer",
+        default_value = "."
+    )]
     private_key_folder: PathBuf,
 }
 

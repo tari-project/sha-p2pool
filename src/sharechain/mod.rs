@@ -8,9 +8,9 @@ pub const MAX_BLOCKS_COUNT: usize = 80;
 
 pub const SHARE_COUNT: u64 = 100;
 
-pub mod in_memory;
 pub mod block;
 pub mod error;
+pub mod in_memory;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 
@@ -21,7 +21,7 @@ pub trait ShareChain {
 
     /// Add multiple blocks at once.
     /// While this operation runs, no other blocks can be added until it's done.
-    async fn submit_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()>;
+    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<()>;
 
     /// Returns the tip of height in chain.
     async fn tip_height(&self) -> ShareChainResult<u64>;

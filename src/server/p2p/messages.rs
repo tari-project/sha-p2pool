@@ -27,13 +27,15 @@ macro_rules! impl_conversions {
     };
 }
 pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
-    where T: Deserialize<'a>,
+where
+    T: Deserialize<'a>,
 {
     serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
 }
 
 pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
-    where T: Serialize,
+where
+    T: Serialize,
 {
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
@@ -46,8 +48,14 @@ pub struct PeerInfo {
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(current_height: u64) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
-        Self { current_height, timestamp }
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
+        Self {
+            current_height,
+            timestamp,
+        }
     }
 }
 
@@ -59,7 +67,10 @@ pub struct ValidateBlockRequest {
 impl_conversions!(ValidateBlockRequest);
 impl ValidateBlockRequest {
     pub fn new(block: Block) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
         Self { block, timestamp }
     }
 
@@ -77,12 +88,11 @@ pub struct ValidateBlockResult {
 }
 impl_conversions!(ValidateBlockResult);
 impl ValidateBlockResult {
-    pub fn new(
-        peer_id: PeerId,
-        block: Block,
-        valid: bool,
-    ) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+    pub fn new(peer_id: PeerId, block: Block, valid: bool) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
         Self {
             peer_id,
             block,

@@ -1,8 +1,8 @@
-use libp2p::{multiaddr, noise, TransportError};
 use libp2p::gossipsub::PublishError;
 use libp2p::identity::DecodingError;
 use libp2p::kad::NoKnownPeers;
 use libp2p::swarm::DialError;
+use libp2p::{multiaddr, noise, TransportError};
 use thiserror::Error;
 
 use crate::server::p2p;

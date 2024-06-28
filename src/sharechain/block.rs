@@ -27,9 +27,10 @@ impl Block {
         BlockBuilder::new()
     }
     pub fn generate_hash(&self) -> BlockHash {
-        let mut hash = DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
-            .chain(&self.prev_hash)
-            .chain(&self.height);
+        let mut hash =
+            DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
+                .chain(&self.prev_hash)
+                .chain(&self.height);
 
         if let Some(miner_wallet_address) = &self.miner_wallet_address {
             hash = hash.chain(&miner_wallet_address.to_hex());
@@ -116,5 +117,3 @@ impl BlockBuilder {
         self.block.clone()
     }
 }
-
-

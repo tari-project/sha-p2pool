@@ -19,7 +19,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             base_node_address: String::from("http://127.0.0.1:18142"),
-            p2p_port: 0, // bind to any free port
+            p2p_port: 0,      // bind to any free port
             grpc_port: 18145, // to possibly not collide with any other ports
             idle_connection_timeout: Duration::from_secs(30),
             peer_store: PeerStoreConfig::default(),

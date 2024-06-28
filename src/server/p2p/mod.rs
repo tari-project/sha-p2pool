@@ -5,9 +5,8 @@ pub use client::*;
 pub use error::*;
 pub use p2p::*;
 
-mod p2p;
+pub(crate) mod client;
 mod error;
 pub mod messages;
+mod p2p;
 pub mod peer_store;
-pub(crate) mod client;
-

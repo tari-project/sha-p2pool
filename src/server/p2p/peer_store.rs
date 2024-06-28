@@ -47,10 +47,7 @@ pub struct PeerStoreBlockHeightTip {
 
 impl PeerStoreBlockHeightTip {
     pub fn new(peer_id: PeerId, height: u64) -> Self {
-        Self {
-            peer_id,
-            height,
-        }
+        Self { peer_id, height }
     }
 }
 
@@ -79,7 +76,9 @@ impl PeerStore {
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
-        self.inner.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+        self.inner
+            .insert(peer_id, PeerStoreRecord::new(peer_info))
+            .await;
         self.set_tip_of_block_height().await;
     }
 
@@ -91,20 +90,16 @@ impl PeerStore {
 
     /// Sets the actual highest block height with peer.
     async fn set_tip_of_block_height(&self) {
-        if let Some((k, v)) =
-            self.inner.iter()
-                .max_by(|(_k1, v1), (_k2, v2)| {
-                    v1.peer_info.current_height.cmp(&v2.peer_info.current_height)
-                }) {
+        if let Some((k, v)) = self.inner.iter().max_by(|(_k1, v1), (_k2, v2)| {
+            v1.peer_info
+                .current_height
+                .cmp(&v2.peer_info.current_height)
+        }) {
             // save result
             if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
                 if tip_height_opt.is_none() {
-                    let _ = tip_height_opt.insert(
-                        PeerStoreBlockHeightTip::new(
-                            *k,
-                            v.peer_info.current_height,
-                        )
-                    );
+                    let _ = tip_height_opt
+                        .insert(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 } else {
                     let mut tip_height = tip_height_opt.unwrap();
                     tip_height.peer_id = *k;
