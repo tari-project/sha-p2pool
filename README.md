@@ -38,5 +38,9 @@ How to use
   Please note that `18145` is the port where `base node's gRPC` is running, so if it is different from the default
   one (`18145`)
   just use the right port.
-- 
+- Start sha p2pool by running the binary simple `$ ./sha_p2pool` or using `Cargo` (if installed and want to build from
+  source):
+  `$ cargo build --release && ./target/release/sha_p2pool`
+
+**Note:** For more information about usage of p2pool, just run `$ sha_p2pool --help`! 
 
