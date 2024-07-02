@@ -10,8 +10,8 @@ use tari_utilities::epoch_time::EpochTime;
 use tari_utilities::hex::Hex;
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
+use crate::sharechain::{Block, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult};
 use crate::sharechain::error::{BlockConvertError, Error};
-use crate::sharechain::{Block, ShareChain, ShareChainResult, MAX_BLOCKS_COUNT, SHARE_COUNT};
 
 const LOG_TARGET: &str = "in_memory_share_chain";
 
@@ -100,7 +100,8 @@ impl InMemoryShareChain {
             }
         } else if !clear_before_add && last_block.is_none() {
             return Err(Error::Empty);
-        } else if clear_before_add {
+        } else if (clear_before_add && last_block.is_none()) ||
+            (clear_before_add && last_block.is_some() && last_block.unwrap().height() < block.height()) {
             // if we are synchronizing blocks, we trust we receive all the valid blocks
             blocks.clear();
         }

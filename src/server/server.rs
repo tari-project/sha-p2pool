@@ -7,10 +7,10 @@ use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
 use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2PoolServer;
 use thiserror::Error;
 
+use crate::server::{config, grpc, p2p};
 use crate::server::grpc::base_node::TariBaseNodeGrpc;
 use crate::server::grpc::error::TonicError;
 use crate::server::grpc::p2pool::ShaP2PoolGrpc;
-use crate::server::{config, grpc, p2p};
 use crate::sharechain::ShareChain;
 
 const LOG_TARGET: &str = "server";
@@ -27,8 +27,8 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -38,14 +38,11 @@ where
 
 // TODO: add graceful shutdown
 impl<S> Server<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
-
-        // TODO: have base node's network here and pass to p2p_service to be able to subscribe to the right gossipsub topics
-        // TODO: se we are not mixing main net and test net blocks.
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone())
             .await
@@ -64,8 +61,8 @@ where
                 p2p_service.client(),
                 share_chain.clone(),
             )
-            .await
-            .map_err(Error::Grpc)?;
+                .await
+                .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 

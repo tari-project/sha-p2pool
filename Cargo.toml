@@ -12,6 +12,7 @@ edition = "2021"
 minotari_app_grpc = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 minotari_node_grpc_client = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 tari_common_types = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
+tari_common = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 tari_core = { git = "https://github.com/ksrichard/tari.git", branch = "p2pool" }
 
 tari_utilities = { version = "0.7", features = ["borsh"] }

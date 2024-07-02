@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use clap::builder::styling::AnsiColor;
 use clap::builder::Styles;
+use clap::builder::styling::AnsiColor;
 use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
@@ -66,13 +66,13 @@ struct Cli {
     )]
     private_key_folder: PathBuf,
 
-    /// Mining enabled
+    /// Mining disabled
     ///
-    /// In case it is set to false, the node will only handle p2p operations,
+    /// In case it is set, the node will only handle p2p operations,
     /// will be syncing with share chain, but not starting gRPC services and no Tari base node needed.
-    /// By setting this to, false it can be used as a stable node for routing only.
-    #[arg(long, value_name = "mining-enabled", default_value_t = true)]
-    mining_enabled: bool,
+    /// By setting this it can be used as a stable node for routing only.
+    #[arg(long, value_name = "mining-disabled", default_value_t = false)]
+    mining_disabled: bool,
 }
 
 #[tokio::main]
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     }
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder);
-    config_builder.with_mining_enabled(cli.mining_enabled);
+    config_builder.with_mining_enabled(!cli.mining_disabled);
 
     // server start
     let config = config_builder.build();

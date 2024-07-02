@@ -3,35 +3,36 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use libp2p::{
+    gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux,
+};
 use libp2p::futures::StreamExt;
 use libp2p::gossipsub::{IdentTopic, Message, PublishError};
 use libp2p::identity::Keypair;
-use libp2p::kad::store::MemoryStore;
 use libp2p::kad::{Event, Mode};
+use libp2p::kad::store::MemoryStore;
 use libp2p::mdns::tokio::Tokio;
 use libp2p::multiaddr::Protocol;
 use libp2p::request_response::{cbor, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
-use libp2p::{
-    gossipsub, kad, mdns, noise, request_response, tcp, yamux, Multiaddr, StreamProtocol, Swarm,
-};
 use log::{debug, error, info, warn};
+use tari_common::configuration::Network;
 use tari_utilities::hex::Hex;
+use tokio::{io, select};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, mpsc};
-use tokio::{io, select};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::server::config;
+use crate::server::p2p::{
+    client, Error, LibP2PError, messages, ServiceClient, ServiceClientChannels,
+};
 use crate::server::p2p::messages::{
     PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse, ValidateBlockRequest,
     ValidateBlockResult,
 };
 use crate::server::p2p::peer_store::PeerStore;
-use crate::server::p2p::{
-    client, messages, Error, LibP2PError, ServiceClient, ServiceClientChannels,
-};
 use crate::sharechain::block::Block;
 use crate::sharechain::ShareChain;
 
@@ -75,8 +76,8 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -96,8 +97,8 @@ where
 }
 
 impl<S> Service<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
@@ -202,7 +203,7 @@ where
                             mdns::Config::default(),
                             key_pair.public().to_peer_id(),
                         )
-                        .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
+                            .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
                         share_chain_sync: cbor::Behaviour::<
                             ShareChainSyncRequest,
                             ShareChainSyncResponse,
@@ -260,7 +261,7 @@ where
                 match request_raw_result {
                     Ok(request_raw) => {
                         if let Err(error) = self.swarm.behaviour_mut().gossipsub.publish(
-                            IdentTopic::new(BLOCK_VALIDATION_REQUESTS_TOPIC),
+                            IdentTopic::new(Self::topic_name(BLOCK_VALIDATION_REQUESTS_TOPIC)),
                             request_raw,
                         ) {
                             error!(target: LOG_TARGET, "Failed to send block validation request: {error:?}");
@@ -286,7 +287,7 @@ where
                     .swarm
                     .behaviour_mut()
                     .gossipsub
-                    .publish(IdentTopic::new(BLOCK_VALIDATION_RESULTS_TOPIC), result_raw)
+                    .publish(IdentTopic::new(Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC)), result_raw)
                 {
                     error!(target: LOG_TARGET, "Failed to publish block validation result: {error:?}");
                 }
@@ -309,7 +310,7 @@ where
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(PEER_INFO_TOPIC), peer_info_raw)
+            .publish(IdentTopic::new(Self::topic_name(PEER_INFO_TOPIC)), peer_info_raw)
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         Ok(())
@@ -326,7 +327,7 @@ where
                             .swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(IdentTopic::new(NEW_BLOCK_TOPIC), block_raw)
+                            .publish(IdentTopic::new(Self::topic_name(NEW_BLOCK_TOPIC)), block_raw)
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
                             Ok(_) => {}
@@ -344,12 +345,19 @@ where
         }
     }
 
+    /// Generates the gossip sub topic names based on the current Tari network to avoid mixing up
+    /// blocks and peers with different Tari networks.
+    fn topic_name(topic: &str) -> String {
+        let network = Network::get_current_or_user_setting_or_default().to_string();
+        format!("{network}_{topic}")
+    }
+
     /// Subscribing to a gossipsub topic.
     fn subscribe(&mut self, topic: &str) {
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .subscribe(&IdentTopic::new(topic))
+            .subscribe(&IdentTopic::new(Self::topic_name(topic)))
             .expect("must be subscribed to topic");
     }
 
@@ -370,9 +378,10 @@ where
         }
         let peer = peer.unwrap();
 
-        let topic = message.topic.as_str();
+        let topic = message.topic.to_string();
+
         match topic {
-            PEER_INFO_TOPIC => match messages::PeerInfo::try_from(message) {
+            topic if topic == Self::topic_name(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
@@ -388,7 +397,7 @@ where
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
                 }
             },
-            BLOCK_VALIDATION_REQUESTS_TOPIC => {
+            topic if topic == Self::topic_name(BLOCK_VALIDATION_REQUESTS_TOPIC) => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
                         debug!(target: LOG_TARGET, "Block validation request: {payload:?}");
@@ -418,7 +427,7 @@ where
                     }
                 }
             }
-            BLOCK_VALIDATION_RESULTS_TOPIC => {
+            topic if topic == Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC) => {
                 match messages::ValidateBlockResult::try_from(message) {
                     Ok(payload) => {
                         let mut senders_to_delete = vec![];
@@ -438,7 +447,7 @@ where
                 }
             }
             // TODO: send a signature that proves that the actual block was coming from this peer
-            NEW_BLOCK_TOPIC => match Block::try_from(message) {
+            topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => match Block::try_from(message) {
                 Ok(payload) => {
                     info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
                     if let Err(error) = self.share_chain.submit_block(&payload).await {
@@ -449,7 +458,7 @@ where
                     error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
                 }
             },
-            &_ => {
+            _ => {
                 warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
             }
         }
@@ -493,7 +502,7 @@ where
         while self.peer_store.tip_of_block_height().await.is_none() {} // waiting for the highest blockchain
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
-                debug!(target: LOG_TARGET, "Found highet block height: {result:?}");
+                debug!(target: LOG_TARGET, "Found highest block height: {result:?}");
                 match self.share_chain.tip_height().await {
                     Ok(tip) => {
                         debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");

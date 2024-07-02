@@ -4059,6 +4059,7 @@ dependencies = [
  "moka",
  "serde",
  "serde_cbor",
+ "tari_common",
  "tari_common_types",
  "tari_core",
  "tari_utilities",
