@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest,
     HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest, SubmitBlockResponse,
@@ -55,7 +55,7 @@ impl<S> ShaP2PoolGrpc<S>
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
         if let Err(error) = self.share_chain.submit_block(block).await {
-            error!(target: LOG_TARGET, "Failed to add new block: {error:?}");
+            warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
         }
         debug!(target: LOG_TARGET, "Broadcast new block with height: {:?}", block.height());
         self.p2p_client

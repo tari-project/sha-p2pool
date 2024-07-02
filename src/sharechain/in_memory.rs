@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
@@ -95,6 +95,7 @@ impl InMemoryShareChain {
         if in_sync && last_block.is_some() {
             // validate
             if !self.validate_block(last_block.unwrap(), &block).await? {
+                error!(target: LOG_TARGET, "Invalid block!");
                 return Err(Error::InvalidBlock(block));
             }
         } else if !in_sync && last_block.is_none() {
@@ -102,6 +103,7 @@ impl InMemoryShareChain {
         } else if !in_sync && last_block.is_some() {
             // validate
             if !self.validate_block(last_block.unwrap(), &block).await? {
+                error!(target: LOG_TARGET, "Invalid block!");
                 return Err(Error::InvalidBlock(block));
             }
         }
@@ -136,7 +138,7 @@ impl ShareChain for InMemoryShareChain {
 
         let last_block = blocks_write_lock.last();
         if (sync && last_block.is_none()) ||
-            (sync && last_block.is_some() && last_block.unwrap().height() < blocks[0].height()) {
+            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height()) {
             blocks_write_lock.clear();
         }
 

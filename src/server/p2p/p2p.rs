@@ -385,13 +385,13 @@ impl<S> Service<S>
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
-                    if let Some(tip) = self.peer_store.tip_of_block_height().await {
-                        if let Ok(curr_height) = self.share_chain.tip_height().await {
-                            if curr_height < tip.height {
-                                self.sync_share_chain().await;
-                            }
-                        }
-                    }
+                    // if let Some(tip) = self.peer_store.tip_of_block_height().await {
+                    //     if let Ok(curr_height) = self.share_chain.tip_height().await {
+                    //         if curr_height < tip.height {
+                    self.sync_share_chain().await;
+                    // }
+                    // }
+                    // }
                 }
                 Err(error) => {
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
