@@ -100,10 +100,6 @@ impl InMemoryShareChain {
             }
         } else if !clear_before_add && last_block.is_none() {
             return Err(Error::Empty);
-        } else if (clear_before_add && last_block.is_none()) ||
-            (clear_before_add && last_block.is_some() && last_block.unwrap().height() < block.height()) {
-            // if we are synchronizing blocks, we trust we receive all the valid blocks
-            blocks.clear();
         }
 
         if blocks.len() >= self.max_blocks_count {
@@ -132,6 +128,13 @@ impl ShareChain for InMemoryShareChain {
 
     async fn submit_blocks(&self, blocks: Vec<Block>, mut sync: bool) -> ShareChainResult<()> {
         let mut blocks_write_lock = self.blocks.write().await;
+
+        let last_block = blocks_write_lock.last();
+        if (sync && last_block.is_none()) ||
+            (sync && last_block.is_some() && last_block.unwrap().height() < blocks[0].height()) {
+            blocks_write_lock.clear();
+        }
+
         for block in blocks {
             self.submit_block_with_lock(&mut blocks_write_lock, &block, sync)
                 .await?;
