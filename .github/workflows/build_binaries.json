@@ -13,8 +13,8 @@
     "rust": "stable",
     "target": "aarch64-unknown-linux-gnu",
     "cross": true,
-    "flags": "--features libtor --workspace --exclude minotari_mining_helper_ffi --exclude tari_integration_tests",
-    "build_metric": true
+    "build_enabled": true,
+    "best_effort": true
   },
   {
     "name": "linux-riscv64",
@@ -22,7 +22,6 @@
     "rust": "stable",
     "target": "riscv64gc-unknown-linux-gnu",
     "cross": true,
-    "flags": "--workspace --exclude minotari_mining_helper_ffi --exclude tari_integration_tests",
     "build_enabled": true,
     "best_effort": true
   },
@@ -46,8 +45,7 @@
     "rust": "stable",
     "target": "x86_64-pc-windows-msvc",
     "cross": false,
-    "features": "safe",
-    "flags": "--workspace --exclude tari_libtor"
+    "features": "safe"
   },
   {
     "name": "windows-arm64",
@@ -55,9 +53,7 @@
     "rust": "stable",
     "target": "aarch64-pc-windows-msvc",
     "cross": false,
-    "features": "safe",
-    "target_bins": "minotari_node, minotari_console_wallet, minotari_merge_mining_proxy, minotari_miner",
-    "flags": "--workspace --exclude tari_libtor",
-    "build_enabled": false
+    "build_enabled": true,
+    "best_effort": true
   }
 ]

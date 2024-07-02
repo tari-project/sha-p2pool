@@ -18,14 +18,12 @@ name: Build Matrix of Binaries
         default: "development-tag"
 
 env:
-  TS_FILENAME: "tari_suite"
+  TS_FILENAME: "sha_p2pool"
   TS_BUNDLE_ID_BASE: "com.tarilabs"
   TS_SIG_FN: "sha256-unsigned.txt"
   ## Must be a JSon string
-  TS_FILES: '["minotari_node","minotari_console_wallet","minotari_miner","minotari_merge_mining_proxy"]'
-  TS_FEATURES: "default, safe"
-  TS_LIBRARIES: "minotari_mining_helper_ffi"
-  TARI_NETWORK_DIR: testnet
+  TS_FILES: '["sha_p2pool"]'
+  TS_FEATURES: "default"
   toolchain: nightly-2024-03-01
   matrix-json-file: ".github/workflows/build_binaries.json"
   CARGO_HTTP_MULTIPLEXING: false
@@ -93,7 +91,6 @@ jobs:
     needs: matrix-prep
     continue-on-error: ${{ matrix.builds.best_effort || false }}
     outputs:
-      TARI_NETWORK_DIR: ${{ steps.set-tari-network.outputs.TARI_NETWORK_DIR }}
       TARI_VERSION: ${{ steps.set-tari-vars.outputs.TARI_VERSION }}
       VSHA_SHORT: ${{ steps.set-tari-vars.outputs.VSHA_SHORT }}
     strategy:
@@ -105,26 +102,6 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Declare TestNet for tags
-        id: set-tari-network
-        # Don't forget to comment out the below if, when force testing with GHA_NETWORK
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        env:
-          GHA_NETWORK: ${{ github.ref_name }}
-          # GHA_NETWORK: "v1.0.0-rc.4"
-        shell: bash
-        run: |
-          source buildtools/multinet_envs.sh ${{ env.GHA_NETWORK }}
-          echo ${TARI_NETWORK}
-          echo ${TARI_TARGET_NETWORK}
-          echo ${TARI_NETWORK_DIR}
-          echo "TARI_NETWORK=${TARI_NETWORK}" >> $GITHUB_ENV
-          echo "TARI_TARGET_NETWORK=${TARI_TARGET_NETWORK}" >> $GITHUB_ENV
-          echo "TARI_NETWORK_DIR=${TARI_NETWORK_DIR}" >> $GITHUB_ENV
-          echo "TARI_NETWORK_DIR=${TARI_NETWORK_DIR}" >> $GITHUB_OUTPUT
 
       - name: Declare Global Variables 4 GHA ${{ github.event_name }}
         id: set-tari-vars
@@ -136,7 +113,7 @@ jobs:
           echo "VSHA_SHORT=${VSHA_SHORT}" >> $GITHUB_OUTPUT
           TARI_VERSION=$(awk -F ' = ' '$1 ~ /^version/ \
             { gsub(/["]/, "", $2); printf("%s",$2) }' \
-            "$GITHUB_WORKSPACE/applications/minotari_node/Cargo.toml")
+            "$GITHUB_WORKSPACE/Cargo.toml")
           echo "TARI_VERSION=${TARI_VERSION}" >> $GITHUB_ENV
           echo "TARI_VERSION=${TARI_VERSION}" >> $GITHUB_OUTPUT
           if [[ "${{ matrix.builds.features }}" == "" ]]; then
@@ -155,17 +132,6 @@ jobs:
             TARGET_BINS+="--bin ${BIN_FILE} "
           done
           echo "TARGET_BINS=${TARGET_BINS}" >> $GITHUB_ENV
-          TARGET_LIBS=""
-          if [[ "${{ matrix.builds.target_libs }}" == "" ]]; then
-            ARRAY_LIBS=( $(echo ${TS_LIBRARIES} | tr ', ' '\n') )
-          else
-            ARRAY_LIBS=( $(echo "${{ matrix.builds.target_libs }}" | tr ', ' '\n') )
-          fi
-          for LIB_FILE in "${ARRAY_LIBS[@]}"; do
-            echo "Adding ${LIB_FILE} to library Builds"
-            TARGET_LIBS+="--package ${LIB_FILE} "
-          done
-          echo "TARGET_LIBS=${TARGET_LIBS}" >> $GITHUB_ENV
           TARI_BUILD_ISA_CPU=${{ matrix.builds.target }}
           # Strip unknown part
           TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//-unknown-linux-gnu}
@@ -203,8 +169,9 @@ jobs:
       - name: Install macOS dependencies
         if: startsWith(runner.os,'macOS')
         run: |
-          # openssl, cmake and autoconf already installed
-          brew install zip coreutils automake protobuf
+          # Already installed items
+          # brew install openssl cmake autoconf zip
+          brew install coreutils automake protobuf
           rustup target add ${{ matrix.builds.target }}
 
       - name: Install Windows dependencies
@@ -312,14 +279,6 @@ jobs:
             ${{ env.TARGET_BINS }} \
             ${{ matrix.builds.flags }} --locked
 
-      - name: Build release libraries
-        shell: bash
-        run: |
-          ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
-            --target ${{ matrix.builds.target }} \
-            --lib ${{ env.TARGET_LIBS }} \
-            ${{ matrix.builds.flags }} --locked
-
       - name: Copy binaries to folder for archiving
         shell: bash
         run: |
@@ -354,40 +313,7 @@ jobs:
               cp -vf "${GITHUB_WORKSPACE}/target/${{ matrix.builds.target }}/release/${FILE}${LIB_EXT}" .
             fi
           done
-          if [ -f "${GITHUB_WORKSPACE}/applications/minotari_node/${PLATFORM_SPECIFIC_DIR}/runtime/start_tor${SHELL_EXT}" ]; then
-            cp -vf "${GITHUB_WORKSPACE}/applications/minotari_node/${PLATFORM_SPECIFIC_DIR}/runtime/start_tor${SHELL_EXT}" .
-          fi
           ls -alhtR ${{ env.MTS_SOURCE }}
-
-      - name: Build minotari_node with metrics too
-        if: ${{ matrix.builds.build_metric }}
-        shell: bash
-        run: |
-          ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
-            --target ${{ matrix.builds.target }} \
-            --features "${{ env.BUILD_FEATURES }}, metrics" \
-            --bin minotari_node \
-            ${{ matrix.builds.flags }} --locked
-          cp -vf "$GITHUB_WORKSPACE/target/${{ matrix.builds.target }}/release/minotari_node${TS_EXT}" \
-            "${{ env.MTS_SOURCE }}/minotari_node-metrics${TS_EXT}"
-
-      - name: Build targeted miners
-        # if: ${{ ( startsWith(github.ref, 'refs/tags/v') ) && ( matrix.builds.miner_cpu_targets != '' ) }}
-        if: ${{ matrix.builds.miner_cpu_targets != '' }}
-        shell: bash
-        run: |
-          ARRAY_TARGETS=( $(echo "${{ matrix.builds.miner_cpu_targets }}" | tr ', ' '\n') )
-          for CPU_TARGET in "${ARRAY_TARGETS[@]}"; do
-            echo "Target CPU ${CPU_TARGET} for miner"
-            export RUSTFLAGS="-C target-cpu=${CPU_TARGET}"
-            ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
-              --target ${{ matrix.builds.target }} \
-              --features "${{ env.BUILD_FEATURES }}" \
-              --bin minotari_miner \
-              ${{ matrix.builds.flags }} --locked
-            cp -vf "$GITHUB_WORKSPACE/target/${{ matrix.builds.target }}/release/minotari_miner" \
-              "${{ env.MTS_SOURCE }}/minotari_miner-${CPU_TARGET}"
-          done
 
       - name: Pre/unsigned OSX Artifact upload for Archive
         # Debug
@@ -505,6 +431,7 @@ jobs:
 
       - name: Build the Windows installer
         if: startsWith(runner.os,'Windows')
+        continue-on-error: true
         shell: cmd
         run: |
           cd buildtools
@@ -519,6 +446,7 @@ jobs:
 
       - name: Artifact upload for Windows installer
         if: startsWith(runner.os,'Windows')
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: "${{ env.TS_FILENAME }}_windows_installer"
@@ -548,36 +476,6 @@ jobs:
         with:
           name: ${{ env.TS_FILENAME }}_archive-${{ matrix.builds.name }}
           path: "${{ github.workspace }}${{ env.TS_DIST }}/${{ env.BINFILE }}.zip*"
-
-      - name: Prep diag-utils archive for upload
-        continue-on-error: true
-        shell: bash
-        run: |
-          mkdir -p "${{ env.MTS_SOURCE }}-diag-utils"
-          cd "${{ env.MTS_SOURCE }}-diag-utils"
-          # Find RandomX built tools for testing
-          find "$GITHUB_WORKSPACE/target/${{ matrix.builds.target }}/release/" \
-            -name "randomx-*${{ env.TS_EXT}}" -type f -perm -+x -exec cp -vf {} . \;
-          echo "Compute diag utils shasum"
-          ${SHARUN} * \
-            >> "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.sha256"
-          cat "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.sha256"
-          echo "Checksum verification for diag utils is "
-          ${SHARUN} --check "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.sha256"
-          7z a "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.zip" *
-          echo "Compute diag utils archive shasum"
-          ${SHARUN} "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.zip" \
-            >> "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.zip.sha256"
-          cat "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.zip.sha256"
-          echo "Checksum verification for diag utils archive is "
-          ${SHARUN} --check "${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}.zip.sha256"
-
-      - name: Artifact upload for diag-utils
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.TS_FILENAME }}_archive-diag-utils-${{ matrix.builds.name }}
-          path: "${{ github.workspace }}${{ env.TS_DIST }}-diag-utils/*.zip*"
 
   macOS-universal-assemble:
     name: macOS universal assemble
@@ -779,7 +677,6 @@ jobs:
     needs: builds
 
     env:
-      TARI_NETWORK_DIR: ${{ needs.builds.outputs.TARI_NETWORK_DIR }}
       TARI_VERSION: ${{ needs.builds.outputs.TARI_VERSION }}
 
     permissions:
@@ -837,10 +734,6 @@ jobs:
           ls -alhtR
           echo "Clean up"
           # Bash check if file with wildcards, does not work as expected
-          # if [ -f ${{ env.TS_FILENAME }}*diag-utils* ] ; then
-          if ls ${{ env.TS_FILENAME }}*diag-utils* > /dev/null 2>&1 ; then
-            rm -fv ${{ env.TS_FILENAME }}*diag-utils*
-          fi
           echo "Folder setup"
           if ls ${{ env.TS_FILENAME }}*linux* > /dev/null 2>&1 ; then
             mkdir -p "linux/${{ env.TARI_NETWORK_DIR }}/"
