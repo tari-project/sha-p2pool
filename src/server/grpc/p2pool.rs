@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use log::{debug, error, info};
-use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
-use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
-use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2Pool;
 use minotari_app_grpc::tari_rpc::{
     GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest,
     HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest, SubmitBlockResponse,
 };
+use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
+use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
+use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2Pool;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -16,13 +16,15 @@ use crate::server::grpc::error::Error;
 use crate::server::grpc::util;
 use crate::server::p2p;
 use crate::sharechain::block::Block;
-use crate::sharechain::ShareChain;
 use crate::sharechain::SHARE_COUNT;
+use crate::sharechain::ShareChain;
+
+const LOG_TARGET: &str = "p2pool_grpc";
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -33,8 +35,8 @@ where
 }
 
 impl<S> ShaP2PoolGrpc<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     pub async fn new(
         base_node_address: String,
@@ -53,9 +55,9 @@ where
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
         if let Err(error) = self.share_chain.submit_block(block).await {
-            error!("Failed to add new block: {error:?}");
+            error!(target: LOG_TARGET, "Failed to add new block: {error:?}");
         }
-        debug!("Broadcast new block with height: {:?}", block.height());
+        debug!(target: LOG_TARGET, "Broadcast new block with height: {:?}", block.height());
         self.p2p_client
             .broadcast_block(block)
             .await
@@ -65,8 +67,8 @@ where
 
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
-where
-    S: ShareChain + Send + Sync + 'static,
+    where
+        S: ShareChain + Send + Sync + 'static,
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.

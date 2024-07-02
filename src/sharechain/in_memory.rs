@@ -87,20 +87,25 @@ impl InMemoryShareChain {
         &self,
         blocks: &mut RwLockWriteGuard<'_, Vec<Block>>,
         block: &Block,
-        clear_before_add: bool,
+        in_sync: bool,
     ) -> ShareChainResult<()> {
         let block = block.clone();
 
         let last_block = blocks.last();
-
-        // validate
-        if !clear_before_add && last_block.is_some() {
+        if in_sync && last_block.is_some() {
+            // validate
             if !self.validate_block(last_block.unwrap(), &block).await? {
                 return Err(Error::InvalidBlock(block));
             }
-        } else if !clear_before_add && last_block.is_none() {
+        } else if !in_sync && last_block.is_none() {
             return Err(Error::Empty);
+        } else if !in_sync && last_block.is_some() {
+            // validate
+            if !self.validate_block(last_block.unwrap(), &block).await? {
+                return Err(Error::InvalidBlock(block));
+            }
         }
+
 
         if blocks.len() >= self.max_blocks_count {
             let diff = blocks.len() - self.max_blocks_count;
@@ -126,7 +131,7 @@ impl ShareChain for InMemoryShareChain {
             .await
     }
 
-    async fn submit_blocks(&self, blocks: Vec<Block>, mut sync: bool) -> ShareChainResult<()> {
+    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<()> {
         let mut blocks_write_lock = self.blocks.write().await;
 
         let last_block = blocks_write_lock.last();
@@ -138,7 +143,6 @@ impl ShareChain for InMemoryShareChain {
         for block in blocks {
             self.submit_block_with_lock(&mut blocks_write_lock, &block, sync)
                 .await?;
-            sync = false;
         }
 
         Ok(())
