@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use log::{debug, error, warn};
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::time::sleep;
 
 use crate::server::p2p::messages::{ValidateBlockRequest, ValidateBlockResult};

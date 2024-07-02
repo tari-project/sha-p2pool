@@ -493,6 +493,7 @@ impl<S> Service<S>
         debug!(target: LOG_TARGET, "Share chain sync response: {response:?}");
         if let Err(error) = self.share_chain.submit_blocks(response.blocks, true).await {
             error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
+            self.sync_share_chain().await;
         }
     }
 
