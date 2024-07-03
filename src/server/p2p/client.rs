@@ -1,16 +1,31 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use log::{debug, error, warn};
 use thiserror::Error;
-use tokio::select;
-use tokio::sync::{broadcast, mpsc, Mutex};
-use tokio::sync::broadcast::error::{RecvError, SendError};
-use tokio::time::sleep;
+use tokio::{
+    select,
+    sync::{
+        broadcast,
+        broadcast::error::{RecvError, SendError},
+        mpsc,
+        Mutex,
+    },
+    time::sleep,
+};
 
-use crate::server::p2p::messages::{ValidateBlockRequest, ValidateBlockResult};
-use crate::server::p2p::peer_store::PeerStore;
-use crate::sharechain::block::Block;
+use crate::{
+    server::p2p::{
+        messages::{ValidateBlockRequest, ValidateBlockResult},
+        peer_store::PeerStore,
+    },
+    sharechain::block::Block,
+};
 
 const LOG_TARGET: &str = "p2p_service_client";
 
@@ -77,11 +92,7 @@ pub struct ServiceClient {
 }
 
 impl ServiceClient {
-    pub fn new(
-        channels: ServiceClientChannels,
-        peer_store: Arc<PeerStore>,
-        config: ClientConfig,
-    ) -> Self {
+    pub fn new(channels: ServiceClientChannels, peer_store: Arc<PeerStore>, config: ClientConfig) -> Self {
         Self {
             channels,
             peer_store,
@@ -94,18 +105,12 @@ impl ServiceClient {
         self.channels
             .broadcast_block_sender
             .send(block.clone())
-            .map_err(|error| {
-                ClientError::ChannelSend(Box::new(ChannelSendError::BroadcastBlock(error)))
-            })?;
+            .map_err(|error| ClientError::ChannelSend(Box::new(ChannelSendError::BroadcastBlock(error))))?;
 
         Ok(())
     }
 
-    async fn validate_block_with_retries(
-        &self,
-        block: &Block,
-        mut retries: u64,
-    ) -> Result<bool, ClientError> {
+    async fn validate_block_with_retries(&self, block: &Block, mut retries: u64) -> Result<bool, ClientError> {
         if retries >= self.config.validate_block_max_retries {
             warn!(target: LOG_TARGET, "❗Too many validation retries!");
             return Ok(false);
@@ -117,9 +122,7 @@ impl ServiceClient {
         self.channels
             .validate_block_sender
             .send(ValidateBlockRequest::new(block.clone()))
-            .map_err(|error| {
-                ClientError::ChannelSend(Box::new(ChannelSendError::ValidateBlockRequest(error)))
-            })?;
+            .map_err(|error| ClientError::ChannelSend(Box::new(ChannelSendError::ValidateBlockRequest(error))))?;
 
         // calculate how many validations we need (more than 2/3 of peers should validate)
         let peer_count = self.peer_store.peer_count().await as f64 + 1.0;

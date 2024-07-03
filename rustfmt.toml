@@ -1,0 +1,32 @@
+edition = "2021"
+
+# Stable features
+hard_tabs = false
+match_block_trailing_comma = true
+max_width = 120
+newline_style = "Native"
+reorder_imports = true
+reorder_modules = true
+use_field_init_shorthand = true
+use_small_heuristics = "default"
+use_try_shorthand = true
+wrap_comments = true
+
+ignore = []
+
+# Nightly features
+binop_separator = "Back"
+comment_width = 120
+format_code_in_doc_comments = true
+format_strings = true
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+imports_layout = "HorizontalVertical"
+normalize_comments = true
+overflow_delimited_expr = true
+reorder_impl_items = true
+space_after_colon = true
+space_before_colon = false
+struct_lit_single_line = true
+unstable_features = true
+where_single_line = true

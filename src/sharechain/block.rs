@@ -1,10 +1,14 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use blake2::Blake2b;
 use digest::consts::U32;
 use serde::{Deserialize, Serialize};
-use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::BlockHash;
-use tari_core::blocks::{BlockHeader, BlocksHashDomain};
-use tari_core::consensus::DomainSeparatedConsensusHasher;
+use tari_common_types::{tari_address::TariAddress, types::BlockHash};
+use tari_core::{
+    blocks::{BlockHeader, BlocksHashDomain},
+    consensus::DomainSeparatedConsensusHasher,
+};
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::impl_conversions;
@@ -26,11 +30,11 @@ impl Block {
     pub fn builder() -> BlockBuilder {
         BlockBuilder::new()
     }
+
     pub fn generate_hash(&self) -> BlockHash {
-        let mut hash =
-            DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
-                .chain(&self.prev_hash)
-                .chain(&self.height);
+        let mut hash = DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
+            .chain(&self.prev_hash)
+            .chain(&self.height);
 
         if let Some(miner_wallet_address) = &self.miner_wallet_address {
             hash = hash.chain(&miner_wallet_address.to_hex());
@@ -42,27 +46,35 @@ impl Block {
 
         hash.finalize().into()
     }
+
     pub fn timestamp(&self) -> EpochTime {
         self.timestamp
     }
+
     pub fn prev_hash(&self) -> BlockHash {
         self.prev_hash
     }
+
     pub fn height(&self) -> u64 {
         self.height
     }
+
     pub fn original_block_header(&self) -> &Option<BlockHeader> {
         &self.original_block_header
     }
+
     pub fn hash(&self) -> BlockHash {
         self.hash
     }
+
     pub fn set_sent_to_main_chain(&mut self, sent_to_main_chain: bool) {
         self.sent_to_main_chain = sent_to_main_chain;
     }
+
     pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
         &self.miner_wallet_address
     }
+
     pub fn sent_to_main_chain(&self) -> bool {
         self.sent_to_main_chain
     }

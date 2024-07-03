@@ -1,17 +1,25 @@
-use std::net::{AddrParseError, SocketAddr};
-use std::str::FromStr;
-use std::sync::Arc;
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    net::{AddrParseError, SocketAddr},
+    str::FromStr,
+    sync::Arc,
+};
 
 use log::{error, info};
-use minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer;
-use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2PoolServer;
+use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use thiserror::Error;
 
-use crate::server::{config, grpc, p2p};
-use crate::server::grpc::base_node::TariBaseNodeGrpc;
-use crate::server::grpc::error::TonicError;
-use crate::server::grpc::p2pool::ShaP2PoolGrpc;
-use crate::sharechain::ShareChain;
+use crate::{
+    server::{
+        config,
+        grpc,
+        grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
+        p2p,
+    },
+    sharechain::ShareChain,
+};
 
 const LOG_TARGET: &str = "server";
 
@@ -27,8 +35,7 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -38,8 +45,7 @@ pub struct Server<S>
 
 // TODO: add graceful shutdown
 impl<S> Server<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
@@ -61,8 +67,8 @@ impl<S> Server<S>
                 p2p_service.client(),
                 share_chain.clone(),
             )
-                .await
-                .map_err(Error::Grpc)?;
+            .await
+            .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
@@ -84,10 +90,7 @@ impl<S> Server<S>
         tonic::transport::Server::builder()
             .add_service(base_node_service)
             .add_service(p2pool_service)
-            .serve(
-                SocketAddr::from_str(format!("0.0.0.0:{}", grpc_port).as_str())
-                    .map_err(Error::AddrParse)?,
-            )
+            .serve(SocketAddr::from_str(format!("0.0.0.0:{}", grpc_port).as_str()).map_err(Error::AddrParse)?)
             .await
             .map_err(|err| {
                 error!(target: LOG_TARGET, "GRPC encountered an error: {:?}", err);
@@ -108,12 +111,11 @@ impl<S> Server<S>
             let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();
             let grpc_port = self.config.grpc_port;
             tokio::spawn(async move {
-                match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await
-                {
-                    Ok(_) => {}
+                match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
+                    Ok(_) => {},
                     Err(error) => {
                         error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
-                    }
+                    },
                 }
             });
         }

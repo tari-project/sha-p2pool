@@ -1,12 +1,18 @@
-use libp2p::gossipsub::PublishError;
-use libp2p::identity::DecodingError;
-use libp2p::kad::NoKnownPeers;
-use libp2p::swarm::DialError;
-use libp2p::{multiaddr, noise, TransportError};
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use libp2p::{
+    gossipsub::PublishError,
+    identity::DecodingError,
+    kad::NoKnownPeers,
+    multiaddr,
+    noise,
+    swarm::DialError,
+    TransportError,
+};
 use thiserror::Error;
 
-use crate::server::p2p;
-use crate::sharechain;
+use crate::{server::p2p, sharechain};
 
 #[derive(Error, Debug)]
 pub enum Error {

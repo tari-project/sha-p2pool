@@ -1,8 +1,12 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::path::PathBuf;
 
-use clap::builder::Styles;
-use clap::builder::styling::AnsiColor;
-use clap::Parser;
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser,
+};
 use env_logger::Builder;
 use log::LevelFilter;
 

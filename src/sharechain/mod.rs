@@ -1,8 +1,10 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 
-use crate::sharechain::block::Block;
-use crate::sharechain::error::Error;
+use crate::sharechain::{block::Block, error::Error};
 
 pub const MAX_BLOCKS_COUNT: usize = 80;
 

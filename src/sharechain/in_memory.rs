@@ -1,17 +1,24 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
-use tari_utilities::epoch_time::EpochTime;
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{Block, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult};
-use crate::sharechain::error::{BlockConvertError, Error};
+use crate::sharechain::{
+    error::{BlockConvertError, Error},
+    Block,
+    ShareChain,
+    ShareChainResult,
+    MAX_BLOCKS_COUNT,
+    SHARE_COUNT,
+};
 
 const LOG_TARGET: &str = "in_memory_share_chain";
 
@@ -108,7 +115,6 @@ impl InMemoryShareChain {
             }
         }
 
-
         if blocks.len() >= self.max_blocks_count {
             let diff = blocks.len() - self.max_blocks_count;
             blocks.drain(0..diff);
@@ -129,8 +135,7 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut blocks_write_lock = self.blocks.write().await;
-        self.submit_block_with_lock(&mut blocks_write_lock, block, false)
-            .await
+        self.submit_block_with_lock(&mut blocks_write_lock, block, false).await
     }
 
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<()> {
@@ -138,7 +143,8 @@ impl ShareChain for InMemoryShareChain {
 
         let last_block = blocks_write_lock.last();
         if (sync && last_block.is_none()) ||
-            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height()) {
+            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
+        {
             blocks_write_lock.clear();
         }
 
@@ -201,8 +207,7 @@ impl ShareChain for InMemoryShareChain {
             .with_height(last_block.height() + 1)
             .with_original_block_header(origin_block_header)
             .with_miner_wallet_address(
-                TariAddress::from_hex(request.wallet_payment_address.as_str())
-                    .map_err(Error::TariAddress)?,
+                TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
             )
             .build())
     }

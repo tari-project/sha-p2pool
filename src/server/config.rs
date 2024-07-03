@@ -1,8 +1,9 @@
-use std::path::PathBuf;
-use std::time::Duration;
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
 
-use crate::server::p2p;
-use crate::server::p2p::peer_store::PeerStoreConfig;
+use std::{path::PathBuf, time::Duration};
+
+use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
 
 /// Config is the server configuration struct.
 #[derive(Clone)]

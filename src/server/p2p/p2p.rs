@@ -1,40 +1,66 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use libp2p::{
-    gossipsub, kad, mdns, Multiaddr, noise, request_response, StreamProtocol, Swarm, tcp, yamux,
+    futures::StreamExt,
+    gossipsub,
+    gossipsub::{IdentTopic, Message, PublishError},
+    identity::Keypair,
+    kad,
+    kad::{store::MemoryStore, Event, Mode},
+    mdns,
+    mdns::tokio::Tokio,
+    multiaddr::Protocol,
+    noise,
+    request_response,
+    request_response::{cbor, ResponseChannel},
+    swarm::{NetworkBehaviour, SwarmEvent},
+    tcp,
+    yamux,
+    Multiaddr,
+    StreamProtocol,
+    Swarm,
 };
-use libp2p::futures::StreamExt;
-use libp2p::gossipsub::{IdentTopic, Message, PublishError};
-use libp2p::identity::Keypair;
-use libp2p::kad::{Event, Mode};
-use libp2p::kad::store::MemoryStore;
-use libp2p::mdns::tokio::Tokio;
-use libp2p::multiaddr::Protocol;
-use libp2p::request_response::{cbor, ResponseChannel};
-use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use log::{debug, error, info, warn};
 use tari_common::configuration::Network;
 use tari_utilities::hex::Hex;
-use tokio::{io, select};
-use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc};
-use tokio::sync::broadcast::error::RecvError;
+use tokio::{
+    fs::File,
+    io,
+    io::{AsyncReadExt, AsyncWriteExt},
+    select,
+    sync::{broadcast, broadcast::error::RecvError, mpsc},
+};
 
-use crate::server::config;
-use crate::server::p2p::{
-    client, Error, LibP2PError, messages, ServiceClient, ServiceClientChannels,
+use crate::{
+    server::{
+        config,
+        p2p::{
+            client,
+            messages,
+            messages::{
+                PeerInfo,
+                ShareChainSyncRequest,
+                ShareChainSyncResponse,
+                ValidateBlockRequest,
+                ValidateBlockResult,
+            },
+            peer_store::PeerStore,
+            Error,
+            LibP2PError,
+            ServiceClient,
+            ServiceClientChannels,
+        },
+    },
+    sharechain::{block::Block, ShareChain},
 };
-use crate::server::p2p::messages::{
-    PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse, ValidateBlockRequest,
-    ValidateBlockResult,
-};
-use crate::server::p2p::peer_store::PeerStore;
-use crate::sharechain::block::Block;
-use crate::sharechain::ShareChain;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_VALIDATION_REQUESTS_TOPIC: &str = "block_validation_requests";
@@ -76,8 +102,7 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -97,8 +122,7 @@ pub struct Service<S>
 }
 
 impl<S> Service<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
@@ -167,64 +191,51 @@ impl<S> Service<S>
 
     /// Creates a new swarm from the provided config
     async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let mut swarm =
-            libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
-                .with_tokio()
-                .with_tcp(
-                    tcp::Config::default(),
-                    noise::Config::new,
-                    yamux::Config::default,
-                )
-                .map_err(|e| Error::LibP2P(LibP2PError::Noise(e)))?
-                .with_behaviour(move |key_pair| {
-                    // gossipsub
-                    let message_id_fn = |message: &gossipsub::Message| {
-                        let mut s = DefaultHasher::new();
-                        if let Some(soure_peer) = message.source {
-                            soure_peer.to_bytes().hash(&mut s);
-                        }
-                        message.data.hash(&mut s);
-                        gossipsub::MessageId::from(s.finish().to_string())
-                    };
-                    let gossipsub_config = gossipsub::ConfigBuilder::default()
-                        .heartbeat_interval(Duration::from_secs(10))
-                        .validation_mode(gossipsub::ValidationMode::Strict)
-                        .message_id_fn(message_id_fn)
-                        .build()
-                        .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
-                    let gossipsub = gossipsub::Behaviour::new(
-                        gossipsub::MessageAuthenticity::Signed(key_pair.clone()),
-                        gossipsub_config,
-                    )?;
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
+            .with_tokio()
+            .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
+            .map_err(|e| Error::LibP2P(LibP2PError::Noise(e)))?
+            .with_behaviour(move |key_pair| {
+                // gossipsub
+                let message_id_fn = |message: &gossipsub::Message| {
+                    let mut s = DefaultHasher::new();
+                    if let Some(soure_peer) = message.source {
+                        soure_peer.to_bytes().hash(&mut s);
+                    }
+                    message.data.hash(&mut s);
+                    gossipsub::MessageId::from(s.finish().to_string())
+                };
+                let gossipsub_config = gossipsub::ConfigBuilder::default()
+                    .heartbeat_interval(Duration::from_secs(10))
+                    .validation_mode(gossipsub::ValidationMode::Strict)
+                    .message_id_fn(message_id_fn)
+                    .build()
+                    .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
+                let gossipsub = gossipsub::Behaviour::new(
+                    gossipsub::MessageAuthenticity::Signed(key_pair.clone()),
+                    gossipsub_config,
+                )?;
 
-                    Ok(ServerNetworkBehaviour {
-                        gossipsub,
-                        mdns: mdns::Behaviour::new(
-                            mdns::Config::default(),
-                            key_pair.public().to_peer_id(),
-                        )
-                            .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
-                        share_chain_sync: cbor::Behaviour::<
-                            ShareChainSyncRequest,
-                            ShareChainSyncResponse,
-                        >::new(
-                            [(
-                                StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
-                                request_response::ProtocolSupport::Full,
-                            )],
-                            request_response::Config::default(),
-                        ),
-                        kademlia: kad::Behaviour::new(
-                            key_pair.public().to_peer_id(),
-                            MemoryStore::new(key_pair.public().to_peer_id()),
-                        ),
-                    })
+                Ok(ServerNetworkBehaviour {
+                    gossipsub,
+                    mdns: mdns::Behaviour::new(mdns::Config::default(), key_pair.public().to_peer_id())
+                        .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
+                    share_chain_sync: cbor::Behaviour::<ShareChainSyncRequest, ShareChainSyncResponse>::new(
+                        [(
+                            StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
+                            request_response::ProtocolSupport::Full,
+                        )],
+                        request_response::Config::default(),
+                    ),
+                    kademlia: kad::Behaviour::new(
+                        key_pair.public().to_peer_id(),
+                        MemoryStore::new(key_pair.public().to_peer_id()),
+                    ),
                 })
-                .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
-                .with_swarm_config(|c| {
-                    c.with_idle_connection_timeout(config.idle_connection_timeout)
-                })
-                .build();
+            })
+            .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
+            .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
+            .build();
 
         swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
@@ -251,10 +262,7 @@ impl<S> Service<S>
 
     /// Handles block validation requests coming from Service clients.
     /// All the requests from clients are sent to [`BLOCK_VALIDATION_REQUESTS_TOPIC`].
-    async fn handle_client_validate_block_request(
-        &mut self,
-        result: Result<ValidateBlockRequest, RecvError>,
-    ) {
+    async fn handle_client_validate_block_request(&mut self, result: Result<ValidateBlockRequest, RecvError>) {
         match result {
             Ok(request) => {
                 let request_raw_result: Result<Vec<u8>, Error> = request.try_into();
@@ -266,15 +274,15 @@ impl<S> Service<S>
                         ) {
                             error!(target: LOG_TARGET, "Failed to send block validation request: {error:?}");
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block validation request to bytes: {error:?}");
-                    }
+                    },
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, "Block validation request receive error: {error:?}");
-            }
+            },
         }
     }
 
@@ -283,18 +291,16 @@ impl<S> Service<S>
         let result_raw_result: Result<Vec<u8>, Error> = result.try_into();
         match result_raw_result {
             Ok(result_raw) => {
-                if let Err(error) = self
-                    .swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(IdentTopic::new(Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC)), result_raw)
-                {
+                if let Err(error) = self.swarm.behaviour_mut().gossipsub.publish(
+                    IdentTopic::new(Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC)),
+                    result_raw,
+                ) {
                     error!(target: LOG_TARGET, "Failed to publish block validation result: {error:?}");
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, "Failed to convert block validation result to bytes: {error:?}");
-            }
+            },
         }
     }
 
@@ -330,17 +336,17 @@ impl<S> Service<S>
                             .publish(IdentTopic::new(Self::topic_name(NEW_BLOCK_TOPIC)), block_raw)
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
-                            Ok(_) => {}
+                            Ok(_) => {},
                             Err(error) => {
                                 error!(target: LOG_TARGET, "Failed to broadcast new block: {error:?}")
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block to bytes: {error:?}")
-                    }
+                    },
                 }
-            }
+            },
             Err(error) => error!(target: LOG_TARGET, "Failed to receive new block: {error:?}"),
         }
     }
@@ -385,48 +391,46 @@ impl<S> Service<S>
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
-                    // if let Some(tip) = self.peer_store.tip_of_block_height().await {
-                    //     if let Ok(curr_height) = self.share_chain.tip_height().await {
-                    //         if curr_height < tip.height {
-                    self.sync_share_chain().await;
-                    // }
-                    // }
-                    // }
-                }
+                    if let Some(tip) = self.peer_store.tip_of_block_height().await {
+                        if let Ok(curr_height) = self.share_chain.tip_height().await {
+                            if curr_height < tip.height {
+                                self.sync_share_chain().await;
+                            }
+                        }
+                    }
+                },
                 Err(error) => {
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
-                }
+                },
             },
             topic if topic == Self::topic_name(BLOCK_VALIDATION_REQUESTS_TOPIC) => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
                         debug!(target: LOG_TARGET, "Block validation request: {payload:?}");
 
-                        let validate_result =
-                            self.share_chain.validate_block(&payload.block()).await;
+                        let validate_result = self.share_chain.validate_block(&payload.block()).await;
                         let mut valid = false;
                         if let Ok(is_valid) = validate_result {
                             valid = is_valid;
                         }
 
-                        // TODO: Generate partial schnorr signature to prove that current peer validated the block (using peer's private key and broadcast public key vie PeerInfo)
+                        // TODO: Generate partial schnorr signature to prove that current peer validated the block
+                        // (using peer's private key and broadcast public key vie PeerInfo)
                         // TODO: to be able to verify at other peers.
-                        // TODO: Validate whether new block includes all the shares (generate shares until height of new_block.height - 1)
-                        // TODO: by generating a new block and check kernels/outputs whether they are the same or not.
-                        // TODO: Validating new blocks version 2 would be to send a proof that was generated from the shares.
+                        // TODO: Validate whether new block includes all the shares (generate shares until height of
+                        // new_block.height - 1) TODO: by generating a new block and check
+                        // kernels/outputs whether they are the same or not. TODO: Validating
+                        // new blocks version 2 would be to send a proof that was generated from the shares.
 
-                        let validate_result = ValidateBlockResult::new(
-                            *self.swarm.local_peer_id(),
-                            payload.block(),
-                            valid,
-                        );
+                        let validate_result =
+                            ValidateBlockResult::new(*self.swarm.local_peer_id(), payload.block(), valid);
                         self.send_block_validation_result(validate_result).await;
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Can't deserialize block validation request payload: {:?}", error);
-                    }
+                    },
                 }
-            }
+            },
             topic if topic == Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC) => {
                 match messages::ValidateBlockResult::try_from(message) {
                     Ok(payload) => {
@@ -440,12 +444,12 @@ impl<S> Service<S>
                         senders_to_delete.iter().for_each(|i| {
                             self.client_validate_block_res_txs.remove(*i);
                         });
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Can't deserialize block validation request payload: {:?}", error);
-                    }
+                    },
                 }
-            }
+            },
             // TODO: send a signature that proves that the actual block was coming from this peer
             topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => match Block::try_from(message) {
                 Ok(payload) => {
@@ -453,14 +457,14 @@ impl<S> Service<S>
                     if let Err(error) = self.share_chain.submit_block(&payload).await {
                         error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
                     }
-                }
+                },
                 Err(error) => {
                     error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
-                }
+                },
             },
             _ => {
                 warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
-            }
+            },
         }
     }
 
@@ -482,7 +486,7 @@ impl<S> Service<S>
                 {
                     error!(target: LOG_TARGET, "Failed to send block sync response");
                 }
-            }
+            },
             Err(error) => error!(target: LOG_TARGET, "Failed to get blocks from height: {error:?}"),
         }
     }
@@ -511,15 +515,15 @@ impl<S> Service<S>
                             .behaviour_mut()
                             .share_chain_sync
                             .send_request(&result.peer_id, ShareChainSyncRequest::new(tip));
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
-                    }
+                    },
                 }
-            }
+            },
             None => {
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
-            }
+            },
         }
     }
 
@@ -528,26 +532,20 @@ impl<S> Service<S>
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
-            }
+            },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
                         for (peer, addr) in peers {
                             self.swarm.add_peer_address(peer, addr);
-                            self.swarm
-                                .behaviour_mut()
-                                .gossipsub
-                                .add_explicit_peer(&peer);
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         }
-                    }
+                    },
                     mdns::Event::Expired(peers) => {
                         for (peer, _addr) in peers {
-                            self.swarm
-                                .behaviour_mut()
-                                .gossipsub
-                                .remove_explicit_peer(&peer);
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
                         }
-                    }
+                    },
                 },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message {
@@ -556,37 +554,34 @@ impl<S> Service<S>
                         propagation_source: _propagation_source,
                     } => {
                         self.handle_new_gossipsub_message(message).await;
-                    }
-                    gossipsub::Event::Subscribed { .. } => {}
-                    gossipsub::Event::Unsubscribed { .. } => {}
-                    gossipsub::Event::GossipsubNotSupported { .. } => {}
+                    },
+                    gossipsub::Event::Subscribed { .. } => {},
+                    gossipsub::Event::Unsubscribed { .. } => {},
+                    gossipsub::Event::GossipsubNotSupported { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::ShareChainSync(event) => match event {
-                    request_response::Event::Message {
-                        peer: _peer,
-                        message,
-                    } => match message {
+                    request_response::Event::Message { peer: _peer, message } => match message {
                         request_response::Message::Request {
                             request_id: _request_id,
                             request,
                             channel,
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
-                        }
+                        },
                         request_response::Message::Response {
                             request_id: _request_id,
                             response,
                         } => {
                             self.handle_share_chain_sync_response(response).await;
-                        }
+                        },
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                    }
+                    },
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    }
-                    request_response::Event::ResponseSent { .. } => {}
+                    },
+                    request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated {
@@ -598,31 +593,24 @@ impl<S> Service<S>
                         addresses.iter().for_each(|addr| {
                             self.swarm.add_peer_address(peer, addr.clone());
                         });
-                        self.swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .add_explicit_peer(&peer);
+                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         if let Some(old_peer) = old_peer {
-                            self.swarm
-                                .behaviour_mut()
-                                .gossipsub
-                                .remove_explicit_peer(&old_peer);
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
                             if let Err(error) = self.client_peer_changes_tx.send(()) {
                                 error!(target: LOG_TARGET, "Failed to send peer changes trigger: {error:?}");
                             }
                         }
-                    }
+                    },
                     _ => debug!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
                 },
             },
-            _ => {}
+            _ => {},
         };
     }
 
     /// Main loop of the service that drives the events and libp2p swarm forward.
     async fn main_loop(&mut self) -> Result<(), Error> {
-        let mut publish_peer_info_interval =
-            tokio::time::interval(self.config.peer_info_publish_interval);
+        let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
 
         loop {
             select! {
@@ -680,10 +668,7 @@ impl<S> Service<S>
             if peer_id.is_none() {
                 return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
             }
-            self.swarm
-                .behaviour_mut()
-                .kademlia
-                .add_address(&peer_id.unwrap(), addr);
+            self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
         }
 
         self.swarm

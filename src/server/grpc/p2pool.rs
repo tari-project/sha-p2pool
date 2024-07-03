@@ -1,30 +1,39 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::sync::Arc;
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{
-    GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest,
-    HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest, SubmitBlockResponse,
+    base_node_client::BaseNodeClient,
+    pow_algo::PowAlgos,
+    sha_p2_pool_server::ShaP2Pool,
+    GetNewBlockRequest,
+    GetNewBlockResponse,
+    GetNewBlockTemplateWithCoinbasesRequest,
+    HeightRequest,
+    NewBlockTemplateRequest,
+    PowAlgo,
+    SubmitBlockRequest,
+    SubmitBlockResponse,
 };
-use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
-use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
-use minotari_app_grpc::tari_rpc::sha_p2_pool_server::ShaP2Pool;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
-use crate::server::grpc::error::Error;
-use crate::server::grpc::util;
-use crate::server::p2p;
-use crate::sharechain::block::Block;
-use crate::sharechain::SHARE_COUNT;
-use crate::sharechain::ShareChain;
+use crate::{
+    server::{
+        grpc::{error::Error, util},
+        p2p,
+    },
+    sharechain::{block::Block, ShareChain, SHARE_COUNT},
+};
 
 const LOG_TARGET: &str = "p2pool_grpc";
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -35,8 +44,7 @@ pub struct ShaP2PoolGrpc<S>
 }
 
 impl<S> ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(
         base_node_address: String,
@@ -44,9 +52,7 @@ impl<S> ShaP2PoolGrpc<S>
         share_chain: Arc<S>,
     ) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(
-                util::connect_base_node(base_node_address).await?,
-            )),
+            client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
             p2p_client,
             share_chain,
         })
@@ -67,8 +73,7 @@ impl<S> ShaP2PoolGrpc<S>
 
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where S: ShareChain + Send + Sync + 'static
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
@@ -84,13 +89,7 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
             algo: Some(pow_algo.clone()),
             max_weight: 0,
         };
-        let template_response = self
-            .client
-            .lock()
-            .await
-            .get_new_block_template(req)
-            .await?
-            .into_inner();
+        let template_response = self.client.lock().await.get_new_block_template(req).await?.into_inner();
         let miner_data = template_response
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
@@ -159,8 +158,8 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
-        let request_block_difficulty = sha3x_difficulty(origin_block_header)
-            .map_err(|error| Status::internal(error.to_string()))?;
+        let request_block_difficulty =
+            sha3x_difficulty(origin_block_header).map_err(|error| Status::internal(error.to_string()))?;
         let mut network_difficulty_stream = self
             .client
             .lock()
@@ -174,8 +173,8 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
             .into_inner();
         let mut network_difficulty_matches = false;
         while let Ok(Some(diff_resp)) = network_difficulty_stream.message().await {
-            if origin_block_header.height == diff_resp.height + 1
-                && request_block_difficulty.as_u64() > diff_resp.difficulty
+            if origin_block_header.height == diff_resp.height + 1 &&
+                request_block_difficulty.as_u64() > diff_resp.difficulty
             {
                 network_difficulty_matches = true;
             }
@@ -198,14 +197,14 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            }
+            },
             Err(_) => {
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            }
+            },
         }
     }
 }
