@@ -23,7 +23,6 @@ env:
   TS_SIG_FN: "sha256-unsigned.txt"
   ## Must be a JSon string
   TS_FILES: '["sha_p2pool"]'
-  TS_FEATURES: "default"
   toolchain: nightly-2024-03-01
   matrix-json-file: ".github/workflows/build_binaries.json"
   CARGO_HTTP_MULTIPLEXING: false
@@ -116,11 +115,6 @@ jobs:
             "$GITHUB_WORKSPACE/Cargo.toml")
           echo "TARI_VERSION=${TARI_VERSION}" >> $GITHUB_ENV
           echo "TARI_VERSION=${TARI_VERSION}" >> $GITHUB_OUTPUT
-          if [[ "${{ matrix.builds.features }}" == "" ]]; then
-            echo "BUILD_FEATURES=${{ env.TS_FEATURES }}" >> $GITHUB_ENV
-          else
-            echo "BUILD_FEATURES=${{ matrix.builds.features }}" >> $GITHUB_ENV
-          fi
           TARGET_BINS=""
           if [[ "${{ matrix.builds.target_bins }}" == "" ]]; then
             ARRAY_BINS=( $(echo ${TS_FILES} | jq --raw-output '.[]' | awk '{ print $1 }') )
@@ -275,7 +269,6 @@ jobs:
         run: |
           ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
             --target ${{ matrix.builds.target }} \
-            --features "${{ env.BUILD_FEATURES }}" \
             ${{ env.TARGET_BINS }} \
             ${{ matrix.builds.flags }} --locked
 
