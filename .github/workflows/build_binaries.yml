@@ -309,7 +309,6 @@ jobs:
           ls -alhtR ${{ env.MTS_SOURCE }}
 
       - name: Pre/unsigned OSX Artifact upload for Archive
-        # Debug
         if: ${{ false }}
         # if: startsWith(runner.os,'macOS')
         continue-on-error: true
@@ -319,7 +318,8 @@ jobs:
           path: "${{ env.MTS_SOURCE }}/*"
 
       - name: Build the macOS pkg
-        if: startsWith(runner.os,'macOS')
+        if: ${{ false }}
+        # if: startsWith(runner.os,'macOS')
         continue-on-error: true
         env:
           MACOS_KEYCHAIN_PASS: ${{ secrets.MACOS_KEYCHAIN_PASS }}
@@ -415,7 +415,8 @@ jobs:
           ${SHARUN} --check "${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}.pkg.sha256"
 
       - name: Artifact upload for macOS pkg
-        if: startsWith(runner.os,'macOS')
+        if: ${{ false }}
+        # if: startsWith(runner.os,'macOS')
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -423,7 +424,8 @@ jobs:
           path: "${{ env.distDirPKG }}/${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}*.pkg*"
 
       - name: Build the Windows installer
-        if: startsWith(runner.os,'Windows')
+        if: ${{ false }}
+        # if: startsWith(runner.os,'Windows')
         continue-on-error: true
         shell: cmd
         run: |
@@ -438,7 +440,8 @@ jobs:
           ${{ env.SHARUN }} --check "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe.sha256"
 
       - name: Artifact upload for Windows installer
-        if: startsWith(runner.os,'Windows')
+        if: ${{ false }}
+        # if: startsWith(runner.os,'Windows')
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
