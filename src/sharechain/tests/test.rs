@@ -1,3 +1,6 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 #[cfg(test)]
 mod tests {
     use minotari_app_grpc::tari_rpc::{Block, BlockHeader, ProofOfWork, SubmitBlockRequest};
@@ -21,7 +24,7 @@ mod tests {
 
     fn new_sharechain_blocks(n: u64) -> Vec<ShareChainBlock> {
         let mut blocks = Vec::new();
-        for i in 1..n + 1 {
+        for i in 1..=n {
             let block = BlockBuilder::new()
                 .with_height(i)
                 .with_miner_wallet_address(new_random_address())
@@ -107,7 +110,8 @@ mod tests {
             assert_eq!(share.value, 1);
         }
         let chain = InMemoryShareChain::default();
-        let _ = chain.submit_blocks(blocks, false).await;
+        let op = chain.submit_blocks(blocks, false).await;
+        drop(op);
 
         // every miner has obtained 2% of 100 shares (= 2)
         let shares = chain.generate_shares(200).await;

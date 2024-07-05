@@ -13,8 +13,7 @@ use tokio::{
     sync::{
         broadcast,
         broadcast::error::{RecvError, SendError},
-        mpsc,
-        Mutex,
+        mpsc, Mutex,
     },
     time::sleep,
 };
@@ -110,6 +109,7 @@ impl ServiceClient {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     async fn validate_block_with_retries(&self, block: &Block, mut retries: u64) -> Result<bool, ClientError> {
         if retries >= self.config.validate_block_max_retries {
             warn!(target: LOG_TARGET, "❗Too many validation retries!");
