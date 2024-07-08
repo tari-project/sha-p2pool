@@ -16,14 +16,35 @@ pub mod in_memory;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 
+pub struct SubmitBlockResult {
+    pub need_sync: bool,
+}
+
+impl SubmitBlockResult {
+    pub fn new(need_sync: bool) -> Self {
+        Self { need_sync }
+    }
+}
+
+pub struct ValidateBlockResult {
+    pub valid: bool,
+    pub need_sync: bool,
+}
+
+impl ValidateBlockResult {
+    pub fn new(valid: bool, need_sync: bool) -> Self {
+        Self { valid, need_sync }
+    }
+}
+
 #[async_trait]
 pub trait ShareChain {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<()>;
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
 
     /// Add multiple blocks at once.
     /// While this operation runs, no other blocks can be added until it's done.
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<()>;
+    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult>;
 
     /// Returns the tip of height in chain.
     async fn tip_height(&self) -> ShareChainResult<u64>;
@@ -38,5 +59,5 @@ pub trait ShareChain {
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
 
     /// Validates a block.
-    async fn validate_block(&self, block: &Block) -> ShareChainResult<bool>;
+    async fn validate_block(&self, block: &Block) -> ShareChainResult<ValidateBlockResult>;
 }

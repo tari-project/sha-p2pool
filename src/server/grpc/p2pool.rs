@@ -6,14 +6,14 @@ use std::sync::Arc;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
-    pow_algo::PowAlgos,
-    sha_p2_pool_server::ShaP2Pool,
     GetNewBlockRequest,
     GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest,
     HeightRequest,
     NewBlockTemplateRequest,
+    pow_algo::PowAlgos,
     PowAlgo,
+    sha_p2_pool_server::ShaP2Pool,
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
@@ -26,14 +26,14 @@ use crate::{
         grpc::{error::Error, util},
         p2p,
     },
-    sharechain::{block::Block, ShareChain, SHARE_COUNT},
+    sharechain::{block::Block, SHARE_COUNT, ShareChain},
 };
 
 const LOG_TARGET: &str = "p2pool_grpc";
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
-where S: ShareChain + Send + Sync + 'static
+    where S: ShareChain + Send + Sync + 'static
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -44,7 +44,7 @@ where S: ShareChain + Send + Sync + 'static
 }
 
 impl<S> ShaP2PoolGrpc<S>
-where S: ShareChain + Send + Sync + 'static
+    where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(
         base_node_address: String,
@@ -73,7 +73,7 @@ where S: ShareChain + Send + Sync + 'static
 
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
-where S: ShareChain + Send + Sync + 'static
+    where S: ShareChain + Send + Sync + 'static
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
@@ -141,15 +141,16 @@ where S: ShareChain + Send + Sync + 'static
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
+        // TODO: check if its okay
         // validate block with other peers
-        let validation_result = self
-            .p2p_client
-            .validate_block(&block)
-            .await
-            .map_err(|error| Status::internal(error.to_string()))?;
-        if !validation_result {
-            return Err(Status::invalid_argument("invalid block"));
-        }
+        // let validation_result = self
+        //     .p2p_client
+        //     .validate_block(&block)
+        //     .await
+        //     .map_err(|error| Status::internal(error.to_string()))?;
+        // if !validation_result {
+        //     return Err(Status::invalid_argument("invalid block"));
+        // }
 
         let origin_block_header = block
             .original_block_header()
@@ -197,14 +198,14 @@ where S: ShareChain + Send + Sync + 'static
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            },
+            }
             Err(_) => {
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            },
+            }
         }
     }
 }

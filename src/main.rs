@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
+    builder::{Styles, styling::AnsiColor},
     Parser,
 };
 use env_logger::Builder;
@@ -77,6 +77,12 @@ struct Cli {
     /// By setting this it can be used as a stable node for routing only.
     #[arg(long, value_name = "mining-disabled", default_value_t = false)]
     mining_disabled: bool,
+
+    /// mDNS disabled
+    ///
+    /// If set, mDNS local peer discovery is disabled.
+    #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
+    mdns_disabled: bool,
 }
 
 #[tokio::main]
@@ -97,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder);
     config_builder.with_mining_enabled(!cli.mining_disabled);
+    config_builder.with_mdns_enabled(!cli.mdns_disabled);
 
     // server start
     let config = config_builder.build();

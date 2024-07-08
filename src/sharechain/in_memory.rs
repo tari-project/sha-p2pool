@@ -11,14 +11,7 @@ use tari_core::blocks::BlockHeader;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{
-    error::{BlockConvertError, Error},
-    Block,
-    ShareChain,
-    ShareChainResult,
-    MAX_BLOCKS_COUNT,
-    SHARE_COUNT,
-};
+use crate::sharechain::{Block, error::{BlockConvertError, Error}, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult};
 
 const LOG_TARGET: &str = "in_memory_share_chain";
 
@@ -68,92 +61,112 @@ impl InMemoryShareChain {
         result
     }
 
-    async fn validate_block(&self, last_block: &Block, block: &Block) -> ShareChainResult<bool> {
-        // check if we have this block as last
-        if last_block == block {
-            warn!(target: LOG_TARGET, "↩️ This block already added, skip");
-            return Ok(false);
+    async fn validate_block(&self, last_block: Option<&Block>, block: &Block, sync: bool) -> ShareChainResult<ValidateBlockResult> {
+        if sync && last_block.is_none() {
+            return Ok(ValidateBlockResult::new(true, false));
         }
 
-        // validate hash
-        if block.hash() != block.generate_hash() {
-            warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
-            return Ok(false);
+        if let Some(last_block) = last_block {
+            let block_height_diff = last_block.height() as i64 - block.height() as i64;
+            if block_height_diff < -1 {
+                warn!("Out-of-sync chain, do a sync now...");
+                return Ok(ValidateBlockResult::new(false, true));
+            }
+            
+            if block.height() <= last_block.height() {
+                warn!("Uncle blocks are not handled yet! Current block height: {:?}, Last block height: {:?}", block.height(), last_block.height());
+                return Ok(ValidateBlockResult::new(true, false));
+            }
+
+            // check if we have this block as last
+            if last_block == block {
+                warn!(target: LOG_TARGET, "↩️ This block already added, skip");
+                return Ok(ValidateBlockResult::new(false, false));
+            }
+
+            // validate hash
+            if block.hash() != block.generate_hash() {
+                warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
+                return Ok(ValidateBlockResult::new(false, false));
+            }
+
+            // validate height
+            if last_block.height() + 1 != block.height() {
+                warn!(target: LOG_TARGET, "❌ Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
+                return Ok(ValidateBlockResult::new(false, false));
+            }
+        } else {
+            return Ok(ValidateBlockResult::new(false, true));
         }
 
-        // validate height
-        if last_block.height() + 1 != block.height() {
-            warn!(target: LOG_TARGET, "❌ Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
-            return Ok(false);
-        }
-
-        Ok(true)
+        Ok(ValidateBlockResult::new(true, false))
     }
 
     async fn submit_block_with_lock(
         &self,
         blocks: &mut RwLockWriteGuard<'_, Vec<Block>>,
         block: &Block,
-        in_sync: bool,
-    ) -> ShareChainResult<()> {
+        sync: bool,
+    ) -> ShareChainResult<SubmitBlockResult> {
         let block = block.clone();
-
         let last_block = blocks.last();
-        if in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
-        } else if !in_sync && last_block.is_none() {
-            return Err(Error::Empty);
-        } else if !in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
+
+        // validate
+        let validate_result = self.validate_block(last_block, &block, sync).await?;
+        if !validate_result.valid {
+            error!(target: LOG_TARGET, "Invalid block!");
+            return if !validate_result.need_sync {
+                Err(Error::InvalidBlock(block))
+            } else {
+                Ok(SubmitBlockResult::new(true))
+            };
         }
+
+        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
 
         if blocks.len() >= self.max_blocks_count {
             let diff = blocks.len() - self.max_blocks_count;
             blocks.drain(0..diff);
         }
 
-        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
-
         blocks.push(block);
 
         let last_block = blocks.last().ok_or_else(|| Error::Empty)?;
         info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
 
-        Ok(())
+        Ok(SubmitBlockResult::new(validate_result.need_sync))
     }
 }
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
         let mut blocks_write_lock = self.blocks.write().await;
         self.submit_block_with_lock(&mut blocks_write_lock, block, false).await
     }
 
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<()> {
+    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
         let mut blocks_write_lock = self.blocks.write().await;
 
-        let last_block = blocks_write_lock.last();
-        if (sync && last_block.is_none()) ||
-            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
-        {
+        // let last_block = blocks_write_lock.last();
+        // if (sync && last_block.is_none()) ||
+        //     (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
+        // {
+        //     blocks_write_lock.clear();
+        // }
+        if sync {
             blocks_write_lock.clear();
         }
 
         for block in blocks {
-            self.submit_block_with_lock(&mut blocks_write_lock, &block, sync)
+            let result = self.submit_block_with_lock(&mut blocks_write_lock, &block, sync)
                 .await?;
+            if result.need_sync {
+                return Ok(SubmitBlockResult::new(true));
+            }
         }
 
-        Ok(())
+        Ok(SubmitBlockResult::new(false))
     }
 
     async fn tip_height(&self) -> ShareChainResult<u64> {
@@ -221,9 +234,9 @@ impl ShareChain for InMemoryShareChain {
             .collect())
     }
 
-    async fn validate_block(&self, block: &Block) -> ShareChainResult<bool> {
+    async fn validate_block(&self, block: &Block) -> ShareChainResult<ValidateBlockResult> {
         let blocks_read_lock = self.blocks.read().await;
         let last_block = blocks_read_lock.last().ok_or_else(|| Error::Empty)?;
-        self.validate_block(last_block, block).await
+        self.validate_block(Some(last_block), block, false).await
     }
 }
