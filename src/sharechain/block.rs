@@ -19,8 +19,8 @@ pub struct Block {
     timestamp: EpochTime,
     prev_hash: BlockHash,
     height: u64,
-    original_block_header: Option<BlockHeader>,
-    miner_wallet_address: Option<TariAddress>,
+    original_block_header: BlockHeader,
+    miner_wallet_address: TariAddress,
     sent_to_main_chain: bool,
 }
 impl_conversions!(Block);
@@ -32,19 +32,12 @@ impl Block {
     }
 
     pub fn generate_hash(&self) -> BlockHash {
-        let mut hash = DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
+        DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
             .chain(&self.prev_hash)
-            .chain(&self.height);
-
-        if let Some(miner_wallet_address) = &self.miner_wallet_address {
-            hash = hash.chain(&miner_wallet_address.to_hex());
-        }
-
-        if let Some(original_block_header) = &self.original_block_header {
-            hash = hash.chain(original_block_header);
-        }
-
-        hash.finalize().into()
+            .chain(&self.height)
+            .chain(&self.miner_wallet_address.to_hex())
+            .chain(&self.original_block_header)
+            .finalize().into()
     }
 
     pub fn timestamp(&self) -> EpochTime {
@@ -59,7 +52,7 @@ impl Block {
         self.height
     }
 
-    pub fn original_block_header(&self) -> &Option<BlockHeader> {
+    pub fn original_block_header(&self) -> &BlockHeader {
         &self.original_block_header
     }
 
@@ -71,7 +64,7 @@ impl Block {
         self.sent_to_main_chain = sent_to_main_chain;
     }
 
-    pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
+    pub fn miner_wallet_address(&self) -> &TariAddress {
         &self.miner_wallet_address
     }
 
@@ -92,8 +85,8 @@ impl BlockBuilder {
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),
                 height: 0,
-                original_block_header: None,
-                miner_wallet_address: None,
+                original_block_header: BlockHeader::new(0),
+                miner_wallet_address: Default::default(),
                 sent_to_main_chain: false,
             },
         }
@@ -115,12 +108,12 @@ impl BlockBuilder {
     }
 
     pub fn with_original_block_header(&mut self, original_block_header: BlockHeader) -> &mut Self {
-        self.block.original_block_header = Some(original_block_header);
+        self.block.original_block_header = original_block_header;
         self
     }
 
     pub fn with_miner_wallet_address(&mut self, miner_wallet_address: TariAddress) -> &mut Self {
-        self.block.miner_wallet_address = Some(miner_wallet_address);
+        self.block.miner_wallet_address = miner_wallet_address;
         self
     }
 

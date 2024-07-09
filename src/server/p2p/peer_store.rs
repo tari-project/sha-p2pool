@@ -71,7 +71,7 @@ impl PeerStore {
     pub fn new(config: &PeerStoreConfig) -> Self {
         Self {
             inner: CacheBuilder::new(100_000)
-                .time_to_live(config.peer_record_ttl * 2)
+                .time_to_live(config.peer_record_ttl)
                 .build(),
             ttl: config.peer_record_ttl,
             tip_of_block_height: RwLock::new(None),

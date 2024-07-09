@@ -46,7 +46,7 @@ pub trait ShareChain {
     /// While this operation runs, no other blocks can be added until it's done.
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult>;
 
-    /// Returns the tip of height in chain.
+    /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.

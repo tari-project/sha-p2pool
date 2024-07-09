@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{collections::HashMap, sync::Arc};
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
+use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
@@ -17,16 +19,28 @@ const LOG_TARGET: &str = "in_memory_share_chain";
 
 pub struct InMemoryShareChain {
     max_blocks_count: usize,
-    blocks: Arc<RwLock<Vec<Block>>>,
+    block_levels: Arc<RwLock<Vec<BlockLevel>>>,
+}
+
+pub struct BlockLevel {
+    blocks: Vec<Block>,
+}
+
+impl BlockLevel {
+    pub fn new(blocks: Vec<Block>) -> Self {
+        Self { blocks }
+    }
 }
 
 impl Default for InMemoryShareChain {
     fn default() -> Self {
         Self {
             max_blocks_count: MAX_BLOCKS_COUNT,
-            blocks: Arc::new(RwLock::new(vec![
-                // genesis block
-                Block::builder().with_height(0).build(),
+            block_levels: Arc::new(RwLock::new(vec![
+                BlockLevel::new(vec![
+                    // genesis block
+                    Block::builder().build(),
+                ])
             ])),
         }
     }
@@ -37,24 +51,50 @@ impl InMemoryShareChain {
     pub fn new(max_blocks_count: usize) -> Self {
         Self {
             max_blocks_count,
-            blocks: Arc::new(RwLock::new(vec![
-                // genesis block
-                Block::builder().with_height(0).build(),
+            block_levels: Arc::new(RwLock::new(vec![
+                BlockLevel::new(vec![
+                    // genesis block
+                    Block::builder().build(),
+                ])
             ])),
         }
     }
 
+    /// Returns the current (strongest) chain
+    async fn chain(&self) -> Vec<Block> {
+        let mut result = vec![];
+        let block_levels_read_lock = self.block_levels.read().await;
+
+        block_levels_read_lock.iter().for_each(|level| {
+            level.blocks.iter().max_by(|block1, block2| {
+                let diff1 = if let Ok(diff) = sha3x_difficulty(block1.original_block_header()) {
+                    diff.as_u64()
+                } else {
+                    0
+                };
+                let diff2 = if let Ok(diff) = sha3x_difficulty(block2.original_block_header()) {
+                    diff.as_u64()
+                } else {
+                    0
+                };
+                diff1.cmp(&diff2)
+            }).iter().for_each(|block| {
+                result.push(block.deref().clone());
+            });
+        });
+
+        result
+    }
+
     async fn miners_with_shares(&self) -> HashMap<String, f64> {
         let mut result: HashMap<String, f64> = HashMap::new(); // target wallet address -> number of shares
-        let blocks_read_lock = self.blocks.read().await;
-        blocks_read_lock.iter().for_each(|block| {
-            if let Some(miner_wallet_address) = block.miner_wallet_address() {
-                let addr = miner_wallet_address.to_base58();
-                if let Some(curr_hash_rate) = result.get(&addr) {
-                    result.insert(addr, curr_hash_rate + 1.0);
-                } else {
-                    result.insert(addr, 1.0);
-                }
+        let blocks = self.chain().await;
+        blocks.iter().for_each(|block| {
+            let addr = block.miner_wallet_address().to_base58();
+            if let Some(curr_hash_rate) = result.get(&addr) {
+                result.insert(addr, curr_hash_rate + 1.0);
+            } else {
+                result.insert(addr, 1.0);
             }
         });
 
@@ -72,11 +112,6 @@ impl InMemoryShareChain {
                 warn!("Out-of-sync chain, do a sync now...");
                 return Ok(ValidateBlockResult::new(false, true));
             }
-            
-            if block.height() <= last_block.height() {
-                warn!("Uncle blocks are not handled yet! Current block height: {:?}, Last block height: {:?}", block.height(), last_block.height());
-                return Ok(ValidateBlockResult::new(true, false));
-            }
 
             // check if we have this block as last
             if last_block == block {
@@ -89,12 +124,6 @@ impl InMemoryShareChain {
                 warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
                 return Ok(ValidateBlockResult::new(false, false));
             }
-
-            // validate height
-            if last_block.height() + 1 != block.height() {
-                warn!(target: LOG_TARGET, "❌ Invalid block, invalid block height: {:?} != {:?}", last_block.height() + 1, block.height());
-                return Ok(ValidateBlockResult::new(false, false));
-            }
         } else {
             return Ok(ValidateBlockResult::new(false, true));
         }
@@ -102,6 +131,7 @@ impl InMemoryShareChain {
         Ok(ValidateBlockResult::new(true, false))
     }
 
+    // TODO: add block to the right block level/branch (same tari block height goes to the same level)
     async fn submit_block_with_lock(
         &self,
         blocks: &mut RwLockWriteGuard<'_, Vec<Block>>,
@@ -148,15 +178,9 @@ impl ShareChain for InMemoryShareChain {
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
         let mut blocks_write_lock = self.blocks.write().await;
 
-        // let last_block = blocks_write_lock.last();
-        // if (sync && last_block.is_none()) ||
-        //     (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
-        // {
+        // if sync {
         //     blocks_write_lock.clear();
         // }
-        if sync {
-            blocks_write_lock.clear();
-        }
 
         for block in blocks {
             let result = self.submit_block_with_lock(&mut blocks_write_lock, &block, sync)
@@ -172,7 +196,8 @@ impl ShareChain for InMemoryShareChain {
     async fn tip_height(&self) -> ShareChainResult<u64> {
         let blocks_read_lock = self.blocks.read().await;
         let last_block = blocks_read_lock.last().ok_or_else(|| Error::Empty)?;
-        Ok(last_block.height())
+        let original_block_header = last_block.original_block_header().as_ref().ok_or_else(|| Error::MissingBlockField("tari block header"))?;
+        Ok(original_block_header.height)
     }
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
@@ -217,7 +242,6 @@ impl ShareChain for InMemoryShareChain {
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
             .with_prev_hash(last_block.generate_hash())
-            .with_height(last_block.height() + 1)
             .with_original_block_header(origin_block_header)
             .with_miner_wallet_address(
                 TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
