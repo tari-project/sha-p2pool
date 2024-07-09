@@ -13,14 +13,10 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{
     error::{BlockConvertError, Error},
-    Block,
-    ShareChain,
-    ShareChainResult,
-    MAX_BLOCKS_COUNT,
-    SHARE_COUNT,
+    Block, ShareChain, ShareChainResult, MAX_BLOCKS_COUNT, SHARE_COUNT,
 };
 
-const LOG_TARGET: &str = "in_memory_share_chain";
+const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
 pub struct InMemoryShareChain {
     max_blocks_count: usize,
@@ -142,8 +138,8 @@ impl ShareChain for InMemoryShareChain {
         let mut blocks_write_lock = self.blocks.write().await;
 
         let last_block = blocks_write_lock.last();
-        if (sync && last_block.is_none()) ||
-            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
+        if (sync && last_block.is_none())
+            || (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
         {
             blocks_write_lock.clear();
         }

@@ -13,8 +13,7 @@ use tokio::{
     sync::{
         broadcast,
         broadcast::error::{RecvError, SendError},
-        mpsc,
-        Mutex,
+        mpsc, Mutex,
     },
     time::sleep,
 };
@@ -27,7 +26,7 @@ use crate::{
     sharechain::block::Block,
 };
 
-const LOG_TARGET: &str = "p2p_service_client";
+const LOG_TARGET: &str = "p2pool::server::p2p::client";
 
 #[derive(Error, Debug)]
 pub enum ClientError {

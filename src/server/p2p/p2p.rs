@@ -18,15 +18,10 @@ use libp2p::{
     mdns,
     mdns::tokio::Tokio,
     multiaddr::Protocol,
-    noise,
-    request_response,
+    noise, request_response,
     request_response::{cbor, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp,
-    yamux,
-    Multiaddr,
-    StreamProtocol,
-    Swarm,
+    tcp, yamux, Multiaddr, StreamProtocol, Swarm,
 };
 use log::{debug, error, info, warn};
 use tari_common::configuration::Network;
@@ -43,20 +38,12 @@ use crate::{
     server::{
         config,
         p2p::{
-            client,
-            messages,
+            client, messages,
             messages::{
-                PeerInfo,
-                ShareChainSyncRequest,
-                ShareChainSyncResponse,
-                ValidateBlockRequest,
-                ValidateBlockResult,
+                PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse, ValidateBlockRequest, ValidateBlockResult,
             },
             peer_store::PeerStore,
-            Error,
-            LibP2PError,
-            ServiceClient,
-            ServiceClientChannels,
+            Error, LibP2PError, ServiceClient, ServiceClientChannels,
         },
     },
     sharechain::{block::Block, ShareChain},
@@ -67,7 +54,7 @@ const BLOCK_VALIDATION_REQUESTS_TOPIC: &str = "block_validation_requests";
 const BLOCK_VALIDATION_RESULTS_TOPIC: &str = "block_validation_results";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
-const LOG_TARGET: &str = "p2p_service";
+const LOG_TARGET: &str = "p2pool::server::p2p::p2p";
 const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug)]
@@ -102,7 +89,8 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-where S: ShareChain + Send + Sync + 'static
+where
+    S: ShareChain + Send + Sync + 'static,
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -122,7 +110,8 @@ where S: ShareChain + Send + Sync + 'static
 }
 
 impl<S> Service<S>
-where S: ShareChain + Send + Sync + 'static
+where
+    S: ShareChain + Send + Sync + 'static,
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
