@@ -1,14 +1,12 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::stdout;
 use std::path::PathBuf;
 
 use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser,
 };
-use crossterm::{execute, terminal::SetTitle};
 use log::LevelFilter;
 
 use tari_common::initialize_logging;
@@ -104,11 +102,6 @@ async fn main() -> anyhow::Result<()> {
     ) {
         eprintln!("{}", e);
         return Err(e.into());
-    }
-
-    let terminal_title = "Decentralized mining pool for Tari network".to_string();
-    if let Err(e) = execute!(stdout(), SetTitle(terminal_title.as_str())) {
-        println!("Error setting terminal title. {}", e)
     }
 
     let mut config_builder = server::Config::builder();
