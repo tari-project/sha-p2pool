@@ -13,8 +13,7 @@ use thiserror::Error;
 
 use crate::{
     server::{
-        config,
-        grpc,
+        config, grpc,
         grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
         p2p,
     },
@@ -35,7 +34,8 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-where S: ShareChain + Send + Sync + 'static
+where
+    S: ShareChain + Send + Sync + 'static,
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -45,7 +45,8 @@ where S: ShareChain + Send + Sync + 'static
 
 // TODO: add graceful shutdown
 impl<S> Server<S>
-where S: ShareChain + Send + Sync + 'static
+where
+    S: ShareChain + Send + Sync + 'static,
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);

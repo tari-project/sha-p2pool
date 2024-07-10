@@ -13,11 +13,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{
     error::{BlockConvertError, Error},
-    Block,
-    ShareChain,
-    ShareChainResult,
-    MAX_BLOCKS_COUNT,
-    SHARE_COUNT,
+    Block, ShareChain, ShareChainResult, MAX_BLOCKS_COUNT, SHARE_COUNT,
 };
 
 const LOG_TARGET: &str = "in_memory_share_chain";
@@ -97,22 +93,14 @@ impl InMemoryShareChain {
         in_sync: bool,
     ) -> ShareChainResult<()> {
         let block = block.clone();
-
         let last_block = blocks.last();
-        if in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
-        } else if !in_sync && last_block.is_none() {
+        if !in_sync && last_block.is_none() {
             return Err(Error::Empty);
-        } else if !in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
+        }
+
+        if last_block.is_some() && !self.validate_block(last_block.unwrap(), &block).await? {
+            error!(target: LOG_TARGET, "Invalid block!");
+            return Err(Error::InvalidBlock(block));
         }
 
         if blocks.len() >= self.max_blocks_count {
@@ -142,8 +130,8 @@ impl ShareChain for InMemoryShareChain {
         let mut blocks_write_lock = self.blocks.write().await;
 
         let last_block = blocks_write_lock.last();
-        if (sync && last_block.is_none()) ||
-            (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
+        if (sync && last_block.is_none())
+            || (sync && last_block.is_some() && !blocks.is_empty() && last_block.unwrap().height() < blocks[0].height())
         {
             blocks_write_lock.clear();
         }
@@ -162,6 +150,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(last_block.height())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
         let miners = self.miners_with_shares().await;

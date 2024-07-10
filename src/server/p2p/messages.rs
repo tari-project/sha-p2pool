@@ -29,12 +29,16 @@ macro_rules! impl_conversions {
     };
 }
 pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
-where T: Deserialize<'a> {
+where
+    T: Deserialize<'a>,
+{
     serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
 }
 
 pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
-where T: Serialize {
+where
+    T: Serialize,
+{
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 
