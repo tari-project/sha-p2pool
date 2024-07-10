@@ -54,7 +54,7 @@ const BLOCK_VALIDATION_REQUESTS_TOPIC: &str = "block_validation_requests";
 const BLOCK_VALIDATION_RESULTS_TOPIC: &str = "block_validation_results";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
-const LOG_TARGET: &str = "p2pool::server::p2p::p2p";
+const LOG_TARGET: &str = "p2p_service";
 const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug)]

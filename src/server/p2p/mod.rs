@@ -11,5 +11,5 @@ pub use p2p::*;
 pub(crate) mod client;
 mod error;
 pub mod messages;
-mod p2p;
+mod network;
 pub mod peer_store;
