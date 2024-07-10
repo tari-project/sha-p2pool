@@ -29,12 +29,12 @@ macro_rules! impl_conversions {
     };
 }
 pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
-where T: Deserialize<'a> {
+    where T: Deserialize<'a> {
     serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
 }
 
 pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
-where T: Serialize {
+    where T: Serialize {
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 
@@ -99,6 +99,18 @@ pub struct ShareChainSyncRequest {
 impl ShareChainSyncRequest {
     pub fn new(from_height: u64) -> Self {
         Self { from_height }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LocalShareChainSyncRequest {
+    pub peer_id: PeerId,
+    pub request: ShareChainSyncRequest,
+}
+
+impl LocalShareChainSyncRequest {
+    pub fn new(peer_id: PeerId, request: ShareChainSyncRequest) -> Self {
+        Self { peer_id, request }
     }
 }
 

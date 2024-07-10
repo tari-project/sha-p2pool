@@ -7,27 +7,10 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
-use libp2p::{
-    futures::StreamExt,
-    gossipsub,
-    gossipsub::{IdentTopic, Message, PublishError},
-    identity::Keypair,
-    kad,
-    kad::{Event, Mode, store::MemoryStore},
-    mdns,
-    mdns::tokio::Tokio,
-    Multiaddr,
-    multiaddr::Protocol,
-    noise,
-    request_response,
-    request_response::{cbor, ResponseChannel},
-    StreamProtocol,
-    swarm::{NetworkBehaviour, SwarmEvent},
-    Swarm,
-    tcp,
-    yamux,
-};
+use libp2p::{futures::StreamExt, gossipsub, gossipsub::{IdentTopic, Message, PublishError}, identity::Keypair, kad, kad::{Event, Mode, store::MemoryStore}, mdns, mdns::tokio::Tokio, Multiaddr, multiaddr::Protocol, noise, PeerId, request_response, request_response::{cbor, ResponseChannel}, StreamProtocol, swarm::{NetworkBehaviour, SwarmEvent}, Swarm, tcp, yamux};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use log::{debug, error, info, warn};
 use tari_common::configuration::Network;
@@ -62,6 +45,7 @@ use crate::{
     },
     sharechain::{block::Block, ShareChain},
 };
+use crate::server::p2p::messages::LocalShareChainSyncRequest;
 use crate::sharechain::ShareChainResult;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
@@ -113,6 +97,9 @@ pub struct Service<S>
     share_chain: Arc<S>,
     peer_store: Arc<PeerStore>,
     config: Config,
+    initial_sync_in_progress: Arc<AtomicBool>,
+    share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
+    share_chain_sync_rx: broadcast::Receiver<LocalShareChainSyncRequest>,
 
     // service client related channels
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
@@ -130,7 +117,7 @@ impl<S> Service<S>
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
-    pub async fn new(config: &config::Config, share_chain: Arc<S>) -> Result<Self, Error> {
+    pub async fn new(config: &config::Config, share_chain: Arc<S>, initial_sync_in_progress: Arc<AtomicBool>) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config).await?;
         let peer_store = Arc::new(PeerStore::new(&config.peer_store));
 
@@ -138,6 +125,7 @@ impl<S> Service<S>
         let (validate_req_tx, validate_req_rx) = broadcast::channel::<ValidateBlockRequest>(1000);
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
         let (peer_changes_tx, peer_changes_rx) = broadcast::channel::<()>(1000);
+        let (share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
 
         Ok(Self {
             swarm,
@@ -152,6 +140,9 @@ impl<S> Service<S>
             client_broadcast_block_rx: broadcast_block_rx,
             client_peer_changes_tx: peer_changes_tx,
             client_peer_changes_rx: peer_changes_rx,
+            initial_sync_in_progress,
+            share_chain_sync_tx,
+            share_chain_sync_rx,
         })
     }
 
@@ -337,6 +328,10 @@ impl<S> Service<S>
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
     async fn broadcast_block(&mut self, result: Result<Block, RecvError>) {
+        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+            return;
+        }
+
         match result {
             Ok(block) => {
                 let block_raw_result: Result<Vec<u8>, Error> = block.try_into();
@@ -404,10 +399,12 @@ impl<S> Service<S>
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
-                    if let Some(tip) = self.peer_store.tip_of_block_height().await {
-                        if let Ok(curr_height) = self.share_chain.tip_height().await {
-                            if curr_height < tip.height {
-                                self.sync_share_chain().await;
+                    if !self.initial_sync_in_progress.load(Ordering::Relaxed) {
+                        if let Some(tip) = self.peer_store.tip_of_block_height().await {
+                            if let Ok(curr_height) = self.share_chain.tip_height().await {
+                                if curr_height < tip.height {
+                                    self.sync_share_chain().await;
+                                }
                             }
                         }
                     }
@@ -416,6 +413,7 @@ impl<S> Service<S>
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
                 }
             },
+            // TODO: revisit if we still need separate block validation
             topic if topic == Self::topic_name(BLOCK_VALIDATION_REQUESTS_TOPIC) => {
                 match messages::ValidateBlockRequest::try_from(message) {
                     Ok(payload) => {
@@ -447,6 +445,7 @@ impl<S> Service<S>
                     }
                 }
             }
+            // TODO: revisit if we still need separate block validation
             topic if topic == Self::topic_name(BLOCK_VALIDATION_RESULTS_TOPIC) => {
                 match messages::ValidateBlockResult::try_from(message) {
                     Ok(payload) => {
@@ -467,24 +466,30 @@ impl<S> Service<S>
                 }
             }
             // TODO: send a signature that proves that the actual block was coming from this peer
-            topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => match Block::try_from(message) {
-                Ok(payload) => {
-                    info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
-                    match self.share_chain.submit_block(&payload).await {
-                        Ok(result) => {
-                            if result.need_sync {
-                                self.sync_share_chain().await;
+            topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => {
+                if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                match Block::try_from(message) {
+                    Ok(payload) => {
+                        info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
+                        match self.share_chain.submit_block(&payload).await {
+                            Ok(result) => {
+                                if result.need_sync {
+                                    self.sync_share_chain().await;
+                                }
+                            }
+                            Err(error) => {
+                                error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
                             }
                         }
-                        Err(error) => {
-                            error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
-                        }
+                    }
+                    Err(error) => {
+                        error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
                     }
                 }
-                Err(error) => {
-                    error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
-                }
-            },
+            }
             _ => {
                 warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
             }
@@ -528,10 +533,18 @@ impl<S> Service<S>
                 error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
             }
         }
+        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+            self.initial_sync_in_progress.store(false, Ordering::Relaxed);
+        }
     }
 
     /// Trigger share chai sync with another peer with the highest known block height.
     async fn sync_share_chain(&mut self) {
+        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+            return;
+        }
+        self.initial_sync_in_progress.store(true, Ordering::Relaxed);
+
         info!(target: LOG_TARGET, "Syncing share chain...");
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
@@ -543,15 +556,64 @@ impl<S> Service<S>
                             self.swarm
                                 .behaviour_mut()
                                 .share_chain_sync
-                                .send_request(&result.peer_id, ShareChainSyncRequest::new(0));
+                                .send_request(&result.peer_id, ShareChainSyncRequest::new(tip));
+                        } else {
+                            self.initial_sync_in_progress.store(false, Ordering::Relaxed);
                         }
                     }
                     Err(error) => {
+                        self.initial_sync_in_progress.store(false, Ordering::Relaxed);
                         error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
                     }
                 }
             }
             None => {
+                self.initial_sync_in_progress.store(false, Ordering::Relaxed);
+                error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
+            }
+        }
+    }
+
+    async fn initial_share_chain_sync(in_progress: Arc<AtomicBool>,
+                                      peer_store: Arc<PeerStore>,
+                                      share_chain: Arc<S>,
+                                      share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
+                                      timeout: Duration,
+    ) {
+        in_progress.store(true, Ordering::Relaxed);
+        let start = Instant::now();
+        while peer_store.tip_of_block_height().await.is_none() {
+            if Instant::now().duration_since(start) >= timeout {
+                break;
+            }
+        } // wait for the first height
+        info!(target: LOG_TARGET, "Initially syncing share chain (timeout: {timeout:?})...");
+        match peer_store.tip_of_block_height().await {
+            Some(result) => {
+                match share_chain.tip_height().await {
+                    Ok(tip) => {
+                        if tip < result.height {
+                            if let Err(error) = share_chain_sync_tx.send(
+                                LocalShareChainSyncRequest::new(
+                                    result.peer_id,
+                                    ShareChainSyncRequest::new(tip),
+                                )
+                            ) {
+                                error!("Failed to send share chain sync request: {error:?}");
+                            }
+                            info!(target: LOG_TARGET, "Found highest block height: {result:?}");
+                        } else {
+                            in_progress.store(false, Ordering::Relaxed);
+                        }
+                    }
+                    Err(error) => {
+                        in_progress.store(false, Ordering::Relaxed);
+                        error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
+                    }
+                }
+            }
+            None => {
+                in_progress.store(false, Ordering::Relaxed);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
             }
         }
@@ -678,6 +740,17 @@ impl<S> Service<S>
                         }
                     }
                 }
+                req = self.share_chain_sync_rx.recv() => {
+                    match req {
+                        Ok(request) => {
+                            self.swarm.behaviour_mut().share_chain_sync
+                                .send_request(&request.peer_id, request.request);
+                        }
+                        Err(error) => {
+                            error!("Failed to receive share chain sync request from channel: {error:?}");
+                        }
+                    }
+                },
             }
         }
     }
@@ -723,6 +796,15 @@ impl<S> Service<S>
 
         self.join_seed_peers()?;
         self.subscribe_to_topics();
+
+        // start initial share chain sync
+        let in_progress = self.initial_sync_in_progress.clone();
+        let peer_store = self.peer_store.clone();
+        let share_chain = self.share_chain.clone();
+        let share_chain_sync_tx = self.share_chain_sync_tx.clone();
+        tokio::spawn(async move {
+            Self::initial_share_chain_sync(in_progress, peer_store, share_chain, share_chain_sync_tx, Duration::from_secs(30)).await;
+        });
 
         self.main_loop().await
     }

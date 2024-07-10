@@ -20,7 +20,7 @@ pub struct Block {
     prev_hash: BlockHash,
     height: u64,
     original_block_header: BlockHeader,
-    miner_wallet_address: TariAddress,
+    miner_wallet_address: Option<TariAddress>,
     sent_to_main_chain: bool,
 }
 impl_conversions!(Block);
@@ -32,11 +32,15 @@ impl Block {
     }
 
     pub fn generate_hash(&self) -> BlockHash {
-        DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
+        let mut hasher = DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
             .chain(&self.prev_hash)
-            .chain(&self.height)
-            .chain(&self.miner_wallet_address.to_hex())
-            .chain(&self.original_block_header)
+            .chain(&self.height);
+
+        if let Some(miner_wallet_address) = &self.miner_wallet_address {
+            hasher = hasher.chain(&miner_wallet_address.to_hex());
+        }
+
+        hasher.chain(&self.original_block_header)
             .finalize().into()
     }
 
@@ -64,12 +68,15 @@ impl Block {
         self.sent_to_main_chain = sent_to_main_chain;
     }
 
-    pub fn miner_wallet_address(&self) -> &TariAddress {
-        &self.miner_wallet_address
-    }
-
     pub fn sent_to_main_chain(&self) -> bool {
         self.sent_to_main_chain
+    }
+
+    pub fn set_height(&mut self, height: u64) {
+        self.height = height;
+    }
+    pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
+        &self.miner_wallet_address
     }
 }
 
@@ -113,7 +120,7 @@ impl BlockBuilder {
     }
 
     pub fn with_miner_wallet_address(&mut self, miner_wallet_address: TariAddress) -> &mut Self {
-        self.block.miner_wallet_address = miner_wallet_address;
+        self.block.miner_wallet_address = Some(miner_wallet_address);
         self
     }
 

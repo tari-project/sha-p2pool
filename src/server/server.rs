@@ -6,6 +6,7 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use std::sync::atomic::AtomicBool;
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
@@ -35,7 +36,7 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-where S: ShareChain + Send + Sync + 'static
+    where S: ShareChain + Send + Sync + 'static
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -45,12 +46,13 @@ where S: ShareChain + Send + Sync + 'static
 
 // TODO: add graceful shutdown
 impl<S> Server<S>
-where S: ShareChain + Send + Sync + 'static
+    where S: ShareChain + Send + Sync + 'static
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
+        let initial_sync_in_progress = Arc::new(AtomicBool::new(true));
 
-        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone())
+        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone(), initial_sync_in_progress.clone())
             .await
             .map_err(Error::P2PService)?;
 
@@ -66,9 +68,10 @@ where S: ShareChain + Send + Sync + 'static
                 config.base_node_address.clone(),
                 p2p_service.client(),
                 share_chain.clone(),
+                initial_sync_in_progress.clone(),
             )
-            .await
-            .map_err(Error::Grpc)?;
+                .await
+                .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
@@ -112,10 +115,10 @@ where S: ShareChain + Send + Sync + 'static
             let grpc_port = self.config.grpc_port;
             tokio::spawn(async move {
                 match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(error) => {
                         error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
-                    },
+                    }
                 }
             });
         }
