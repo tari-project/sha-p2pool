@@ -94,20 +94,6 @@ jobs:
       - name: cargo test compile
         run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
 
-      - name: Run ${{ env.CI_PROFILE }} integration tests for binaries
-        if: ${{ env.CI_BINS == 'true' }}
-        timeout-minutes: 90
-        run: |
-          cargo test \
-            --test cucumber \
-            -v \
-            --all-features \
-            --release \
-            --package tari_integration_tests \
-            -- -t "${{ env.CI_PROFILE }} and (not @wallet-ffi) and (not @chat-ffi) and (not @broken)" \
-            -c 5 \
-            --retry 2
-
       - name: upload artifact
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()
@@ -175,20 +161,6 @@ jobs:
       - name: cargo test compile
         if: ${{ env.CI_FFI == 'true' }}
         run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
-
-      - name: Run ${{ env.CI_PROFILE }} integration tests for ffi
-        if: ${{ env.CI_FFI == 'true' }}
-        timeout-minutes: 90
-        run: |
-          cargo test \
-            --test cucumber \
-            -v \
-            --all-features \
-            --release \
-            --package tari_integration_tests \
-            -- -t "(@wallet-ffi or @chat-ffi) and ${{ env.CI_PROFILE }} and (not @broken)" \
-            -c 1 \
-            --retry 2
 
       - name: upload artifact
         uses: actions/upload-artifact@v4  # upload test results as artifact

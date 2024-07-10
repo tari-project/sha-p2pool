@@ -6,7 +6,7 @@
 
 pub use client::*;
 pub use error::*;
-pub use p2p::*;
+pub use network::*;
 
 pub(crate) mod client;
 mod error;

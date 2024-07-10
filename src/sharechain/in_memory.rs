@@ -93,22 +93,14 @@ impl InMemoryShareChain {
         in_sync: bool,
     ) -> ShareChainResult<()> {
         let block = block.clone();
-
         let last_block = blocks.last();
-        if in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
-        } else if !in_sync && last_block.is_none() {
+        if !in_sync && last_block.is_none() {
             return Err(Error::Empty);
-        } else if !in_sync && last_block.is_some() {
-            // validate
-            if !self.validate_block(last_block.unwrap(), &block).await? {
-                error!(target: LOG_TARGET, "Invalid block!");
-                return Err(Error::InvalidBlock(block));
-            }
+        }
+
+        if last_block.is_some() && !self.validate_block(last_block.unwrap(), &block).await? {
+            error!(target: LOG_TARGET, "Invalid block!");
+            return Err(Error::InvalidBlock(block));
         }
 
         if blocks.len() >= self.max_blocks_count {
@@ -158,6 +150,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(last_block.height())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
         let miners = self.miners_with_shares().await;
