@@ -5,7 +5,7 @@ use std::slice::Iter;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use log::{error, info, warn};
+use log::{info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
@@ -103,7 +103,7 @@ impl InMemoryShareChain {
                     diff1.cmp(&diff2)
                 })
                 .iter()
-                .cloned()
+                .copied()
                 .for_each(|block| {
                     result.push(block.clone());
                 });
@@ -145,7 +145,8 @@ impl InMemoryShareChain {
 
         if let Some(last_block) = last_block {
             // check if we have outdated tip of chain
-            let block_height_diff = block.height() as i64 - last_block.height() as i64;
+            let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)?
+                - i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
             if block_height_diff > 1 {
                 warn!("Out-of-sync chain, do a sync now...");
                 return Ok(ValidateBlockResult::new(false, true));
@@ -179,10 +180,10 @@ impl InMemoryShareChain {
         // validate
         let validate_result = self.validate_block(last_block, block, sync).await?;
         if !validate_result.valid {
-            return if !validate_result.need_sync {
-                Err(Error::InvalidBlock(block.clone()))
-            } else {
+            return if validate_result.need_sync {
                 Ok(SubmitBlockResult::new(true))
+            } else {
+                Err(Error::InvalidBlock(block.clone()))
             };
         }
 
@@ -242,8 +243,8 @@ impl ShareChain for InMemoryShareChain {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
                 if last_block.hash() != genesis_block().hash()
-                    && (last_block.height() as usize) < MAX_BLOCKS_COUNT
-                    && (blocks[0].height() as usize) > MAX_BLOCKS_COUNT
+                    && usize::try_from(last_block.height()).map_err(Error::FromIntConversion)? < MAX_BLOCKS_COUNT
+                    && usize::try_from(blocks[0].height()).map_err(Error::FromIntConversion)? > MAX_BLOCKS_COUNT
                 {
                     block_levels_write_lock.clear();
                 }
@@ -273,6 +274,8 @@ impl ShareChain for InMemoryShareChain {
         Ok(last_block.height())
     }
 
+    // TODO: use integers only instead of floats
+    #[allow(clippy::cast_possible_truncation)]
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
         let miners = self.miners_with_shares().await;

@@ -34,7 +34,7 @@ use tokio::{
     io,
     io::{AsyncReadExt, AsyncWriteExt},
     select,
-    sync::{broadcast, broadcast::error::RecvError, mpsc},
+    sync::{broadcast, broadcast::error::RecvError},
 };
 
 use crate::server::p2p::messages::LocalShareChainSyncRequest;
@@ -42,10 +42,10 @@ use crate::{
     server::{
         config,
         p2p::{
-            client, messages,
+            messages,
             messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
-            Error, LibP2PError, ServiceClient, ServiceClientChannels,
+            Error, LibP2PError, ServiceClient,
         },
     },
     sharechain::{block::Block, ShareChain},
@@ -60,7 +60,6 @@ const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 #[derive(Clone, Debug)]
 pub struct Config {
     pub seed_peers: Vec<String>,
-    pub client: client::ClientConfig,
     pub peer_info_publish_interval: Duration,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
@@ -71,7 +70,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             seed_peers: vec![],
-            client: client::ClientConfig::default(),
             peer_info_publish_interval: Duration::from_secs(5),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
@@ -242,11 +240,7 @@ where
     /// Creates a new client for this service, it is thread safe (Send + Sync).
     /// Any amount of clients can be created, no need to share the same one across many components.
     pub fn client(&mut self) -> ServiceClient {
-        ServiceClient::new(
-            ServiceClientChannels::new(self.client_broadcast_block_tx.clone()),
-            self.peer_store.clone(),
-            self.config.client.clone(),
-        )
+        ServiceClient::new(self.client_broadcast_block_tx.clone())
     }
 
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network

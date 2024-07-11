@@ -10,8 +10,6 @@ use tokio::sync::{
 
 use crate::sharechain::block::Block;
 
-const LOG_TARGET: &str = "p2p_service_client";
-
 #[derive(Error, Debug)]
 pub enum ClientError {
     #[error("Channel send error: {0}")]
@@ -26,31 +24,19 @@ pub enum ChannelSendError {
     BroadcastBlock(#[from] SendError<Block>),
 }
 
-/// Contains all the channels a client needs to operate successfully.
-pub struct ServiceClientChannels {
+/// P2P service client.
+pub struct ServiceClient {
     broadcast_block_sender: broadcast::Sender<Block>,
 }
 
-impl ServiceClientChannels {
+impl ServiceClient {
     pub fn new(broadcast_block_sender: broadcast::Sender<Block>) -> Self {
         Self { broadcast_block_sender }
-    }
-}
-
-/// P2P service client.
-pub struct ServiceClient {
-    channels: ServiceClientChannels,
-}
-
-impl ServiceClient {
-    pub fn new(channels: ServiceClientChannels) -> Self {
-        Self { channels }
     }
 
     /// Triggering broadcasting of a new block to p2pool network.
     pub async fn broadcast_block(&self, block: &Block) -> Result<(), ClientError> {
-        self.channels
-            .broadcast_block_sender
+        self.broadcast_block_sender
             .send(block.clone())
             .map_err(|error| ClientError::ChannelSend(Box::new(ChannelSendError::BroadcastBlock(error))))?;
 
