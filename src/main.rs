@@ -7,8 +7,9 @@ use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser,
 };
-use env_logger::Builder;
 use log::LevelFilter;
+
+use tari_common::initialize_logging;
 
 use crate::sharechain::in_memory::InMemoryShareChain;
 
@@ -26,7 +27,7 @@ fn cli_styles() -> Styles {
         .valid(AnsiColor::BrightGreen.on_default())
 }
 
-#[derive(Parser)]
+#[derive(Clone, Parser)]
 #[command(version)]
 #[command(styles = cli_styles())]
 #[command(about = "⛏ Decentralized mining pool for Tari network ⛏", long_about = None)]
@@ -77,13 +78,32 @@ struct Cli {
     /// By setting this it can be used as a stable node for routing only.
     #[arg(long, value_name = "mining-disabled", default_value_t = false)]
     mining_disabled: bool,
+
+    base_dir: Option<PathBuf>,
+}
+
+impl Cli {
+    pub fn base_dir(&self) -> PathBuf {
+        self.base_dir
+            .clone()
+            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".p2pool/miner"))
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // cli
     let cli = Cli::parse();
-    Builder::new().filter_level(cli.log_level).init();
+
+    // logger setup
+    if let Err(e) = initialize_logging(
+        &cli.base_dir().join("configs/logs.yml"),
+        &cli.base_dir(),
+        include_str!("../log4rs_sample.yml"),
+    ) {
+        eprintln!("{}", e);
+        return Err(e.into());
+    }
+
     let mut config_builder = server::Config::builder();
     if let Some(grpc_port) = cli.grpc_port {
         config_builder.with_grpc_port(grpc_port);
@@ -91,11 +111,11 @@ async fn main() -> anyhow::Result<()> {
     if let Some(p2p_port) = cli.p2p_port {
         config_builder.with_p2p_port(p2p_port);
     }
-    if let Some(seed_peers) = cli.seed_peers {
+    if let Some(seed_peers) = cli.seed_peers.clone() {
         config_builder.with_seed_peers(seed_peers);
     }
     config_builder.with_stable_peer(cli.stable_peer);
-    config_builder.with_private_key_folder(cli.private_key_folder);
+    config_builder.with_private_key_folder(cli.private_key_folder.clone());
     config_builder.with_mining_enabled(!cli.mining_disabled);
 
     // server start

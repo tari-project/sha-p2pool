@@ -12,7 +12,7 @@ use moka::future::{Cache, CacheBuilder};
 
 use crate::server::p2p::messages::PeerInfo;
 
-const LOG_TARGET: &str = "peer_store";
+const LOG_TARGET: &str = "p2pool::server::p2p::peer_store";
 
 #[derive(Copy, Clone, Debug)]
 pub struct PeerStoreConfig {
