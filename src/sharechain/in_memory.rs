@@ -18,7 +18,7 @@ use crate::sharechain::{
     Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, MAX_BLOCKS_COUNT, SHARE_COUNT,
 };
 
-const LOG_TARGET: &str = "in_memory_share_chain";
+const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
 pub struct InMemoryShareChain {
     max_blocks_count: usize,

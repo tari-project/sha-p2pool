@@ -22,7 +22,7 @@ use crate::{
     sharechain::{block::Block, ShareChain, SHARE_COUNT},
 };
 
-const LOG_TARGET: &str = "p2pool_grpc";
+const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
