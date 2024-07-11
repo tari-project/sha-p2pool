@@ -51,10 +51,10 @@ where
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
-        let initial_sync_in_progress = Arc::new(AtomicBool::new(true));
+        let sync_in_progress = Arc::new(AtomicBool::new(true));
 
         let mut p2p_service: p2p::Service<S> =
-            p2p::Service::new(&config, share_chain.clone(), initial_sync_in_progress.clone())
+            p2p::Service::new(&config, share_chain.clone(), sync_in_progress.clone())
                 .await
                 .map_err(Error::P2PService)?;
 
@@ -70,7 +70,7 @@ where
                 config.base_node_address.clone(),
                 p2p_service.client(),
                 share_chain.clone(),
-                initial_sync_in_progress.clone(),
+                sync_in_progress.clone(),
             )
             .await
             .map_err(Error::Grpc)?;

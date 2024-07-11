@@ -16,8 +16,6 @@ pub enum Error {
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {0:?}")]
     InvalidBlock(Block),
-    #[error("Missing block field: {0:?}")]
-    MissingBlockField(&'static str),
 }
 
 #[derive(Error, Debug)]

@@ -57,7 +57,4 @@ pub trait ShareChain {
 
     /// Returns blocks from the given height (`from_height`, exclusive).
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
-
-    /// Validates a block.
-    async fn validate_block(&self, block: &Block) -> ShareChainResult<ValidateBlockResult>;
 }

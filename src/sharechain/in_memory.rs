@@ -5,7 +5,7 @@ use std::slice::Iter;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
@@ -332,12 +332,5 @@ impl ShareChain for InMemoryShareChain {
             .filter(|block| block.height() > from_height)
             .cloned()
             .collect())
-    }
-
-    async fn validate_block(&self, block: &Block) -> ShareChainResult<ValidateBlockResult> {
-        let block_levels_read_lock = self.block_levels.read().await;
-        let chain = self.chain(block_levels_read_lock.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        self.validate_block(Some(last_block), block, false).await
     }
 }
