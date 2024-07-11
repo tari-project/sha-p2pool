@@ -46,6 +46,7 @@ use crate::{
     sharechain::{block::Block, ShareChain},
 };
 use crate::server::p2p::messages::LocalShareChainSyncRequest;
+use crate::server::p2p::peer_store::PeerStoreBlockHeightTip;
 use crate::sharechain::ShareChainResult;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
@@ -97,7 +98,7 @@ pub struct Service<S>
     share_chain: Arc<S>,
     peer_store: Arc<PeerStore>,
     config: Config,
-    initial_sync_in_progress: Arc<AtomicBool>,
+    sync_in_progress: Arc<AtomicBool>,
     share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
     share_chain_sync_rx: broadcast::Receiver<LocalShareChainSyncRequest>,
 
@@ -117,7 +118,7 @@ impl<S> Service<S>
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
-    pub async fn new(config: &config::Config, share_chain: Arc<S>, initial_sync_in_progress: Arc<AtomicBool>) -> Result<Self, Error> {
+    pub async fn new(config: &config::Config, share_chain: Arc<S>, sync_in_progress: Arc<AtomicBool>) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config).await?;
         let peer_store = Arc::new(PeerStore::new(&config.peer_store));
 
@@ -140,7 +141,7 @@ impl<S> Service<S>
             client_broadcast_block_rx: broadcast_block_rx,
             client_peer_changes_tx: peer_changes_tx,
             client_peer_changes_rx: peer_changes_rx,
-            initial_sync_in_progress,
+            sync_in_progress,
             share_chain_sync_tx,
             share_chain_sync_rx,
         })
@@ -311,6 +312,10 @@ impl<S> Service<S>
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
     /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         // get peer info
         let share_chain = self.share_chain.clone();
         let current_height = share_chain.tip_height().await.map_err(Error::ShareChain)?;
@@ -328,7 +333,7 @@ impl<S> Service<S>
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
     async fn broadcast_block(&mut self, result: Result<Block, RecvError>) {
-        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
             return;
         }
 
@@ -399,7 +404,7 @@ impl<S> Service<S>
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
-                    if !self.initial_sync_in_progress.load(Ordering::Relaxed) {
+                    if !self.sync_in_progress.load(Ordering::Relaxed) {
                         if let Some(tip) = self.peer_store.tip_of_block_height().await {
                             if let Ok(curr_height) = self.share_chain.tip_height().await {
                                 if curr_height < tip.height {
@@ -467,7 +472,7 @@ impl<S> Service<S>
             }
             // TODO: send a signature that proves that the actual block was coming from this peer
             topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => {
-                if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+                if self.sync_in_progress.load(Ordering::Relaxed) {
                     return;
                 }
 
@@ -522,6 +527,9 @@ impl<S> Service<S>
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            self.sync_in_progress.store(false, Ordering::Relaxed);
+        }
         debug!(target: LOG_TARGET, "Share chain sync response: {response:?}");
         match self.share_chain.submit_blocks(response.blocks, true).await {
             Ok(result) => {
@@ -533,42 +541,40 @@ impl<S> Service<S>
                 error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
             }
         }
-        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
-            self.initial_sync_in_progress.store(false, Ordering::Relaxed);
-        }
     }
 
     /// Trigger share chai sync with another peer with the highest known block height.
     async fn sync_share_chain(&mut self) {
-        if self.initial_sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            warn!("Sync already in progress...");
             return;
         }
-        self.initial_sync_in_progress.store(true, Ordering::Relaxed);
+        self.sync_in_progress.store(true, Ordering::Relaxed);
 
         info!(target: LOG_TARGET, "Syncing share chain...");
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
-                debug!(target: LOG_TARGET, "Found highest block height: {result:?}");
+                info!(target: LOG_TARGET, "Found highest block height: {result:?}");
                 match self.share_chain.tip_height().await {
                     Ok(tip) => {
-                        if tip < result.height {
-                            debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
-                            self.swarm
-                                .behaviour_mut()
-                                .share_chain_sync
-                                .send_request(&result.peer_id, ShareChainSyncRequest::new(tip));
-                        } else {
-                            self.initial_sync_in_progress.store(false, Ordering::Relaxed);
-                        }
+                        // if tip < result.height {
+                        debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
+                        self.swarm
+                            .behaviour_mut()
+                            .share_chain_sync
+                            .send_request(&result.peer_id, ShareChainSyncRequest::new(0));
+                        // } else {
+                        //     self.sync_in_progress.store(false, Ordering::Relaxed);
+                        // }
                     }
                     Err(error) => {
-                        self.initial_sync_in_progress.store(false, Ordering::Relaxed);
+                        self.sync_in_progress.store(false, Ordering::Relaxed);
                         error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
                     }
                 }
             }
             None => {
-                self.initial_sync_in_progress.store(false, Ordering::Relaxed);
+                self.sync_in_progress.store(false, Ordering::Relaxed);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
             }
         }
@@ -580,28 +586,35 @@ impl<S> Service<S>
                                       share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
                                       timeout: Duration,
     ) {
+        info!(target: LOG_TARGET, "Initially syncing share chain (timeout: {timeout:?})...");
         in_progress.store(true, Ordering::Relaxed);
         let start = Instant::now();
-        while peer_store.tip_of_block_height().await.is_none() {
+        loop {
             if Instant::now().duration_since(start) >= timeout {
                 break;
             }
+            if let Some(result) = peer_store.tip_of_block_height().await {
+                if let Ok(tip) = share_chain.tip_height().await {
+                    if tip < result.height {
+                        break;
+                    }
+                }
+            }
         } // wait for the first height
-        info!(target: LOG_TARGET, "Initially syncing share chain (timeout: {timeout:?})...");
         match peer_store.tip_of_block_height().await {
             Some(result) => {
+                info!(target: LOG_TARGET, "Found highest block height: {result:?}");
                 match share_chain.tip_height().await {
                     Ok(tip) => {
                         if tip < result.height {
                             if let Err(error) = share_chain_sync_tx.send(
                                 LocalShareChainSyncRequest::new(
                                     result.peer_id,
-                                    ShareChainSyncRequest::new(tip),
+                                    ShareChainSyncRequest::new(0),
                                 )
                             ) {
                                 error!("Failed to send share chain sync request: {error:?}");
                             }
-                            info!(target: LOG_TARGET, "Found highest block height: {result:?}");
                         } else {
                             in_progress.store(false, Ordering::Relaxed);
                         }
@@ -798,7 +811,7 @@ impl<S> Service<S>
         self.subscribe_to_topics();
 
         // start initial share chain sync
-        let in_progress = self.initial_sync_in_progress.clone();
+        let in_progress = self.sync_in_progress.clone();
         let peer_store = self.peer_store.clone();
         let share_chain = self.share_chain.clone();
         let share_chain_sync_tx = self.share_chain_sync_tx.clone();

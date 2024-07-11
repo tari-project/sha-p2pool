@@ -43,7 +43,7 @@ impl BlockLevel {
 }
 
 fn genesis_block() -> Block {
-    Block::builder().build()
+    Block::builder().with_height(0).build()
 }
 
 impl Default for InMemoryShareChain {
@@ -146,10 +146,10 @@ impl InMemoryShareChain {
             // }
 
             // check if we have this block as last
-            if last_block == block {
-                warn!(target: LOG_TARGET, "↩️ This block already added, skip");
-                return Ok(ValidateBlockResult::new(false, false));
-            }
+            // if last_block == block {
+            //     warn!(target: LOG_TARGET, "↩️ This block already added, skip");
+            //     return Ok(ValidateBlockResult::new(false, false));
+            // }
 
             // validate hash
             if block.hash() != block.generate_hash() {
@@ -195,20 +195,26 @@ impl InMemoryShareChain {
         if let Some(found_level) = block_levels.iter_mut().filter(|level| {
             level.height == block.height()
         }).last() {
-            found_level.add_block(block.clone())?;
+            let found = found_level.blocks.iter()
+                .filter(|curr_block| { curr_block.generate_hash() == block.generate_hash() })
+                .count() > 0;
+            if !found {
+                found_level.add_block(block.clone())?;
+                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+            }
         } else if let Some(last_block) = last_block {
             if last_block.height() < block.height() {
                 block_levels.push(
                     BlockLevel::new(vec![block.clone()], block.height())
                 );
+                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
             }
+        } else {
+            block_levels.push(
+                BlockLevel::new(vec![block.clone()], block.height())
+            );
+            info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
         }
-
-        info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
-
-        let chain = self.chain(block_levels.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
 
         Ok(SubmitBlockResult::new(validate_result.need_sync))
     }
@@ -218,20 +224,25 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
-        self.submit_block_with_lock(&mut block_levels_write_lock, block, false).await
+        let result = self.submit_block_with_lock(&mut block_levels_write_lock, block, false).await;
+        let chain = self.chain(block_levels_write_lock.iter());
+        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
+        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
+        result
     }
 
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
-        // if sync {
-        //     let chain = self.chain(block_levels_write_lock.iter());
-        //     if let Some(last_block) = chain.last() {
-        //         if *last_block != genesis_block() && last_block.height() < blocks[0].height() {
-        //             block_levels_write_lock.clear();
-        //         }
-        //     }
-        // }
+        if sync {
+            let chain = self.chain(block_levels_write_lock.iter());
+            if let Some(last_block) = chain.last() {
+                if last_block.hash() != genesis_block().hash() &&
+                    (last_block.height() as usize) < MAX_BLOCKS_COUNT && (blocks[0].height() as usize) > MAX_BLOCKS_COUNT {
+                    block_levels_write_lock.clear();
+                }
+            }
+        }
 
         for block in blocks {
             let result = self.submit_block_with_lock(&mut block_levels_write_lock, &block, sync)
@@ -241,6 +252,10 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
+        let chain = self.chain(block_levels_write_lock.iter());
+        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
+        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
+
         Ok(SubmitBlockResult::new(false))
     }
 
@@ -248,7 +263,6 @@ impl ShareChain for InMemoryShareChain {
         let block_levels_read_lock = self.block_levels.read().await;
         let chain = self.chain(block_levels_read_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        // let last_block = self.last_block(block_levels_read_lock.iter()).ok_or_else(|| Error::Empty)?;
         Ok(last_block.height())
     }
 
