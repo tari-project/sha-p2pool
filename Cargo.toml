@@ -10,7 +10,9 @@ tari_common_types = { git = "https://github.com/tari-project/tari.git" }
 tari_common = { git = "https://github.com/tari-project/tari.git" }
 tari_core = { git = "https://github.com/tari-project/tari.git" }
 
+tari_crypto = "0.20.1"
 tari_utilities = { version = "0.7", features = ["borsh"] }
+
 libp2p = { version = "0.53.2", features = [
     "dns",
     "identify",
@@ -40,5 +42,6 @@ blake2 = "0.10.6"
 digest = "0.10.7"
 clap = { version = "4.5.7", features = ["derive"] }
 moka = { version = "0.12.7", features = ["future"] }
+rand = "0.8.0"
 
 

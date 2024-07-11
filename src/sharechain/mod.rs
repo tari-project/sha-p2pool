@@ -13,6 +13,7 @@ pub const SHARE_COUNT: u64 = 100;
 pub mod block;
 pub mod error;
 pub mod in_memory;
+pub mod tests;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 

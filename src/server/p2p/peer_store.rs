@@ -123,7 +123,7 @@ impl PeerStore {
     pub async fn cleanup(&self) -> Vec<PeerId> {
         let mut expired_peers = vec![];
 
-        for (k, v) in self.inner.iter() {
+        for (k, v) in &self.inner {
             debug!(target: LOG_TARGET, "{:?} -> {:?}", k, v);
             let elapsed = v.created.elapsed();
             let expired = elapsed.gt(&self.ttl);
