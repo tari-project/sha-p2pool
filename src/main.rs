@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{
-    builder::{Styles, styling::AnsiColor},
+    builder::{styling::AnsiColor, Styles},
     Parser,
 };
 use env_logger::Builder;

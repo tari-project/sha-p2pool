@@ -40,8 +40,7 @@ impl Block {
             hasher = hasher.chain(&miner_wallet_address.to_hex());
         }
 
-        hasher.chain(&self.original_block_header)
-            .finalize().into()
+        hasher.chain(&self.original_block_header).finalize().into()
     }
 
     pub fn timestamp(&self) -> EpochTime {

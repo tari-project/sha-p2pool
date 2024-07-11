@@ -29,12 +29,16 @@ macro_rules! impl_conversions {
     };
 }
 pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
-    where T: Deserialize<'a> {
+where
+    T: Deserialize<'a>,
+{
     serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
 }
 
 pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
-    where T: Serialize {
+where
+    T: Serialize,
+{
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 
@@ -49,43 +53,6 @@ impl PeerInfo {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
             current_height,
-            timestamp,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ValidateBlockRequest {
-    block: Block,
-    timestamp: u128,
-}
-impl_conversions!(ValidateBlockRequest);
-impl ValidateBlockRequest {
-    pub fn new(block: Block) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
-        Self { block, timestamp }
-    }
-
-    pub fn block(&self) -> Block {
-        self.block.clone()
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ValidateBlockResult {
-    pub peer_id: PeerId,
-    pub block: Block,
-    pub valid: bool,
-    pub timestamp: u128,
-}
-impl_conversions!(ValidateBlockResult);
-impl ValidateBlockResult {
-    pub fn new(peer_id: PeerId, block: Block, valid: bool) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
-        Self {
-            peer_id,
-            block,
-            valid,
             timestamp,
         }
     }

@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use libp2p::{
-    gossipsub::PublishError,
-    identity::DecodingError,
-    kad::NoKnownPeers,
-    multiaddr,
-    noise,
-    swarm::DialError,
+    gossipsub::PublishError, identity::DecodingError, kad::NoKnownPeers, multiaddr, noise, swarm::DialError,
     TransportError,
 };
 use thiserror::Error;
