@@ -5,7 +5,7 @@ use std::slice::Iter;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use log::{info, warn};
+use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::blocks::BlockHeader;
@@ -287,7 +287,7 @@ impl ShareChain for InMemoryShareChain {
             .filter(|(_, share)| *share > 0.0)
             .for_each(|(addr, share)| {
                 let curr_reward = ((reward as f64) * share) as u64;
-                info!(target: LOG_TARGET, "{addr} -> SHARE: {share:?} T, REWARD: {curr_reward:?}");
+                debug!(target: LOG_TARGET, "{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
