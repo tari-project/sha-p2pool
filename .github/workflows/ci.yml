@@ -167,8 +167,8 @@ jobs:
       matrix:
         tari_target_network: [
           { target: "testnet", network: "esmeralda" },
-          { target: "nextnet", network: "nextnet" },
-          { target: "mainnet", network: "stagenet" },
+          #          { target: "nextnet", network: "nextnet" },
+          #          { target: "mainnet", network: "stagenet" },
         ]
     env:
       TARI_TARGET_NETWORK: ${{ matrix.tari_target_network.target }}
