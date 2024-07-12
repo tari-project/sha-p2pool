@@ -1,6 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use log::{debug, info, warn};
@@ -11,7 +12,7 @@ use minotari_app_grpc::tari_rpc::{
 };
 use tari_core::proof_of_work::sha3x_difficulty;
 use tokio::sync::Mutex;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use crate::{
     server::{
@@ -34,6 +35,7 @@ where
     p2p_client: p2p::ServiceClient,
     /// Current share chain
     share_chain: Arc<S>,
+    sync_in_progress: Arc<AtomicBool>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -44,16 +46,22 @@ where
         base_node_address: String,
         p2p_client: p2p::ServiceClient,
         share_chain: Arc<S>,
+        sync_in_progress: Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
             p2p_client,
             share_chain,
+            sync_in_progress,
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
+        }
+
         if let Err(error) = self.share_chain.submit_block(block).await {
             warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
         }
@@ -76,6 +84,10 @@ where
         &self,
         _request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
+        }
+
         let mut pow_algo = PowAlgo::default();
         pow_algo.set_pow_algo(PowAlgos::Sha3x);
 
@@ -125,6 +137,10 @@ where
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
+        if self.sync_in_progress.load(Ordering::Relaxed) {
+            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
+        }
+
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block
             .block
@@ -136,20 +152,7 @@ where
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
-        // validate block with other peers
-        let validation_result = self
-            .p2p_client
-            .validate_block(&block)
-            .await
-            .map_err(|error| Status::internal(error.to_string()))?;
-        if !validation_result {
-            return Err(Status::invalid_argument("invalid block"));
-        }
-
-        let origin_block_header = block
-            .original_block_header()
-            .as_ref()
-            .ok_or_else(|| Status::internal("missing original block header"))?;
+        let origin_block_header = block.original_block_header();
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
@@ -169,7 +172,7 @@ where
         let mut network_difficulty_matches = false;
         while let Ok(Some(diff_resp)) = network_difficulty_stream.message().await {
             if origin_block_header.height == diff_resp.height + 1
-                && request_block_difficulty.as_u64() > diff_resp.difficulty
+                && request_block_difficulty.as_u64() >= diff_resp.difficulty
             {
                 network_difficulty_matches = true;
             }

@@ -90,6 +90,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_mdns_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.mdns_enabled = config;
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }

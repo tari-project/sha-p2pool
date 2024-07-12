@@ -1,6 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::atomic::AtomicBool;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
@@ -50,10 +51,12 @@ where
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
+        let sync_in_progress = Arc::new(AtomicBool::new(true));
 
-        let mut p2p_service: p2p::Service<S> = p2p::Service::new(&config, share_chain.clone())
-            .await
-            .map_err(Error::P2PService)?;
+        let mut p2p_service: p2p::Service<S> =
+            p2p::Service::new(&config, share_chain.clone(), sync_in_progress.clone())
+                .await
+                .map_err(Error::P2PService)?;
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
@@ -67,6 +70,7 @@ where
                 config.base_node_address.clone(),
                 p2p_service.client(),
                 share_chain.clone(),
+                sync_in_progress.clone(),
             )
             .await
             .map_err(Error::Grpc)?;

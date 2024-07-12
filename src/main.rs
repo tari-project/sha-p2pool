@@ -79,6 +79,12 @@ struct Cli {
     #[arg(long, value_name = "mining-disabled", default_value_t = false)]
     mining_disabled: bool,
 
+    /// mDNS disabled
+    ///
+    /// If set, mDNS local peer discovery is disabled.
+    #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
+    mdns_disabled: bool,
+
     base_dir: Option<PathBuf>,
 }
 
@@ -117,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder.clone());
     config_builder.with_mining_enabled(!cli.mining_disabled);
+    config_builder.with_mdns_enabled(!cli.mdns_disabled);
 
     // server start
     let config = config_builder.build();

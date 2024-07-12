@@ -59,43 +59,6 @@ impl PeerInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ValidateBlockRequest {
-    block: Block,
-    timestamp: u128,
-}
-impl_conversions!(ValidateBlockRequest);
-impl ValidateBlockRequest {
-    pub fn new(block: Block) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
-        Self { block, timestamp }
-    }
-
-    pub fn block(&self) -> Block {
-        self.block.clone()
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ValidateBlockResult {
-    pub peer_id: PeerId,
-    pub block: Block,
-    pub valid: bool,
-    pub timestamp: u128,
-}
-impl_conversions!(ValidateBlockResult);
-impl ValidateBlockResult {
-    pub fn new(peer_id: PeerId, block: Block, valid: bool) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
-        Self {
-            peer_id,
-            block,
-            valid,
-            timestamp,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncRequest {
     pub from_height: u64,
 }
@@ -103,6 +66,18 @@ pub struct ShareChainSyncRequest {
 impl ShareChainSyncRequest {
     pub fn new(from_height: u64) -> Self {
         Self { from_height }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LocalShareChainSyncRequest {
+    pub peer_id: PeerId,
+    pub request: ShareChainSyncRequest,
+}
+
+impl LocalShareChainSyncRequest {
+    pub fn new(peer_id: PeerId, request: ShareChainSyncRequest) -> Self {
+        Self { peer_id, request }
     }
 }
 

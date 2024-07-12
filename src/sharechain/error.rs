@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::num::TryFromIntError;
+
 use tari_common_types::tari_address::TariAddressError;
 use thiserror::Error;
 
@@ -16,6 +18,8 @@ pub enum Error {
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {0:?}")]
     InvalidBlock(Block),
+    #[error("Number conversion error: {0}")]
+    FromIntConversion(#[from] TryFromIntError),
 }
 
 #[derive(Error, Debug)]
