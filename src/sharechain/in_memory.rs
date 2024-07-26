@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
+use tari_common_types::types::BlockHash;
 use tari_core::blocks::BlockHeader;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
@@ -46,7 +47,10 @@ impl BlockLevel {
 }
 
 fn genesis_block() -> Block {
-    Block::builder().with_height(0).build()
+    Block::builder()
+        .with_height(0)
+        .with_prev_hash(BlockHash::zero())
+        .build()
 }
 
 impl Default for InMemoryShareChain {
@@ -112,19 +116,16 @@ impl InMemoryShareChain {
         result
     }
 
-    // TODO: use integers instead of floats
     /// Generating number of shares for all the miners.
-    async fn miners_with_shares(&self) -> HashMap<String, f64> {
-        let mut result: HashMap<String, f64> = HashMap::new(); // target wallet address -> number of shares
-        let block_levels = self.block_levels.read().await;
-        let chain = self.chain(block_levels.iter());
-        chain.iter().for_each(|block| {
+    fn miners_with_shares(&self, chain_iter: Iter<'_, Block>) -> HashMap<String, u64> {
+        let mut result: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
+        chain_iter.for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
                 let addr = miner_wallet_address.to_base58();
                 if let Some(curr_hash_rate) = result.get(&addr) {
-                    result.insert(addr, curr_hash_rate + 1.0);
+                    result.insert(addr, curr_hash_rate + 1);
                 } else {
-                    result.insert(addr, 1.0);
+                    result.insert(addr, 1);
                 }
             }
         });
@@ -155,6 +156,13 @@ impl InMemoryShareChain {
             // validate hash
             if block.hash() != block.generate_hash() {
                 warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
+                return Ok(ValidateBlockResult::new(false, false));
+            }
+
+            // validate PoW
+            if let Err(error) = sha3x_difficulty(block.original_block_header()) {
+                warn!(target: LOG_TARGET, "❌ Invalid PoW!");
+                debug!(target: LOG_TARGET, "Failed to calculate difficulty: {error:?}");
                 return Ok(ValidateBlockResult::new(false, false));
             }
 
@@ -274,19 +282,16 @@ impl ShareChain for InMemoryShareChain {
         Ok(last_block.height())
     }
 
-    // TODO: use integers only instead of floats
-    #[allow(clippy::cast_possible_truncation)]
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
-        let miners = self.miners_with_shares().await;
+        let miners = self.miners_with_shares(self.chain(self.block_levels.read().await.iter()).iter());
 
         // calculate full hash rate and shares
         miners
             .iter()
-            .map(|(addr, rate)| (addr, rate / SHARE_COUNT as f64))
-            .filter(|(_, share)| *share > 0.0)
+            .filter(|(_, share)| **share > 0)
             .for_each(|(addr, share)| {
-                let curr_reward = ((reward as f64) * share) as u64;
+                let curr_reward = (reward / SHARE_COUNT) * share;
                 debug!(target: LOG_TARGET, "{addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}");
                 result.push(NewBlockCoinbase {
                     address: addr.clone(),
