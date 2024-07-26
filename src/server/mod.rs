@@ -11,3 +11,4 @@ mod server;
 
 pub mod grpc;
 pub mod p2p;
+mod http;

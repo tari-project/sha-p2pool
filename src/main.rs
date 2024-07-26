@@ -4,11 +4,10 @@
 use std::path::PathBuf;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
+    builder::{Styles, styling::AnsiColor},
     Parser,
 };
 use log::LevelFilter;
-
 use tari_common::initialize_logging;
 
 use crate::sharechain::in_memory::InMemoryShareChain;
@@ -92,7 +91,7 @@ impl Cli {
     pub fn base_dir(&self) -> PathBuf {
         self.base_dir
             .clone()
-            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".p2pool/miner"))
+            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
     }
 }
 
