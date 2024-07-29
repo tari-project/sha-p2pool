@@ -12,7 +12,7 @@ use crate::sharechain::block::Block;
 pub enum Error {
     #[error("gRPC Block conversion error: {0}")]
     BlockConvert(#[from] BlockConvertError),
-    #[error("Share chain is empty, no genesis block found as well!")]
+    #[error("Share chain is empty!")]
     Empty,
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),

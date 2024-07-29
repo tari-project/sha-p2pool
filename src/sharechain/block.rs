@@ -10,6 +10,7 @@ use tari_core::{
     consensus::DomainSeparatedConsensusHasher,
 };
 use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::hex::Hex;
 
 use crate::impl_conversions;
 

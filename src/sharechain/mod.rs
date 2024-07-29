@@ -6,7 +6,11 @@ use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 
 use crate::sharechain::{block::Block, error::Error};
 
-pub const MAX_BLOCKS_COUNT: usize = 80;
+/// How many blocks to keep overall.
+pub const MAX_BLOCKS_COUNT: usize = 240;
+
+/// How many blocks are used to calculate current shares to be paid out.
+pub const BLOCKS_WINDOW: usize = 80;
 
 pub const SHARE_COUNT: u64 = 100;
 
@@ -39,7 +43,7 @@ impl ValidateBlockResult {
 }
 
 #[async_trait]
-pub trait ShareChain {
+pub trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
 
@@ -58,4 +62,9 @@ pub trait ShareChain {
 
     /// Returns blocks from the given height (`from_height`, exclusive).
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
+
+    /// Returns the estimated hash rate of the whole chain
+    /// (including all blocks and not just strongest chain).
+    /// Returning number is the result in hash/second.
+    async fn hash_rate(&self) -> ShareChainResult<u128>;
 }

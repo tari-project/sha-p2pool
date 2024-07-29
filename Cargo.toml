@@ -45,6 +45,7 @@ rand = "0.8.0"
 dirs = "4.0.0"
 log4rs = "1.3.0"
 axum = "0.7.5"
+itertools = "0.13.0"
 
 [package.metadata.cargo-machete]
 ignored = ["log4rs"]

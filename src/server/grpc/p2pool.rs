@@ -1,13 +1,13 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{
-    base_node_client::BaseNodeClient, GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest,
-    HeightRequest, NewBlockTemplateRequest, pow_algo::PowAlgos, PowAlgo, sha_p2_pool_server::ShaP2Pool,
+    base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
+    GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo,
     SubmitBlockRequest, SubmitBlockResponse,
 };
 use tari_core::proof_of_work::sha3x_difficulty;
@@ -19,15 +19,15 @@ use crate::{
         grpc::{error::Error, util},
         p2p,
     },
-    sharechain::{block::Block, SHARE_COUNT, ShareChain},
+    sharechain::{block::Block, ShareChain, SHARE_COUNT},
 };
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where
+    S: ShareChain,
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -40,8 +40,8 @@ pub struct ShaP2PoolGrpc<S>
 }
 
 impl<S> ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where
+    S: ShareChain,
 {
     pub async fn new(
         base_node_address: String,
@@ -76,8 +76,8 @@ impl<S> ShaP2PoolGrpc<S>
 
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
-    where
-        S: ShareChain + Send + Sync + 'static,
+where
+    S: ShareChain,
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
@@ -196,14 +196,14 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            }
+            },
             Err(_) => {
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            }
+            },
         }
     }
 }

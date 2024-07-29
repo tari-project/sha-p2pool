@@ -90,7 +90,7 @@ pub struct ServerNetworkBehaviour {
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -109,7 +109,7 @@ where
 
 impl<S> Service<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.

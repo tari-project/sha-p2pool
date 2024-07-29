@@ -1,10 +1,11 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::slice::Iter;
 use std::{collections::HashMap, sync::Arc};
+use std::slice::Iter;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use tari_common_types::tari_address::TariAddress;
@@ -14,10 +15,7 @@ use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{
-    error::{BlockConvertError, Error},
-    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, MAX_BLOCKS_COUNT, SHARE_COUNT,
-};
+use crate::sharechain::{Block, BLOCKS_WINDOW, error::{BlockConvertError, Error}, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult};
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
@@ -117,9 +115,9 @@ impl InMemoryShareChain {
     }
 
     /// Generating number of shares for all the miners.
-    fn miners_with_shares(&self, chain_iter: Iter<'_, Block>) -> HashMap<String, u64> {
+    fn miners_with_shares(&self, chain: Vec<&Block>) -> HashMap<String, u64> {
         let mut result: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
-        chain_iter.for_each(|block| {
+        chain.iter().for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
                 let addr = miner_wallet_address.to_base58();
                 if let Some(curr_hash_rate) = result.get(&addr) {
@@ -284,7 +282,9 @@ impl ShareChain for InMemoryShareChain {
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
-        let miners = self.miners_with_shares(self.chain(self.block_levels.read().await.iter()).iter());
+        let chain = self.chain(self.block_levels.read().await.iter());
+        let windowed_chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
+        let miners = self.miners_with_shares(windowed_chain);
 
         // calculate full hash rate and shares
         miners
@@ -340,5 +340,49 @@ impl ShareChain for InMemoryShareChain {
             .filter(|block| block.height() > from_height)
             .cloned()
             .collect())
+    }
+
+    async fn hash_rate(&self) -> ShareChainResult<u128> {
+        let block_levels = self.block_levels.read().await;
+        if block_levels.is_empty() {
+            return Ok(0);
+        }
+
+        let blocks = block_levels.iter()
+            .map(|level| level.blocks.clone())
+            .flatten()
+            .sorted_by(|block1, block2| {
+                block1.timestamp().cmp(&block2.timestamp())
+            });
+
+        // calculate time window
+        let first_block = blocks.clone()
+            .min_by(|block1, block2| { block1.timestamp().cmp(&block2.timestamp()) })
+            .ok_or_else(|| Error::Empty)?; // TODO: use another custom error
+        let last_block = blocks.clone()
+            .max_by(|block1, block2| { block1.timestamp().cmp(&block2.timestamp()) })
+            .ok_or_else(|| Error::Empty)?; // TODO: use another custom error
+        let all_time_window_seconds = last_block.timestamp().as_u64() - first_block.timestamp().as_u64();
+
+        // calculate average block time
+        let blocks = blocks.collect_vec();
+        let mut block_times_sum = 0;
+        let mut block_times_count = 0;
+        for i in 0..blocks.len() {
+            let current_block = blocks.get(i);
+            let next_block = blocks.get(i + 1);
+            if let Some(current_block) = current_block {
+                if let Some(next_block) = next_block {
+                    block_times_sum += next_block.timestamp().as_u64() - current_block.timestamp().as_u64();
+                    block_times_count += 1;
+                }
+            }
+        }
+        let avg_block_time = block_times_sum / block_times_count;
+
+        // TODO: continue impl
+
+
+        Ok(0)
     }
 }

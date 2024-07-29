@@ -4,6 +4,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
+use crate::server::http::stats;
 
 /// Config is the server configuration struct.
 #[derive(Clone)]
@@ -15,6 +16,7 @@ pub struct Config {
     pub peer_store: PeerStoreConfig,
     pub p2p_service: p2p::Config,
     pub mining_enabled: bool,
+    pub stats_server: stats::server::Config,
 }
 
 impl Default for Config {
@@ -27,6 +29,7 @@ impl Default for Config {
             peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
             mining_enabled: true,
+            stats_server: stats::server::Config::default(),
         }
     }
 }
@@ -92,6 +95,16 @@ impl ConfigBuilder {
 
     pub fn with_mdns_enabled(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.mdns_enabled = config;
+        self
+    }
+
+    pub fn with_stats_server_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.stats_server.enabled = config;
+        self
+    }
+
+    pub fn with_stats_server_port(&mut self, config: u16) -> &mut Self {
+        self.config.stats_server.port = config;
         self
     }
 
