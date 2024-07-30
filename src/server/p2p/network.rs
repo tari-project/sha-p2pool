@@ -359,7 +359,7 @@ where
 
                 match Block::try_from(message) {
                     Ok(payload) => {
-                        debug!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
+                        info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
                         match self.share_chain.submit_block(&payload).await {
                             Ok(result) => {
                                 if result.need_sync {
@@ -428,7 +428,7 @@ where
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
     async fn sync_share_chain(&mut self) {
         if self.sync_in_progress.load(Ordering::SeqCst) {
-            info!("Sync already in progress...");
+            debug!("Sync already in progress...");
             return;
         }
         self.sync_in_progress.store(true, Ordering::SeqCst);

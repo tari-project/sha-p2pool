@@ -28,8 +28,9 @@ impl From<Block> for StatsBlock {
 #[derive(Serialize, Deserialize)]
 pub struct Stats {
     pub connected: bool,
+    pub connected_since: Option<EpochTime>,
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
-    pub current_height: u64,
+    pub share_chain_height: u64,
     pub pool_hash_rate: BigUint,
 }

@@ -156,14 +156,8 @@ impl InMemoryShareChain {
             let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)?
                 - i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
             if block_height_diff > 1 {
-                warn!("Out-of-sync chain, do a sync now... Last block height: {:?}, New block height: {:?} , Diff: {block_height_diff:?}", last_block.height(), block.height());
+                warn!(target: LOG_TARGET, "Out-of-sync chain, do a sync now...");
                 return Ok(ValidateBlockResult::new(false, true));
-            }
-
-            // validate hash
-            if block.hash() != block.generate_hash() {
-                warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
-                return Ok(ValidateBlockResult::new(false, false));
             }
 
             // validate PoW
