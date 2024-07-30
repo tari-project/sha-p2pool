@@ -115,6 +115,7 @@ impl InMemoryShareChain {
                 });
         });
 
+        // TODO: revisit if we still need it
         // set correct height
         for (i, block) in result.iter_mut().enumerate() {
             block.set_height(i as u64);
