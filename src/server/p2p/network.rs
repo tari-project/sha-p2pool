@@ -433,11 +433,11 @@ where
         }
         self.sync_in_progress.store(true, Ordering::SeqCst);
 
-        info!(target: LOG_TARGET, "Syncing share chain...");
+        debug!(target: LOG_TARGET, "Syncing share chain...");
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
-                info!(target: LOG_TARGET, "Found highest known block height: {result:?}");
-                info!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
+                debug!(target: LOG_TARGET, "Found highest known block height: {result:?}");
+                debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
                 // we always send from_height as zero now, to not miss any blocks
                 self.swarm
                     .behaviour_mut()
