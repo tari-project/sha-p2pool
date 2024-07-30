@@ -1,6 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use num::BigUint;
 use serde::{Deserialize, Serialize};
 use tari_utilities::epoch_time::EpochTime;
 use tari_utilities::hex::Hex;
@@ -26,7 +27,9 @@ impl From<Block> for StatsBlock {
 
 #[derive(Serialize, Deserialize)]
 pub struct Stats {
+    pub connected: bool,
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
-    pub pool_hash_rate: u128,
+    pub current_height: u64,
+    pub pool_hash_rate: BigUint,
 }

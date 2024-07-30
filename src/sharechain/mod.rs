@@ -3,6 +3,7 @@
 
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use num::BigUint;
 
 use crate::sharechain::{block::Block, error::Error};
 
@@ -66,5 +67,5 @@ pub trait ShareChain: Send + Sync + 'static {
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).
     /// Returning number is the result in hash/second.
-    async fn hash_rate(&self) -> ShareChainResult<u128>;
+    async fn hash_rate(&self) -> ShareChainResult<BigUint>;
 }

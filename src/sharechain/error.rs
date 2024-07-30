@@ -4,6 +4,7 @@
 use std::num::TryFromIntError;
 
 use tari_common_types::tari_address::TariAddressError;
+use tari_core::proof_of_work::DifficultyError;
 use thiserror::Error;
 
 use crate::sharechain::block::Block;
@@ -20,6 +21,8 @@ pub enum Error {
     InvalidBlock(Block),
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
+    #[error("Difficulty calculation error: {0}")]
+    Difficulty(#[from] DifficultyError),
 }
 
 #[derive(Error, Debug)]

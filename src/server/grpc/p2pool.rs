@@ -1,16 +1,17 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{
-    base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
-    GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo,
+    base_node_client::BaseNodeClient, GetNewBlockRequest, GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest,
+    HeightRequest, NewBlockTemplateRequest, pow_algo::PowAlgos, PowAlgo, sha_p2_pool_server::ShaP2Pool,
     SubmitBlockRequest, SubmitBlockResponse,
 };
 use tari_core::proof_of_work::sha3x_difficulty;
+use tari_utilities::hex::Hex;
 use tokio::sync::Mutex;
 use tonic::{Code, Request, Response, Status};
 
@@ -19,7 +20,7 @@ use crate::{
         grpc::{error::Error, util},
         p2p,
     },
-    sharechain::{block::Block, ShareChain, SHARE_COUNT},
+    sharechain::{block::Block, SHARE_COUNT, ShareChain},
 };
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
@@ -59,14 +60,14 @@ where
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::SeqCst) {
             return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
         }
 
         if let Err(error) = self.share_chain.submit_block(block).await {
             warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
         }
-        debug!(target: LOG_TARGET, "Broadcast new block with height: {:?}", block.height());
+        info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
         self.p2p_client
             .broadcast_block(block)
             .await
@@ -85,7 +86,7 @@ where
         &self,
         _request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::SeqCst) {
             return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
         }
 
@@ -138,7 +139,7 @@ where
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::SeqCst) {
             return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
         }
 
@@ -196,14 +197,14 @@ where
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            },
+            }
             Err(_) => {
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            },
+            }
         }
     }
 }

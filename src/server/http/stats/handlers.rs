@@ -18,6 +18,9 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // connected
+    let connected = state.peer_store.peer_count().await > 0;
+
     // collect number of miners
     let num_of_miners = chain.iter()
         .map(|block| block.miner_wallet_address())
@@ -33,5 +36,16 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         .cloned()
         .map(|block| block.into());
 
-    Ok(Json(Stats { num_of_miners, last_block_won }))
+    let current_height = state.share_chain.tip_height().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get tip height of share chain: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // hash rate
+    let pool_hash_rate = state.share_chain.hash_rate().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get hash rate of share chain: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(Stats { connected, num_of_miners, last_block_won, current_height, pool_hash_rate }))
 }

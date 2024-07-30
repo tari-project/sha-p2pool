@@ -21,6 +21,7 @@ use crate::{
     sharechain::ShareChain,
 };
 use crate::server::http::stats::server::StatsServer;
+use crate::server::p2p::peer_store::PeerStore;
 
 const LOG_TARGET: &str = "p2pool::server::server";
 
@@ -36,8 +37,8 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-    where
-        S: ShareChain,
+where
+    S: ShareChain,
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -48,15 +49,16 @@ pub struct Server<S>
 
 // TODO: add graceful shutdown
 impl<S> Server<S>
-    where
-        S: ShareChain,
+where
+    S: ShareChain,
 {
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
+        let peer_store = Arc::new(PeerStore::new(&config.peer_store));
 
         let mut p2p_service: p2p::Service<S> =
-            p2p::Service::new(&config, share_chain.clone(), sync_in_progress.clone())
+            p2p::Service::new(&config, share_chain.clone(), peer_store.clone(), sync_in_progress.clone())
                 .await
                 .map_err(Error::P2PService)?;
 
@@ -82,6 +84,7 @@ impl<S> Server<S>
         let stats_server = if config.stats_server.enabled {
             Some(Arc::new(StatsServer::new(
                 share_chain.clone(),
+                peer_store.clone(),
                 config.stats_server.port,
             )))
         } else {

@@ -37,24 +37,26 @@ pub enum Error {
 }
 
 pub struct StatsServer<S>
-    where
-        S: ShareChain,
+where
+    S: ShareChain,
 {
     share_chain: Arc<S>,
+    peer_store: Arc<PeerStore>,
     port: u16,
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub share_chain: Arc<dyn ShareChain>,
+    pub peer_store: Arc<PeerStore>,
 }
 
 impl<S> StatsServer<S>
-    where
-        S: ShareChain,
+where
+    S: ShareChain,
 {
-    pub fn new(share_chain: Arc<S>, port: u16) -> Self {
-        Self { share_chain, port }
+    pub fn new(share_chain: Arc<S>, peer_store: Arc<PeerStore>, port: u16) -> Self {
+        Self { share_chain, peer_store, port }
     }
 
     /// Routes adds all the needed paths for the axum router.
@@ -63,6 +65,7 @@ impl<S> StatsServer<S>
             .route("/stats", get(handlers::handle_get_stats))
             .with_state(AppState {
                 share_chain: self.share_chain.clone(),
+                peer_store: self.peer_store.clone(),
             })
     }
 
