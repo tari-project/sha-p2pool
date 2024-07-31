@@ -13,8 +13,10 @@ use num::{BigUint, Integer, Zero};
 use tari_common::configuration::Network;
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
+use tari_core::blocks;
 use tari_core::blocks::BlockHeader;
-use tari_core::consensus::{ConsensusConstants, ConsensusManagerBuilder};
+use tari_core::consensus::{ConsensusConstants, ConsensusManager, ConsensusManagerBuilder};
+use tari_core::consensus::emission::EmissionSchedule;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
@@ -119,6 +121,7 @@ impl InMemoryShareChain {
         // set correct height
         for (i, block) in result.iter_mut().enumerate() {
             block.set_height(i as u64);
+            block.set_hash(block.generate_hash());
         }
 
         result
@@ -314,13 +317,10 @@ impl ShareChain for InMemoryShareChain {
             .block
             .as_ref()
             .ok_or_else(|| BlockConvertError::MissingField("block".to_string()))?;
-        let origin_block_header_grpc = origin_block_grpc
-            .header
-            .as_ref()
-            .ok_or_else(|| BlockConvertError::MissingField("header".to_string()))?;
-        let origin_block_header = BlockHeader::try_from(origin_block_header_grpc.clone())
-            .map_err(BlockConvertError::GrpcBlockHeaderConvert)?;
+        let origin_block = blocks::Block::try_from(origin_block_grpc.clone())
+            .map_err(BlockConvertError::GrpcBlockConvert)?; // TODO: use different error
 
+        // get current share chain
         let block_levels_read_lock = self.block_levels.read().await;
         let chain = self.chain(block_levels_read_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -329,7 +329,7 @@ impl ShareChain for InMemoryShareChain {
             .with_timestamp(EpochTime::now())
             .with_prev_hash(last_block.generate_hash())
             .with_height(last_block.height() + 1)
-            .with_original_block_header(origin_block_header)
+            .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
                 TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
             )

@@ -1,8 +1,11 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashMap;
+
 use num::BigUint;
 use serde::{Deserialize, Serialize};
+use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::epoch_time::EpochTime;
 use tari_utilities::hex::Hex;
 
@@ -33,4 +36,6 @@ pub struct Stats {
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,
     pub pool_hash_rate: BigUint,
+    pub pool_total_rewards: MicroMinotari,
+    pub estimated_earnings: HashMap<String, u64>,
 }

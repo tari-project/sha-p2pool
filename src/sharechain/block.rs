@@ -10,7 +10,6 @@ use tari_core::{
     consensus::DomainSeparatedConsensusHasher,
 };
 use tari_utilities::epoch_time::EpochTime;
-use tari_utilities::hex::Hex;
 
 use crate::impl_conversions;
 
@@ -75,8 +74,14 @@ impl Block {
     pub fn set_height(&mut self, height: u64) {
         self.height = height;
     }
+
+
     pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
         &self.miner_wallet_address
+    }
+
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash;
     }
 }
 

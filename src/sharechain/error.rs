@@ -4,6 +4,7 @@
 use std::num::TryFromIntError;
 
 use tari_common_types::tari_address::TariAddressError;
+use tari_core::consensus::ConsensusBuilderError;
 use tari_core::proof_of_work::DifficultyError;
 use thiserror::Error;
 
@@ -23,12 +24,14 @@ pub enum Error {
     FromIntConversion(#[from] TryFromIntError),
     #[error("Difficulty calculation error: {0}")]
     Difficulty(#[from] DifficultyError),
+    #[error("Consensus builder error: {0}")]
+    ConsensusBuilder(#[from] ConsensusBuilderError),
 }
 
 #[derive(Error, Debug)]
 pub enum BlockConvertError {
     #[error("Missing field: {0}")]
     MissingField(String),
-    #[error("Converting gRPC block header error: {0}")]
-    GrpcBlockHeaderConvert(String),
+    #[error("Converting gRPC block error: {0}")]
+    GrpcBlockConvert(String),
 }
