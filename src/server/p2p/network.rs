@@ -246,10 +246,6 @@ where
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
     /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
-        if self.sync_in_progress.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-
         // get peer info
         let share_chain = self.share_chain.clone();
         let current_height = share_chain.tip_height().await.map_err(Error::ShareChain)?;

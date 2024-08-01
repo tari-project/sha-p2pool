@@ -8,7 +8,7 @@ use std::{
 use std::ops::Deref;
 
 use libp2p::PeerId;
-use log::debug;
+use log::{debug, info};
 use moka::future::{Cache, CacheBuilder};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -85,6 +85,11 @@ impl PeerStore {
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
         self.inner.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+
+        self.inner.iter().for_each(|(peer_id, record)| {
+            info!("[PEER STORE] {:?} -> Height: {:?}", peer_id, record.peer_info.current_height);
+        });
+
         self.set_tip_of_block_height().await;
         self.set_last_connected().await;
     }
