@@ -75,7 +75,6 @@ impl Block {
         self.height = height;
     }
 
-
     pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
         &self.miner_wallet_address
     }

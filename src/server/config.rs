@@ -3,8 +3,8 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
 use crate::server::http::stats;
+use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
 
 /// Config is the server configuration struct.
 #[derive(Clone)]

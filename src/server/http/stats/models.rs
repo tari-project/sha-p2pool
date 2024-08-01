@@ -64,7 +64,7 @@ pub struct Stats {
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,
     pub pool_hash_rate: BigUint,
-    pub pool_total_rewards: MicroMinotari,
+    pub pool_total_earnings: MicroMinotari,
     pub pool_total_estimated_earnings: EstimatedEarnings,
     pub total_earnings: HashMap<String, u64>,
     pub estimated_earnings: HashMap<String, EstimatedEarnings>,

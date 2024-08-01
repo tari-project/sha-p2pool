@@ -1,27 +1,27 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
 use std::ops::{Add, Div};
 use std::slice::Iter;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Integer, Zero};
-use tari_common::configuration::Network;
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
-use tari_core::blocks::BlockHeader;
-use tari_core::consensus::{ConsensusConstants, ConsensusManager, ConsensusManagerBuilder};
-use tari_core::consensus::emission::EmissionSchedule;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{Block, BLOCKS_WINDOW, error::{BlockConvertError, Error}, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult};
+use crate::sharechain::{
+    error::{BlockConvertError, Error},
+    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT,
+    SHARE_COUNT,
+};
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
@@ -310,8 +310,8 @@ impl ShareChain for InMemoryShareChain {
             .block
             .as_ref()
             .ok_or_else(|| BlockConvertError::MissingField("block".to_string()))?;
-        let origin_block = blocks::Block::try_from(origin_block_grpc.clone())
-            .map_err(BlockConvertError::GrpcBlockConvert)?; // TODO: use different error
+        let origin_block =
+            blocks::Block::try_from(origin_block_grpc.clone()).map_err(BlockConvertError::GrpcBlockConvert)?; // TODO: use different error
 
         // get current share chain
         let block_levels_read_lock = self.block_levels.read().await;
@@ -345,11 +345,10 @@ impl ShareChain for InMemoryShareChain {
             return Ok(BigUint::zero());
         }
 
-        let blocks = block_levels.iter()
+        let blocks = block_levels
+            .iter()
             .flat_map(|level| level.blocks.clone())
-            .sorted_by(|block1, block2| {
-                block1.timestamp().cmp(&block2.timestamp())
-            })
+            .sorted_by(|block1, block2| block1.timestamp().cmp(&block2.timestamp()))
             .tail(BLOCKS_WINDOW);
 
         // calculate average block time
@@ -378,8 +377,7 @@ impl ShareChain for InMemoryShareChain {
         let mut hash_rates_sum = BigUint::zero();
         let mut hash_rates_count = BigUint::zero();
         for block in blocks {
-            let difficulty = sha3x_difficulty(block.original_block_header())
-                .map_err(Error::Difficulty)?;
+            let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
             let current_hash_rate = BigUint::from(difficulty.as_u64()).div(avg_block_time.clone());
             hash_rates_sum = hash_rates_sum.add(current_hash_rate);
             hash_rates_count.inc();

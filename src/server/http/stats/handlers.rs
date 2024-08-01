@@ -7,7 +7,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use itertools::Itertools;
-use log::{error, info};
+use log::error;
 use tari_common::configuration::Network;
 use tari_core::consensus::ConsensusManager;
 use tari_core::transactions::tari_amount::MicroMinotari;
@@ -29,7 +29,8 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
     let connected = state.peer_store.peer_count().await > 0;
 
     // collect number of miners
-    let num_of_miners = chain.iter()
+    let num_of_miners = chain
+        .iter()
         .map(|block| block.miner_wallet_address())
         .filter(|addr_opt| addr_opt.is_some())
         .map(|addr| addr.as_ref().unwrap().to_base58())
@@ -37,7 +38,8 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         .count();
 
     // last won block
-    let last_block_won = chain.iter()
+    let last_block_won = chain
+        .iter()
         .filter(|block| block.sent_to_main_chain())
         .last()
         .cloned()
@@ -59,11 +61,10 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
 
     // consensus manager
     let network = Network::get_current_or_user_setting_or_default();
-    let consensus_manager = ConsensusManager::builder(network).build()
-        .map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to build consensus manager: {error:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let consensus_manager = ConsensusManager::builder(network).build().map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to build consensus manager: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // calculate estimated earnings for all wallet addresses
     let blocks = state.share_chain.blocks(0).await.map_err(|error| {
@@ -71,9 +72,14 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let pool_total_rewards: u64 = blocks.iter()
+    let pool_total_rewards: u64 = blocks
+        .iter()
         .filter(|block| block.sent_to_main_chain())
-        .map(|block| consensus_manager.get_block_reward_at(block.original_block_header().height).as_u64())
+        .map(|block| {
+            consensus_manager
+                .get_block_reward_at(block.original_block_header().height)
+                .as_u64()
+        })
         .sum();
 
     // calculate all possibly earned rewards for all the miners until latest point
@@ -108,7 +114,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
     let mut estimated_earnings = HashMap::new();
     let mut pool_total_estimated_earnings_1m = 0u64;
     if !blocks.is_empty() {
-        // calculate "earning / minute" for all miners and overall
+        // calculate "earning / minute" for all miners
         let first_block_time = blocks.first().unwrap().timestamp();
         let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
         miners_with_rewards.iter().for_each(|(addr, total_earn)| {
@@ -126,7 +132,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         share_chain_height,
         pool_hash_rate,
         connected_since,
-        pool_total_rewards: MicroMinotari::from(pool_total_rewards),
+        pool_total_earnings: MicroMinotari::from(pool_total_rewards),
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
         total_earnings: miners_with_rewards,
         estimated_earnings,

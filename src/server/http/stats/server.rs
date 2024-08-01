@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use axum::Router;
 use axum::routing::get;
+use axum::Router;
 use log::info;
 use thiserror::Error;
 use tokio::io;
@@ -56,7 +56,11 @@ where
     S: ShareChain,
 {
     pub fn new(share_chain: Arc<S>, peer_store: Arc<PeerStore>, port: u16) -> Self {
-        Self { share_chain, peer_store, port }
+        Self {
+            share_chain,
+            peer_store,
+            port,
+        }
     }
 
     /// Routes adds all the needed paths for the axum router.
@@ -75,7 +79,7 @@ where
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", self.port))
             .await
             .map_err(Error::IO)?;
-        info!("Starting Stats HTTP server at http://127.0.0.1:{}", self.port);
+        info!(target: LOG_TARGET, "Starting Stats HTTP server at http://127.0.0.1:{}", self.port);
         axum::serve(listener, router).await.map_err(Error::IO)
     }
 }

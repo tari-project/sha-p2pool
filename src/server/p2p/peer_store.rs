@@ -5,10 +5,9 @@ use std::{
     sync::RwLock,
     time::{Duration, Instant},
 };
-use std::ops::Deref;
 
 use libp2p::PeerId;
-use log::{debug, info};
+use log::debug;
 use moka::future::{Cache, CacheBuilder};
 use tari_utilities::epoch_time::EpochTime;
 
