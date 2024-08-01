@@ -249,7 +249,7 @@ impl ShareChain for InMemoryShareChain {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
                 if last_block.hash() != genesis_block().hash()
-                    && usize::try_from(last_block.height()).map_err(Error::FromIntConversion)? < MAX_BLOCKS_COUNT
+                    // && usize::try_from(last_block.height()).map_err(Error::FromIntConversion)? < MAX_BLOCKS_COUNT
                     && usize::try_from(blocks[0].height()).map_err(Error::FromIntConversion)? > MAX_BLOCKS_COUNT
                 {
                     block_levels_write_lock.clear();
