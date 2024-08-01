@@ -7,7 +7,7 @@ use std::{
 };
 
 use libp2p::PeerId;
-use log::debug;
+use log::{debug, warn};
 use moka::future::{Cache, CacheBuilder};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -112,6 +112,8 @@ impl PeerStore {
             }
         } else if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
             *tip_height_opt = None;
+        } else {
+            warn!(target: LOG_TARGET, "Failed to set tip height!");
         }
     }
 

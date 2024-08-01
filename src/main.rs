@@ -25,6 +25,7 @@ fn cli_styles() -> Styles {
         .valid(AnsiColor::BrightGreen.on_default())
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser)]
 #[command(version)]
 #[command(styles = cli_styles())]
