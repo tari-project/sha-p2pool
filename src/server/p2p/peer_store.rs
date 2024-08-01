@@ -85,11 +85,6 @@ impl PeerStore {
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
         self.inner.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
-
-        self.inner.iter().for_each(|(peer_id, record)| {
-            info!("[PEER STORE] {:?} -> Height: {:?}", peer_id, record.peer_info.current_height);
-        });
-
         self.set_tip_of_block_height().await;
         self.set_last_connected().await;
     }
@@ -116,6 +111,8 @@ impl PeerStore {
                     *tip_height_opt = Some(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 }
             }
+        } else if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
+            *tip_height_opt = None;
         }
     }
 
