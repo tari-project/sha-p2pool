@@ -113,9 +113,7 @@ impl PeerStore {
                 if tip_height_opt.is_none() {
                     let _ = tip_height_opt.insert(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 } else {
-                    let mut tip_height = tip_height_opt.unwrap();
-                    tip_height.peer_id = *k;
-                    tip_height.height = v.peer_info.current_height;
+                    *tip_height_opt = Some(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 }
             }
         }
