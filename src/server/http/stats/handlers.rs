@@ -128,6 +128,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         connected_since,
         pool_total_rewards: MicroMinotari::from(pool_total_rewards),
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
+        total_earnings: miners_with_rewards,
         estimated_earnings,
     }))
 }

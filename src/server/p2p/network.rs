@@ -411,7 +411,7 @@ where
         if self.sync_in_progress.load(Ordering::SeqCst) {
             self.sync_in_progress.store(false, Ordering::SeqCst);
         }
-        debug!(target: LOG_TARGET, "Share chain sync response: {response:?}");
+        info!(target: LOG_TARGET, "Share chain sync response: {response:?}");
         match self.share_chain.submit_blocks(response.blocks, true).await {
             Ok(result) => {
                 if result.need_sync {
@@ -433,11 +433,11 @@ where
         }
         self.sync_in_progress.store(true, Ordering::SeqCst);
 
-        debug!(target: LOG_TARGET, "Syncing share chain...");
+        info!(target: LOG_TARGET, "Syncing share chain...");
         match self.peer_store.tip_of_block_height().await {
             Some(result) => {
-                debug!(target: LOG_TARGET, "Found highest known block height: {result:?}");
-                debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
+                info!(target: LOG_TARGET, "Found highest known block height: {result:?}");
+                info!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
                 // we always send from_height as zero now, to not miss any blocks
                 self.swarm
                     .behaviour_mut()
@@ -592,6 +592,7 @@ where
     /// Main loop of the service that drives the events and libp2p swarm forward.
     async fn main_loop(&mut self) -> Result<(), Error> {
         let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
+        let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(30));
 
         loop {
             select! {
@@ -634,6 +635,11 @@ where
                         }
                     }
                 },
+                _ = kademlia_bootstrap_interval.tick() => {
+                    if let Err(error) = self.bootstrap_kademlia() {
+                        warn!("Failed to do kademlia bootstrap: {error:?}");
+                    }
+                }
             }
         }
     }
@@ -659,6 +665,12 @@ where
             self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
         }
 
+        self.bootstrap_kademlia()?;
+
+        Ok(())
+    }
+
+    fn bootstrap_kademlia(&mut self) -> Result<(), Error> {
         self.swarm
             .behaviour_mut()
             .kademlia

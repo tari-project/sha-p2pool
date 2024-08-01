@@ -14,6 +14,7 @@ use crate::sharechain::block::Block;
 #[derive(Serialize, Deserialize)]
 pub struct StatsBlock {
     pub hash: String,
+    pub height: u64,
     pub timestamp: EpochTime,
     pub miner_wallet_address: Option<String>,
 }
@@ -22,6 +23,7 @@ impl From<Block> for StatsBlock {
     fn from(block: Block) -> Self {
         StatsBlock {
             hash: block.hash().to_hex(),
+            height: block.height(),
             timestamp: block.timestamp(),
             miner_wallet_address: block.miner_wallet_address().clone().map(|addr| addr.to_base58()),
         }
@@ -64,5 +66,6 @@ pub struct Stats {
     pub pool_hash_rate: BigUint,
     pub pool_total_rewards: MicroMinotari,
     pub pool_total_estimated_earnings: EstimatedEarnings,
+    pub total_earnings: HashMap<String, u64>,
     pub estimated_earnings: HashMap<String, EstimatedEarnings>,
 }
