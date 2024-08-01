@@ -117,13 +117,6 @@ impl InMemoryShareChain {
                 });
         });
 
-        // TODO: revisit if we still need it
-        // set correct height
-        for (i, block) in result.iter_mut().enumerate() {
-            block.set_height(i as u64);
-            block.set_hash(block.generate_hash());
-        }
-
         result
     }
 
@@ -220,16 +213,16 @@ impl InMemoryShareChain {
                 > 0;
             if !found {
                 found_level.add_block(block.clone())?;
-                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
             }
         } else if let Some(last_block) = last_block {
             if last_block.height() < block.height() {
                 block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
             }
         } else {
             block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-            info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+            info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
         }
 
         Ok(SubmitBlockResult::new(validate_result.need_sync))

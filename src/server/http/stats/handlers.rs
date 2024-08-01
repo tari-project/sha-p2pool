@@ -11,8 +11,9 @@ use log::{error, info};
 use tari_common::configuration::Network;
 use tari_core::consensus::ConsensusManager;
 use tari_core::transactions::tari_amount::MicroMinotari;
+use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::http::stats::models::Stats;
+use crate::server::http::stats::models::{EstimatedEarnings, Stats};
 use crate::server::http::stats::server::AppState;
 use crate::sharechain::SHARE_COUNT;
 
@@ -80,7 +81,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
     let mut miners_with_rewards = HashMap::<String, u64>::new();
     blocks.iter().for_each(|block| {
         if let Some(miner_wallet_address) = block.miner_wallet_address() {
-            let miner = miner_wallet_address.to_hex();
+            let miner = miner_wallet_address.to_base58();
             let reward = consensus_manager.get_block_reward_at(block.original_block_header().height);
 
             // collect share count for miners
@@ -104,22 +105,19 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         }
     });
 
-    info!("Miner rewards: {miners_with_rewards:?}");
-
     let mut estimated_earnings = HashMap::new();
+    let mut pool_total_estimated_earnings_1m = 0u64;
     if !blocks.is_empty() {
-        // calculate "earning / minute" for all miners
+        // calculate "earning / minute" for all miners and overall
         let first_block_time = blocks.first().unwrap().timestamp();
-        let last_block_time = blocks.last().unwrap().timestamp();
-        let full_interval = last_block_time.as_u64() - first_block_time.as_u64();
+        let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
         miners_with_rewards.iter().for_each(|(addr, total_earn)| {
-            let reward_per_24h = (full_interval / total_earn) * 60 * 60 * 24; // 24 hours
-            estimated_earnings.insert(addr.clone(), reward_per_24h);
+            pool_total_estimated_earnings_1m += total_earn;
+            let reward_per_1m = (total_earn / full_interval) * 60;
+            estimated_earnings.insert(addr.clone(), EstimatedEarnings::new(MicroMinotari::from(reward_per_1m)));
         });
+        pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
     }
-
-    // TODO: continue with estimated 24h earning of the whole pool
-
 
     Ok(Json(Stats {
         connected,
@@ -129,6 +127,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         pool_hash_rate,
         connected_since,
         pool_total_rewards: MicroMinotari::from(pool_total_rewards),
+        pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
         estimated_earnings,
     }))
 }

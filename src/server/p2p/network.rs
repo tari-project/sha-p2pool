@@ -554,9 +554,15 @@ where
                         }
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
+                        if self.sync_in_progress.load(Ordering::SeqCst) {
+                            self.sync_in_progress.store(false, Ordering::SeqCst);
+                        }
                         error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
                     }
                     request_response::Event::InboundFailure { peer, error, .. } => {
+                        if self.sync_in_progress.load(Ordering::SeqCst) {
+                            self.sync_in_progress.store(false, Ordering::SeqCst);
+                        }
                         error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
                     }
                     request_response::Event::ResponseSent { .. } => {}
