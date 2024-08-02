@@ -7,8 +7,6 @@ use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser,
 };
-use log::LevelFilter;
-
 use tari_common::initialize_logging;
 
 use crate::sharechain::in_memory::InMemoryShareChain;
@@ -27,14 +25,13 @@ fn cli_styles() -> Styles {
         .valid(AnsiColor::BrightGreen.on_default())
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser)]
 #[command(version)]
 #[command(styles = cli_styles())]
 #[command(about = "⛏ Decentralized mining pool for Tari network ⛏", long_about = None)]
 struct Cli {
-    /// Log level
-    #[arg(short, long, value_name = "log-level", default_value = Some("info"))]
-    log_level: LevelFilter,
+    base_dir: Option<PathBuf>,
 
     /// (Optional) gRPC port to use.
     #[arg(short, long, value_name = "grpc-port")]
@@ -43,6 +40,10 @@ struct Cli {
     /// (Optional) p2p port to use. It is used to connect p2pool nodes.
     #[arg(short, long, value_name = "p2p-port")]
     p2p_port: Option<u16>,
+
+    /// (Optional) stats server port to use.
+    #[arg(long, value_name = "stats-server-port")]
+    stats_server_port: Option<u16>,
 
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
@@ -85,14 +86,18 @@ struct Cli {
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     mdns_disabled: bool,
 
-    base_dir: Option<PathBuf>,
+    /// Stats server disabled
+    ///
+    /// If set, local stats HTTP server is disabled.
+    #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
+    stats_server_disabled: bool,
 }
 
 impl Cli {
     pub fn base_dir(&self) -> PathBuf {
         self.base_dir
             .clone()
-            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".p2pool/miner"))
+            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
     }
 }
 
@@ -124,6 +129,10 @@ async fn main() -> anyhow::Result<()> {
     config_builder.with_private_key_folder(cli.private_key_folder.clone());
     config_builder.with_mining_enabled(!cli.mining_disabled);
     config_builder.with_mdns_enabled(!cli.mdns_disabled);
+    config_builder.with_stats_server_enabled(!cli.stats_server_disabled);
+    if let Some(stats_server_port) = cli.stats_server_port {
+        config_builder.with_stats_server_port(stats_server_port);
+    }
 
     // server start
     let config = config_builder.build();

@@ -1,18 +1,18 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use log::{debug, info, warn};
+use log::{info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
     GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo,
     SubmitBlockRequest, SubmitBlockResponse,
 };
 use tari_core::proof_of_work::sha3x_difficulty;
+use tari_utilities::hex::Hex;
 use tokio::sync::Mutex;
-use tonic::{Code, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 use crate::{
     server::{
@@ -27,7 +27,7 @@ const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -35,37 +35,30 @@ where
     p2p_client: p2p::ServiceClient,
     /// Current share chain
     share_chain: Arc<S>,
-    sync_in_progress: Arc<AtomicBool>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     pub async fn new(
         base_node_address: String,
         p2p_client: p2p::ServiceClient,
         share_chain: Arc<S>,
-        sync_in_progress: Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
             p2p_client,
             share_chain,
-            sync_in_progress,
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
-        }
-
         if let Err(error) = self.share_chain.submit_block(block).await {
             warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
         }
-        debug!(target: LOG_TARGET, "Broadcast new block with height: {:?}", block.height());
+        info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
         self.p2p_client
             .broadcast_block(block)
             .await
@@ -76,7 +69,7 @@ where
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
@@ -84,10 +77,6 @@ where
         &self,
         _request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
-        }
-
         let mut pow_algo = PowAlgo::default();
         pow_algo.set_pow_algo(PowAlgos::Sha3x);
 
@@ -137,10 +126,6 @@ where
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
-        }
-
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block
             .block

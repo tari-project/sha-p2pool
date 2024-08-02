@@ -7,8 +7,9 @@ use std::{
 };
 
 use libp2p::PeerId;
-use log::debug;
+use log::{debug, warn};
 use moka::future::{Cache, CacheBuilder};
+use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::p2p::messages::PeerInfo;
 
@@ -64,6 +65,8 @@ pub struct PeerStore {
     ttl: Duration,
     // Peer with the highest share chain height.
     tip_of_block_height: RwLock<Option<PeerStoreBlockHeightTip>>,
+    // The last time when we had more than 0 peers.
+    last_connected: RwLock<Option<EpochTime>>,
 }
 
 impl PeerStore {
@@ -73,6 +76,7 @@ impl PeerStore {
             inner: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
             ttl: config.peer_record_ttl,
             tip_of_block_height: RwLock::new(None),
+            last_connected: RwLock::new(None),
         }
     }
 
@@ -81,11 +85,13 @@ impl PeerStore {
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
         self.inner.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
         self.set_tip_of_block_height().await;
+        self.set_last_connected().await;
     }
 
     /// Returns count of peers.
     /// Note: it is needed to calculate number of validations needed to make sure a new block is valid.
     pub async fn peer_count(&self) -> u64 {
+        self.set_last_connected().await;
         self.inner.entry_count()
     }
 
@@ -101,11 +107,13 @@ impl PeerStore {
                 if tip_height_opt.is_none() {
                     let _ = tip_height_opt.insert(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 } else {
-                    let mut tip_height = tip_height_opt.unwrap();
-                    tip_height.peer_id = *k;
-                    tip_height.height = v.peer_info.current_height;
+                    *tip_height_opt = Some(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
                 }
             }
+        } else if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
+            *tip_height_opt = None;
+        } else {
+            warn!(target: LOG_TARGET, "Failed to set tip height!");
         }
     }
 
@@ -135,7 +143,28 @@ impl PeerStore {
         }
 
         self.set_tip_of_block_height().await;
+        self.set_last_connected().await;
 
         expired_peers
+    }
+
+    pub async fn set_last_connected(&self) {
+        if let Ok(mut last_connected) = self.last_connected.write() {
+            if self.inner.entry_count() > 0 {
+                if last_connected.is_none() {
+                    let _ = last_connected.insert(EpochTime::now());
+                }
+            } else {
+                *last_connected = None;
+            }
+        }
+    }
+
+    pub fn last_connected(&self) -> Option<EpochTime> {
+        if let Ok(last_connected) = self.last_connected.read() {
+            return *last_connected;
+        }
+
+        None
     }
 }

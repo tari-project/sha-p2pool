@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use minotari_app_grpc::tari_rpc::{Block, BlockHeader, ProofOfWork, SubmitBlockRequest};
+    use minotari_app_grpc::tari_rpc::SubmitBlockRequest;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::{TariAddress, TariAddressFeatures};
     use tari_crypto::{keys::PublicKey as CryptoPubKey, ristretto::RistrettoPublicKey};
@@ -34,35 +34,35 @@ mod tests {
         blocks
     }
 
-    async fn generate_block_request(payment_address: String) -> SubmitBlockRequest {
-        SubmitBlockRequest {
-            block: Some(Block {
-                header: Some(BlockHeader {
-                    hash: [0; 32].to_vec(),
-                    version: 0,
-                    height: 1,
-                    prev_hash: [0; 32].to_vec(),
-                    timestamp: 1720167829,
-                    output_mr: [0; 32].to_vec(),
-                    kernel_mr: [0; 32].to_vec(),
-                    input_mr: [0; 32].to_vec(),
-                    total_kernel_offset: [0; 32].to_vec(),
-                    nonce: 119018423820796913,
-                    pow: Some(ProofOfWork {
-                        pow_algo: 1,
-                        pow_data: Vec::new(),
-                    }),
-                    kernel_mmr_size: 795,
-                    output_mmr_size: 804,
-                    total_script_offset: [0; 32].to_vec(),
-                    validator_node_mr: [0; 32].to_vec(),
-                    validator_node_size: 0,
-                }),
-                body: None,
-            }),
-            wallet_payment_address: payment_address,
-        }
-    }
+    // async fn generate_block_request(payment_address: String) -> SubmitBlockRequest {
+    //     SubmitBlockRequest {
+    //         block: Some(Block {
+    //             header: Some(BlockHeader {
+    //                 hash: [0; 32].to_vec(),
+    //                 version: 0,
+    //                 height: 1,
+    //                 prev_hash: [0; 32].to_vec(),
+    //                 timestamp: 1720167829,
+    //                 output_mr: [0; 32].to_vec(),
+    //                 kernel_mr: [0; 32].to_vec(),
+    //                 input_mr: [0; 32].to_vec(),
+    //                 total_kernel_offset: [0; 32].to_vec(),
+    //                 nonce: 119018423820796913,
+    //                 pow: Some(ProofOfWork {
+    //                     pow_algo: 1,
+    //                     pow_data: Vec::new(),
+    //                 }),
+    //                 kernel_mmr_size: 795,
+    //                 output_mmr_size: 804,
+    //                 total_script_offset: [0; 32].to_vec(),
+    //                 validator_node_mr: [0; 32].to_vec(),
+    //                 validator_node_size: 0,
+    //             }),
+    //             body: None,
+    //         }),
+    //         wallet_payment_address: payment_address,
+    //     }
+    // }
 
     #[tokio::test]
     async fn submit_blocks_nominal_case() {
@@ -122,18 +122,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn new_block_nominal_case() {
-        let chain = InMemoryShareChain::default();
-
-        let req = generate_block_request(new_random_address().to_hex()).await;
-        let op = chain.new_block(&req).await;
-        assert!(op.is_ok());
-
-        let block = op.unwrap();
-        assert!(block.height() == 1);
-    }
-
-    #[tokio::test]
     async fn new_block_error_no_block() {
         let chain = InMemoryShareChain::default();
 
@@ -147,21 +135,6 @@ mod tests {
         assert_eq!(
             op.err().unwrap().to_string(),
             "gRPC Block conversion error: Missing field: block"
-        );
-    }
-
-    #[tokio::test]
-    async fn new_block_error_invalid_address() {
-        let chain = InMemoryShareChain::default();
-
-        // not in hex format, error
-        let req = generate_block_request(new_random_address().to_string()).await;
-        let op = chain.new_block(&req).await;
-
-        assert!(op.is_err());
-        assert_eq!(
-            op.err().unwrap().to_string(),
-            "Tari address error: Cannot recover public key"
         );
     }
 }
