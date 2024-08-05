@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::server::http::stats::server::StatsServer;
 use crate::server::p2p::peer_store::PeerStore;
+use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
         config, grpc,
@@ -56,6 +57,7 @@ where
         let share_chain = Arc::new(share_chain);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
         let peer_store = Arc::new(PeerStore::new(&config.peer_store));
+        let stats_store = Arc::new(StatsStore::new());
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
@@ -78,6 +80,7 @@ where
                 config.base_node_address.clone(),
                 p2p_service.client(),
                 share_chain.clone(),
+                stats_store.clone(),
             )
             .await
             .map_err(Error::Grpc)?;
@@ -88,6 +91,7 @@ where
             Some(Arc::new(StatsServer::new(
                 share_chain.clone(),
                 peer_store.clone(),
+                stats_store.clone(),
                 config.stats_server.port,
             )))
         } else {

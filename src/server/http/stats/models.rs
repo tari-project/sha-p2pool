@@ -57,6 +57,23 @@ impl EstimatedEarnings {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct BlockStats {
+    pub accepted: u64,
+    pub rejected: u64,
+    pub submitted: u64,
+}
+
+impl BlockStats {
+    pub fn new(accepted: u64, rejected: u64) -> Self {
+        Self {
+            accepted,
+            rejected,
+            submitted: accepted + rejected,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Stats {
     pub connected: bool,
     pub connected_since: Option<EpochTime>,
@@ -68,4 +85,6 @@ pub struct Stats {
     pub pool_total_estimated_earnings: EstimatedEarnings,
     pub total_earnings: HashMap<String, u64>,
     pub estimated_earnings: HashMap<String, EstimatedEarnings>,
+    pub miner_block_stats: BlockStats,
+    pub p2pool_block_stats: BlockStats,
 }
