@@ -19,7 +19,7 @@ impl StatsStore {
     /// Returns one stat by [`key`].
     pub async fn get(&self, key: &String) -> u64 {
         let read_lock = self.stats.read().await;
-        read_lock.get(key).cloned().unwrap_or(0)
+        read_lock.get(key).copied().unwrap_or(0)
     }
 
     /// Increments stat with given key.
