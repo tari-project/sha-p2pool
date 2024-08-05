@@ -11,6 +11,7 @@ use tokio::io;
 
 use crate::server::http::stats::handlers;
 use crate::server::p2p::peer_store::PeerStore;
+use crate::server::stats_store::StatsStore;
 use crate::sharechain::ShareChain;
 
 const LOG_TARGET: &str = "p2pool::server::stats";
@@ -42,6 +43,7 @@ where
 {
     share_chain: Arc<S>,
     peer_store: Arc<PeerStore>,
+    stats_store: Arc<StatsStore>,
     port: u16,
 }
 
@@ -49,16 +51,18 @@ where
 pub struct AppState {
     pub share_chain: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
+    pub stats_store: Arc<StatsStore>,
 }
 
 impl<S> StatsServer<S>
 where
     S: ShareChain,
 {
-    pub fn new(share_chain: Arc<S>, peer_store: Arc<PeerStore>, port: u16) -> Self {
+    pub fn new(share_chain: Arc<S>, peer_store: Arc<PeerStore>, stats_store: Arc<StatsStore>, port: u16) -> Self {
         Self {
             share_chain,
             peer_store,
+            stats_store,
             port,
         }
     }
@@ -70,6 +74,7 @@ where
             .with_state(AppState {
                 share_chain: self.share_chain.clone(),
                 peer_store: self.peer_store.clone(),
+                stats_store: self.stats_store.clone(),
             })
     }
 

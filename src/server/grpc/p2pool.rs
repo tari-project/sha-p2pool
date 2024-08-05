@@ -14,6 +14,11 @@ use tari_utilities::hex::Hex;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
+use crate::server::http::stats::{
+    MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+    P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+};
+use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
         grpc::{error::Error, util},
@@ -35,6 +40,8 @@ where
     p2p_client: p2p::ServiceClient,
     /// Current share chain
     share_chain: Arc<S>,
+    /// Stats store
+    stats_store: Arc<StatsStore>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -45,24 +52,37 @@ where
         base_node_address: String,
         p2p_client: p2p::ServiceClient,
         share_chain: Arc<S>,
+        stats_store: Arc<StatsStore>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
             p2p_client,
             share_chain,
+            stats_store,
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        if let Err(error) = self.share_chain.submit_block(block).await {
-            warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
+        match self.share_chain.submit_block(block).await {
+            Ok(_) => {
+                self.stats_store
+                    .inc(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
+                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
+                self.p2p_client
+                    .broadcast_block(block)
+                    .await
+                    .map_err(|error| Status::internal(error.to_string()))
+            },
+            Err(error) => {
+                warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
+                self.stats_store
+                    .inc(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
+                Ok(())
+            },
         }
-        info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
-        self.p2p_client
-            .broadcast_block(block)
-            .await
-            .map_err(|error| Status::internal(error.to_string()))
     }
 }
 
@@ -176,12 +196,19 @@ where
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
         match self.client.lock().await.submit_block(grpc_request).await {
             Ok(resp) => {
+                self.stats_store
+                    .inc(&P2POOL_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
                 info!("💰 New matching block found and sent to network!");
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             },
-            Err(_) => {
+            Err(error) => {
+                warn!("Failed to submit block to Tari network: {error:?}");
+                self.stats_store
+                    .inc(&P2POOL_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {

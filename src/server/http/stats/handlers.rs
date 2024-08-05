@@ -13,8 +13,12 @@ use tari_core::consensus::ConsensusManager;
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::http::stats::models::{EstimatedEarnings, Stats};
+use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats};
 use crate::server::http::stats::server::AppState;
+use crate::server::http::stats::{
+    MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+    P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+};
 use crate::sharechain::SHARE_COUNT;
 
 const LOG_TARGET: &str = "p2pool::server::stats::get";
@@ -136,5 +140,25 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
         total_earnings: miners_with_rewards,
         estimated_earnings,
+        miner_block_stats: BlockStats::new(
+            state
+                .stats_store
+                .get(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string())
+                .await,
+            state
+                .stats_store
+                .get(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string())
+                .await,
+        ),
+        p2pool_block_stats: BlockStats::new(
+            state
+                .stats_store
+                .get(&P2POOL_STAT_ACCEPTED_BLOCKS_COUNT.to_string())
+                .await,
+            state
+                .stats_store
+                .get(&P2POOL_STAT_REJECTED_BLOCKS_COUNT.to_string())
+                .await,
+        ),
     }))
 }
