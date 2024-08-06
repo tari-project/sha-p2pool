@@ -4,11 +4,13 @@
 use std::path::PathBuf;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
+    builder::{Styles, styling::AnsiColor},
     Parser,
 };
 use tari_common::initialize_logging;
+use tari_utilities::hex::Hex;
 
+use crate::server::p2p;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
 mod server;
@@ -91,6 +93,13 @@ struct Cli {
     /// If set, local stats HTTP server is disabled.
     #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
     stats_server_disabled: bool,
+
+    /// Generate identity
+    ///
+    /// If set, sha_p2pool will only generate a private key in `--private-key-folder`
+    /// and output a stable peer ID, that could be used later when running as a stable peer.
+    #[arg(long, value_name = "generate-identity", default_value_t = false)]
+    generate_identity: bool,
 }
 
 impl Cli {
@@ -104,6 +113,13 @@ impl Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // generate identity
+    if cli.generate_identity {
+        let result = p2p::util::generate_identity().await?;
+        print!("{}", serde_cbor::to_vec(&result)?.to_hex());
+        return Ok(());
+    }
 
     // logger setup
     if let Err(e) = initialize_logging(

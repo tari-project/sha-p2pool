@@ -13,3 +13,4 @@ mod error;
 pub mod messages;
 mod network;
 pub mod peer_store;
+pub mod util;
