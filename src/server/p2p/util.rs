@@ -19,6 +19,7 @@ impl GenerateIdentityResult {
     }
 }
 
+/// Generates a new private key that can be used to return when generating identity.
 pub async fn generate_identity() -> anyhow::Result<GenerateIdentityResult> {
     Ok(GenerateIdentityResult::new(
         Keypair::generate_ed25519().to_protobuf_encoding()?,
