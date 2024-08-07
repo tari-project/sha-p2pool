@@ -1,16 +1,19 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::env;
 use std::path::PathBuf;
 
 use clap::{
-    builder::{Styles, styling::AnsiColor},
+    builder::{styling::AnsiColor, Styles},
     Parser,
 };
+use libp2p::identity::Keypair;
 use tari_common::initialize_logging;
 use tari_utilities::hex::Hex;
 
 use crate::server::p2p;
+use crate::server::p2p::util::GenerateIdentityResult;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
 mod server;
@@ -143,6 +146,15 @@ async fn main() -> anyhow::Result<()> {
     }
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder.clone());
+
+    // try to extract env var based private key
+    if let Ok(identity_cbor) = env::var("SHA_P2POOL_IDENTITY") {
+        let identity_raw = hex::decode(identity_cbor.as_bytes())?;
+        let identity: GenerateIdentityResult = serde_cbor::from_slice(identity_raw.as_slice())?;
+        let private_key = Keypair::from_protobuf_encoding(identity.private_key().as_slice())?;
+        config_builder.with_private_key(Some(private_key));
+    }
+
     config_builder.with_mining_enabled(!cli.mining_disabled);
     config_builder.with_mdns_enabled(!cli.mdns_disabled);
     config_builder.with_stats_server_enabled(!cli.stats_server_disabled);

@@ -4261,6 +4261,7 @@ dependencies = [
  "clap 4.5.9",
  "digest",
  "dirs",
+ "hex",
  "itertools 0.13.0",
  "libp2p",
  "log",
