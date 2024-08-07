@@ -2,26 +2,28 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use libp2p::identity::Keypair;
+use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
+use tari_utilities::hex::Hex;
 
 #[derive(Serialize, Deserialize)]
 pub struct GenerateIdentityResult {
-    private_key: Vec<u8>,
+    peer_id: PeerId,
+    private_key: String,
 }
 
 impl GenerateIdentityResult {
-    pub fn new(private_key: Vec<u8>) -> Self {
-        Self { private_key }
-    }
-
-    pub fn private_key(&self) -> &Vec<u8> {
-        &self.private_key
+    pub fn new(peer_id: PeerId, private_key: String) -> Self {
+        Self { peer_id, private_key }
     }
 }
 
-/// Generates a new private key that can be used to return when generating identity.
+/// Generates a new identity (private key for libp2p).
 pub async fn generate_identity() -> anyhow::Result<GenerateIdentityResult> {
+    let private_key = Keypair::generate_ed25519();
+    let private_key_raw = private_key.to_protobuf_encoding()?.to_hex();
     Ok(GenerateIdentityResult::new(
-        Keypair::generate_ed25519().to_protobuf_encoding()?,
+        private_key.public().to_peer_id(),
+        private_key_raw,
     ))
 }

@@ -10,10 +10,8 @@ use clap::{
 };
 use libp2p::identity::Keypair;
 use tari_common::initialize_logging;
-use tari_utilities::hex::Hex;
 
 use crate::server::p2p;
-use crate::server::p2p::util::GenerateIdentityResult;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
 mod server;
@@ -120,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     // generate identity
     if cli.generate_identity {
         let result = p2p::util::generate_identity().await?;
-        print!("{}", serde_cbor::to_vec(&result)?.to_hex());
+        print!("{}", serde_json::to_value(&result)?);
         return Ok(());
     }
 
@@ -150,8 +148,7 @@ async fn main() -> anyhow::Result<()> {
     // try to extract env var based private key
     if let Ok(identity_cbor) = env::var("SHA_P2POOL_IDENTITY") {
         let identity_raw = hex::decode(identity_cbor.as_bytes())?;
-        let identity: GenerateIdentityResult = serde_cbor::from_slice(identity_raw.as_slice())?;
-        let private_key = Keypair::from_protobuf_encoding(identity.private_key().as_slice())?;
+        let private_key = Keypair::from_protobuf_encoding(identity_raw.as_slice())?;
         config_builder.with_private_key(Some(private_key));
     }
 
