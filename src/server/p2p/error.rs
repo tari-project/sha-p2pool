@@ -27,6 +27,8 @@ pub enum LibP2PError {
     Noise(#[from] noise::Error),
     #[error("Multi address parse error: {0}")]
     MultiAddrParse(#[from] multiaddr::Error),
+    #[error("Multi address empty")]
+    MultiAddrEmpty,
     #[error("Transport error: {0}")]
     Transport(#[from] TransportError<std::io::Error>),
     #[error("I/O error: {0}")]
