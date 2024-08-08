@@ -5,8 +5,8 @@ use std::{path::PathBuf, time::Duration};
 
 use libp2p::identity::Keypair;
 
-use crate::server::http::stats;
 use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
+use crate::server::http::stats;
 
 /// Config is the server configuration struct.
 #[derive(Clone)]
@@ -62,6 +62,11 @@ impl ConfigBuilder {
 
     pub fn with_idle_connection_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.config.idle_connection_timeout = timeout;
+        self
+    }
+
+    pub fn with_tribe(&mut self, tribe: String) -> &mut Self {
+        self.config.p2p_service.tribe = tribe;
         self
     }
 

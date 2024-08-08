@@ -5,7 +5,7 @@ use std::env;
 use std::path::PathBuf;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
+    builder::{Styles, styling::AnsiColor},
     Parser,
 };
 use libp2p::identity::Keypair;
@@ -59,7 +59,7 @@ struct Cli {
     ///
     /// e.g.:
     /// /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
-    /// /dnsaddr/esme.p2pool.tari.com
+    /// /dnsaddr/esmeralda.p2pool.tari.com
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
 
@@ -69,6 +69,11 @@ struct Cli {
     /// and ID of the Peer remains the same.
     #[arg(long, value_name = "stable-peer", default_value_t = false)]
     stable_peer: bool,
+
+    /// Tribe to enter (a team of miners).
+    /// A tribe can have any name.
+    #[arg(long, value_name = "tribe", default_value = "default")]
+    tribe: String,
 
     /// Private key folder.
     ///
@@ -174,6 +179,8 @@ async fn main() -> anyhow::Result<()> {
     if let Some(stats_server_port) = cli.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }
+    // TODO: implement tribe struct for general parsing (converting any string to snake_case string)
+    config_builder.with_tribe(cli.tribe);
 
     // server start
     let config = config_builder.build();

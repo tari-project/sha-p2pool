@@ -1,34 +1,34 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
     sync::Arc,
     time::Duration,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
-use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
     futures::StreamExt,
     gossipsub,
     gossipsub::{IdentTopic, Message, PublishError},
     identity::Keypair,
     kad,
-    kad::{store::MemoryStore, Event, Mode},
+    kad::{Event, Mode, store::MemoryStore},
     mdns,
     mdns::tokio::Tokio,
-    multiaddr::Protocol,
-    noise, request_response,
+    Multiaddr,
+    multiaddr::Protocol, noise,
+    request_response,
     request_response::{cbor, ResponseChannel},
-    swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, StreamProtocol, Swarm,
+    StreamProtocol, swarm::{NetworkBehaviour, SwarmEvent}, Swarm, tcp, yamux,
 };
+use libp2p::swarm::behaviour::toggle::Toggle;
 use log::{debug, error, info, warn};
 use tari_common::configuration::Network;
 use tari_utilities::hex::Hex;
@@ -40,19 +40,19 @@ use tokio::{
     sync::{broadcast, broadcast::error::RecvError},
 };
 
-use crate::server::p2p::messages::LocalShareChainSyncRequest;
 use crate::{
     server::{
         config,
         p2p::{
+            Error,
+            LibP2PError,
             messages,
-            messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
-            peer_store::PeerStore,
-            Error, LibP2PError, ServiceClient,
+            messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse}, peer_store::PeerStore, ServiceClient,
         },
     },
     sharechain::{block::Block, ShareChain},
 };
+use crate::server::p2p::messages::LocalShareChainSyncRequest;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
@@ -64,6 +64,7 @@ pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 pub struct Config {
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
+    pub tribe: String,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,
@@ -75,6 +76,7 @@ impl Default for Config {
         Self {
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(5),
+            tribe: "default".to_string(),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -261,11 +263,18 @@ where
         let current_height = share_chain.tip_height().await.map_err(Error::ShareChain)?;
         let peer_info_raw: Vec<u8> = PeerInfo::new(current_height).try_into()?;
 
-        // broadcast peer info
+        // broadcast peer info to network
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(Self::topic_name(PEER_INFO_TOPIC)), peer_info_raw)
+            .publish(IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)), peer_info_raw)
+            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
+
+        // broadcast peer info to tribe
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(IdentTopic::new(Self::tribe_topic(self.config.tribe.as_str(), PEER_INFO_TOPIC)), peer_info_raw)
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         Ok(())
@@ -286,44 +295,61 @@ where
                             .swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(IdentTopic::new(Self::topic_name(NEW_BLOCK_TOPIC)), block_raw)
+                            .publish(IdentTopic::new(Self::network_topic(NEW_BLOCK_TOPIC)), block_raw)
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
-                            Ok(_) => {},
+                            Ok(_) => {}
                             Err(error) => {
                                 error!(target: LOG_TARGET, "Failed to broadcast new block: {error:?}")
-                            },
+                            }
                         }
-                    },
+                    }
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block to bytes: {error:?}")
-                    },
+                    }
                 }
-            },
+            }
             Err(error) => error!(target: LOG_TARGET, "Failed to receive new block: {error:?}"),
         }
     }
 
-    /// Generates the gossip sub topic names based on the current Tari network to avoid mixing up
+    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
     /// blocks and peers with different Tari networks.
-    fn topic_name(topic: &str) -> String {
+    fn network_topic(topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
         format!("{network}_{topic}")
     }
 
+    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
+    /// blocks and peers with different Tari networks and the given tribe name.
+    fn tribe_topic(tribe: &str, topic: &str) -> String {
+        let network = Network::get_current_or_user_setting_or_default().as_key_str();
+        format!("{network}_{tribe}_{topic}")
+    }
+
     /// Subscribing to a gossipsub topic.
-    fn subscribe(&mut self, topic: &str) {
+    fn subscribe(&mut self, topic: &str, tribe: Option<&str>) {
+        let topic = match tribe {
+            Some(tribe) => {
+                Self::tribe_topic(tribe, topic)
+            }
+            None => {
+                Self::network_topic(topic)
+            }
+        };
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .subscribe(&IdentTopic::new(Self::topic_name(topic)))
+            .subscribe(&IdentTopic::new(topic))
             .expect("must be subscribed to topic");
     }
 
     /// Subscribes to all topics we need.
     fn subscribe_to_topics(&mut self) {
-        self.subscribe(PEER_INFO_TOPIC);
-        self.subscribe(NEW_BLOCK_TOPIC);
+        let tribe = self.config.tribe.clone();
+        self.subscribe(PEER_INFO_TOPIC, Some(tribe.as_str()));
+        self.subscribe(PEER_INFO_TOPIC, None);
+        self.subscribe(NEW_BLOCK_TOPIC, None);
     }
 
     /// Main method to handle any message comes from gossipsub.
@@ -338,7 +364,7 @@ where
         let topic = message.topic.to_string();
 
         match topic {
-            topic if topic == Self::topic_name(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
+            topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
@@ -349,14 +375,14 @@ where
                             }
                         }
                     }
-                },
+                }
                 Err(error) => {
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
-                },
+                }
             },
             // TODO: send a signature that proves that the actual block was coming from this peer
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like 20%))
-            topic if topic == Self::topic_name(NEW_BLOCK_TOPIC) => {
+            topic if topic == Self::network_topic(NEW_BLOCK_TOPIC) => {
                 if self.sync_in_progress.load(Ordering::SeqCst) {
                     return;
                 }
@@ -369,20 +395,20 @@ where
                                 if result.need_sync {
                                     self.sync_share_chain().await;
                                 }
-                            },
+                            }
                             Err(error) => {
                                 error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
-                            },
+                            }
                         }
-                    },
+                    }
                     Err(error) => {
                         error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
-                    },
+                    }
                 }
-            },
+            }
             _ => {
                 warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
-            },
+            }
         }
     }
 
@@ -404,7 +430,7 @@ where
                 {
                     error!(target: LOG_TARGET, "Failed to send block sync response");
                 }
-            },
+            }
             Err(error) => error!(target: LOG_TARGET, "Failed to get blocks from height: {error:?}"),
         }
     }
@@ -421,10 +447,10 @@ where
                 if result.need_sync {
                     self.sync_share_chain().await;
                 }
-            },
+            }
             Err(error) => {
                 error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
-            },
+            }
         }
     }
 
@@ -447,11 +473,11 @@ where
                     .behaviour_mut()
                     .share_chain_sync
                     .send_request(&result.peer_id, ShareChainSyncRequest::new(0));
-            },
+            }
             None => {
                 self.sync_in_progress.store(false, Ordering::SeqCst);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
-            },
+            }
         }
     }
 
@@ -495,17 +521,17 @@ where
                         } else {
                             in_progress.store(false, Ordering::SeqCst);
                         }
-                    },
+                    }
                     Err(error) => {
                         in_progress.store(false, Ordering::SeqCst);
                         error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
-                    },
+                    }
                 }
-            },
+            }
             None => {
                 in_progress.store(false, Ordering::SeqCst);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
-            },
+            }
         }
     }
 
@@ -514,7 +540,7 @@ where
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
-            },
+            }
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
@@ -522,12 +548,12 @@ where
                             self.swarm.add_peer_address(peer, addr);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         }
-                    },
+                    }
                     mdns::Event::Expired(peers) => {
                         for (peer, _addr) in peers {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
                         }
-                    },
+                    }
                 },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message {
@@ -536,10 +562,10 @@ where
                         propagation_source: _propagation_source,
                     } => {
                         self.handle_new_gossipsub_message(message).await;
-                    },
-                    gossipsub::Event::Subscribed { .. } => {},
-                    gossipsub::Event::Unsubscribed { .. } => {},
-                    gossipsub::Event::GossipsubNotSupported { .. } => {},
+                    }
+                    gossipsub::Event::Subscribed { .. } => {}
+                    gossipsub::Event::Unsubscribed { .. } => {}
+                    gossipsub::Event::GossipsubNotSupported { .. } => {}
                 },
                 ServerNetworkBehaviourEvent::ShareChainSync(event) => match event {
                     request_response::Event::Message { peer: _peer, message } => match message {
@@ -549,27 +575,27 @@ where
                             channel,
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
-                        },
+                        }
                         request_response::Message::Response {
                             request_id: _request_id,
                             response,
                         } => {
                             self.handle_share_chain_sync_response(response).await;
-                        },
+                        }
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                    },
+                    }
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    },
-                    request_response::Event::ResponseSent { .. } => {},
+                    }
+                    request_response::Event::ResponseSent { .. } => {}
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated {
@@ -585,11 +611,11 @@ where
                         if let Some(old_peer) = old_peer {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
                         }
-                    },
+                    }
                     _ => debug!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
                 },
             },
-            _ => {},
+            _ => {}
         };
     }
 
@@ -691,17 +717,17 @@ where
                                             if let Some(peer_id) = peer_id {
                                                 self.swarm.behaviour_mut().kademlia.add_address(&peer_id, parsed_addr);
                                             }
-                                        },
+                                        }
                                         Err(error) => {
                                             warn!("Skipping invalid DNS entry: {:?}: {error:?}", chars);
-                                        },
+                                        }
                                     }
                                 }
                             }
-                        },
+                        }
                         Err(error) => {
                             error!("Failed to lookup domain records: {error:?}");
-                        },
+                        }
                     }
                 }
             } else {
@@ -763,7 +789,7 @@ where
                 share_chain_sync_tx,
                 Duration::from_secs(30),
             )
-            .await;
+                .await;
         });
 
         self.main_loop().await
