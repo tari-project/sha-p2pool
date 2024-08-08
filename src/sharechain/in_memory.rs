@@ -238,7 +238,7 @@ impl ShareChain for InMemoryShareChain {
             .await;
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
         result
     }
 
@@ -268,7 +268,7 @@ impl ShareChain for InMemoryShareChain {
 
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
 
         Ok(SubmitBlockResult::new(false))
     }

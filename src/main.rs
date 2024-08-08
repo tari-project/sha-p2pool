@@ -1,14 +1,18 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::env;
 use std::path::PathBuf;
 
 use clap::{
     builder::{styling::AnsiColor, Styles},
     Parser,
 };
+use libp2p::identity::Keypair;
+use tari_common::configuration::Network;
 use tari_common::initialize_logging;
 
+use crate::server::p2p;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
 mod server;
@@ -48,9 +52,14 @@ struct Cli {
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
     ///
-    /// Please note that these addresses must be in libp2p multi address format and must contain peer ID!
+    /// Please note that these addresses must be in libp2p multi address format and must contain peer ID
+    /// or use a dnsaddr multi address!
     ///
-    /// e.g.: /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
+    /// By default a Tari provided seed peer is added.
+    ///
+    /// e.g.:
+    /// /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
+    /// /dnsaddr/esme.p2pool.tari.com
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
 
@@ -91,6 +100,13 @@ struct Cli {
     /// If set, local stats HTTP server is disabled.
     #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
     stats_server_disabled: bool,
+
+    /// Generate identity
+    ///
+    /// If set, sha_p2pool will only generate a private key in `--private-key-folder`
+    /// and output a stable peer ID, that could be used later when running as a stable peer.
+    #[arg(long, value_name = "generate-identity", default_value_t = false)]
+    generate_identity: bool,
 }
 
 impl Cli {
@@ -104,6 +120,13 @@ impl Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // generate identity
+    if cli.generate_identity {
+        let result = p2p::util::generate_identity().await?;
+        print!("{}", serde_json::to_value(result)?);
+        return Ok(());
+    }
 
     // logger setup
     if let Err(e) = initialize_logging(
@@ -122,11 +145,29 @@ async fn main() -> anyhow::Result<()> {
     if let Some(p2p_port) = cli.p2p_port {
         config_builder.with_p2p_port(p2p_port);
     }
-    if let Some(seed_peers) = cli.seed_peers.clone() {
-        config_builder.with_seed_peers(seed_peers);
+
+    // set default tari network specific seed peer address
+    let mut seed_peers = vec![];
+    let network = Network::get_current_or_user_setting_or_default();
+    if network != Network::LocalNet {
+        let default_seed_peer = format!("/dnsaddr/{}.p2pool.tari.com", network.as_key_str());
+        seed_peers.push(default_seed_peer);
     }
+    if let Some(cli_seed_peers) = cli.seed_peers.clone() {
+        seed_peers.extend(cli_seed_peers.iter().cloned());
+    }
+    config_builder.with_seed_peers(seed_peers);
+
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder.clone());
+
+    // try to extract env var based private key
+    if let Ok(identity_cbor) = env::var("SHA_P2POOL_IDENTITY") {
+        let identity_raw = hex::decode(identity_cbor.as_bytes())?;
+        let private_key = Keypair::from_protobuf_encoding(identity_raw.as_slice())?;
+        config_builder.with_private_key(Some(private_key));
+    }
+
     config_builder.with_mining_enabled(!cli.mining_disabled);
     config_builder.with_mdns_enabled(!cli.mdns_disabled);
     config_builder.with_stats_server_enabled(!cli.stats_server_disabled);

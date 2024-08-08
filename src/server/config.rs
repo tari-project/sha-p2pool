@@ -3,6 +3,8 @@
 
 use std::{path::PathBuf, time::Duration};
 
+use libp2p::identity::Keypair;
+
 use crate::server::http::stats;
 use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
 
@@ -85,6 +87,11 @@ impl ConfigBuilder {
 
     pub fn with_private_key_folder(&mut self, config: PathBuf) -> &mut Self {
         self.config.p2p_service.private_key_folder = config;
+        self
+    }
+
+    pub fn with_private_key(&mut self, config: Option<Keypair>) -> &mut Self {
+        self.config.p2p_service.private_key = config;
         self
     }
 

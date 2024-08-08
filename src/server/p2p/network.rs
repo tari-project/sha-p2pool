@@ -10,6 +10,9 @@ use std::{
     time::Duration,
 };
 
+use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::TokioAsyncResolver;
+use itertools::Itertools;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
     futures::StreamExt,
@@ -55,7 +58,7 @@ const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "p2pool::server::p2p";
-const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
+pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -63,6 +66,7 @@ pub struct Config {
     pub peer_info_publish_interval: Duration,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
+    pub private_key: Option<Keypair>,
     pub mdns_enabled: bool,
 }
 
@@ -73,6 +77,7 @@ impl Default for Config {
             peer_info_publish_interval: Duration::from_secs(5),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
+            private_key: None,
             mdns_enabled: false,
         }
     }
@@ -147,7 +152,12 @@ where
             return Ok(Keypair::generate_ed25519());
         }
 
-        // if we have a saved private key, just use it
+        // if we have a private key set, use it instead
+        if let Some(private_key) = &config.private_key {
+            return Ok(private_key.clone());
+        }
+
+        // if we have a saved private key from file, just use it
         let mut content = vec![];
         let mut key_path = config.private_key_folder.clone();
         key_path.push(STABLE_PRIVATE_KEY_FILE);
@@ -297,7 +307,7 @@ where
     /// Generates the gossip sub topic names based on the current Tari network to avoid mixing up
     /// blocks and peers with different Tari networks.
     fn topic_name(topic: &str) -> String {
-        let network = Network::get_current_or_user_setting_or_default().to_string();
+        let network = Network::get_current_or_user_setting_or_default().as_key_str();
         format!("{network}_{topic}")
     }
 
@@ -638,30 +648,82 @@ where
         }
     }
 
-    // TODO: add support for dns addresses without peer ID
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
-    fn join_seed_peers(&mut self) -> Result<(), Error> {
+    async fn join_seed_peers(&mut self) -> Result<(), Error> {
         if self.config.seed_peers.is_empty() {
             return Ok(());
         }
-
+        let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
         for seed_peer in &self.config.seed_peers {
             let addr = seed_peer
                 .parse::<Multiaddr>()
                 .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?;
+            let addr_parts = addr.iter().collect_vec();
+            if addr_parts.is_empty() {
+                return Err(Error::LibP2P(LibP2PError::MultiAddrEmpty));
+            }
+            let is_dns_addr = matches!(addr_parts.first(), Some(Protocol::Dnsaddr(_)));
             let peer_id = match addr.iter().last() {
                 Some(Protocol::P2p(peer_id)) => Some(peer_id),
                 _ => None,
             };
-            if peer_id.is_none() {
+            if peer_id.is_none() && !is_dns_addr {
                 return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
             }
-            self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
+
+            if is_dns_addr {
+                // lookup all addresses in dnsaddr multi address
+                let addr_str = match addr.iter().last() {
+                    Some(Protocol::Dnsaddr(addr_str)) => Some(addr_str.to_string()),
+                    _ => None,
+                };
+                if let Some(addr_str) = addr_str {
+                    match dns_resolver.txt_lookup(format!("_dnsaddr.{}", addr_str)).await {
+                        Ok(result) => {
+                            for txt in result {
+                                if let Some(chars) = txt.txt_data().first() {
+                                    match self.parse_dnsaddr_txt(chars) {
+                                        Ok(parsed_addr) => {
+                                            let peer_id = match parsed_addr.iter().last() {
+                                                Some(Protocol::P2p(peer_id)) => Some(peer_id),
+                                                _ => None,
+                                            };
+                                            if let Some(peer_id) = peer_id {
+                                                self.swarm.behaviour_mut().kademlia.add_address(&peer_id, parsed_addr);
+                                            }
+                                        },
+                                        Err(error) => {
+                                            warn!("Skipping invalid DNS entry: {:?}: {error:?}", chars);
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                        Err(error) => {
+                            error!("Failed to lookup domain records: {error:?}");
+                        },
+                    }
+                }
+            } else {
+                // add simple address
+                self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
+            }
         }
 
         self.bootstrap_kademlia()?;
 
         Ok(())
+    }
+
+    fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
+        let txt_str =
+            String::from_utf8(txt.to_vec()).map_err(|error| Error::LibP2P(LibP2PError::ConvertBytesToString(error)))?;
+        match txt_str.strip_prefix("dnsaddr=") {
+            None => Err(Error::LibP2P(LibP2PError::InvalidDnsEntry(
+                "Missing `dnsaddr=` prefix.".to_string(),
+            ))),
+            Some(a) => Ok(Multiaddr::try_from(a).map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?),
+        }
     }
 
     fn bootstrap_kademlia(&mut self) -> Result<(), Error> {
@@ -685,7 +747,7 @@ where
             )
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
-        self.join_seed_peers()?;
+        self.join_seed_peers().await?;
         self.subscribe_to_topics();
 
         // start initial share chain sync
