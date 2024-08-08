@@ -7,9 +7,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+use convert_case::{Case, Casing};
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
@@ -61,10 +63,29 @@ const LOG_TARGET: &str = "p2pool::server::p2p";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug)]
+pub struct Tribe {
+    inner: String,
+}
+
+impl From<String> for Tribe {
+    fn from(value: String) -> Self {
+        Self {
+            inner: value.to_case(Case::Snake)
+        }
+    }
+}
+
+impl Display for Tribe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner.clone())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
-    pub tribe: String,
+    pub tribe: Tribe,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,

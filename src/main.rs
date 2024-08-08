@@ -13,6 +13,7 @@ use tari_common::configuration::Network;
 use tari_common::initialize_logging;
 
 use crate::server::p2p;
+use crate::server::p2p::Tribe;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
 mod server;
@@ -179,8 +180,8 @@ async fn main() -> anyhow::Result<()> {
     if let Some(stats_server_port) = cli.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }
-    // TODO: implement tribe struct for general parsing (converting any string to snake_case string)
-    config_builder.with_tribe(cli.tribe);
+    // TODO: check for empty tribe
+    config_builder.with_tribe(Tribe::from(cli.tribe));
 
     // server start
     let config = config_builder.build();
