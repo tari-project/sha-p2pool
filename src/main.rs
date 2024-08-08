@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     // generate identity
     if cli.generate_identity {
         let result = p2p::util::generate_identity().await?;
-        print!("{}", serde_json::to_value(&result)?);
+        print!("{}", serde_json::to_value(result)?);
         return Ok(());
     }
 
