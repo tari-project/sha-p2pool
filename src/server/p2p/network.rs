@@ -1,19 +1,34 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
     sync::Arc,
     time::Duration,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
+use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
-use libp2p::{dns, futures::StreamExt, gossipsub, gossipsub::{IdentTopic, Message, PublishError}, identity::Keypair, kad, kad::{Event, Mode, store::MemoryStore}, mdns, mdns::tokio::Tokio, Multiaddr, multiaddr::Protocol, noise, request_response, request_response::{cbor, ResponseChannel}, StreamProtocol, swarm::{NetworkBehaviour, SwarmEvent}, Swarm, tcp, yamux};
-use libp2p::dns::tokio::Transport;
 use libp2p::swarm::behaviour::toggle::Toggle;
+use libp2p::{
+    futures::StreamExt,
+    gossipsub,
+    gossipsub::{IdentTopic, Message, PublishError},
+    identity::Keypair,
+    kad,
+    kad::{store::MemoryStore, Event, Mode},
+    mdns,
+    mdns::tokio::Tokio,
+    multiaddr::Protocol,
+    noise, request_response,
+    request_response::{cbor, ResponseChannel},
+    swarm::{NetworkBehaviour, SwarmEvent},
+    tcp, yamux, Multiaddr, StreamProtocol, Swarm,
+};
 use log::{debug, error, info, warn};
 use tari_common::configuration::Network;
 use tari_utilities::hex::Hex;
@@ -24,22 +39,20 @@ use tokio::{
     select,
     sync::{broadcast, broadcast::error::RecvError},
 };
-use trust_dns_resolver::{Resolver, TokioAsyncResolver};
-use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 
+use crate::server::p2p::messages::LocalShareChainSyncRequest;
 use crate::{
     server::{
         config,
         p2p::{
-            Error,
-            LibP2PError,
             messages,
-            messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse}, peer_store::PeerStore, ServiceClient,
+            messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
+            peer_store::PeerStore,
+            Error, LibP2PError, ServiceClient,
         },
     },
     sharechain::{block::Block, ShareChain},
 };
-use crate::server::p2p::messages::LocalShareChainSyncRequest;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
@@ -276,17 +289,17 @@ where
                             .publish(IdentTopic::new(Self::topic_name(NEW_BLOCK_TOPIC)), block_raw)
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
-                            Ok(_) => {}
+                            Ok(_) => {},
                             Err(error) => {
                                 error!(target: LOG_TARGET, "Failed to broadcast new block: {error:?}")
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block to bytes: {error:?}")
-                    }
+                    },
                 }
-            }
+            },
             Err(error) => error!(target: LOG_TARGET, "Failed to receive new block: {error:?}"),
         }
     }
@@ -294,7 +307,7 @@ where
     /// Generates the gossip sub topic names based on the current Tari network to avoid mixing up
     /// blocks and peers with different Tari networks.
     fn topic_name(topic: &str) -> String {
-        let network = Network::get_current_or_user_setting_or_default().to_string();
+        let network = Network::get_current_or_user_setting_or_default().as_key_str();
         format!("{network}_{topic}")
     }
 
@@ -336,10 +349,10 @@ where
                             }
                         }
                     }
-                }
+                },
                 Err(error) => {
                     error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
-                }
+                },
             },
             // TODO: send a signature that proves that the actual block was coming from this peer
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like 20%))
@@ -356,20 +369,20 @@ where
                                 if result.need_sync {
                                     self.sync_share_chain().await;
                                 }
-                            }
+                            },
                             Err(error) => {
                                 error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
-                    }
+                    },
                 }
-            }
+            },
             _ => {
                 warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
-            }
+            },
         }
     }
 
@@ -391,7 +404,7 @@ where
                 {
                     error!(target: LOG_TARGET, "Failed to send block sync response");
                 }
-            }
+            },
             Err(error) => error!(target: LOG_TARGET, "Failed to get blocks from height: {error:?}"),
         }
     }
@@ -408,10 +421,10 @@ where
                 if result.need_sync {
                     self.sync_share_chain().await;
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
-            }
+            },
         }
     }
 
@@ -434,11 +447,11 @@ where
                     .behaviour_mut()
                     .share_chain_sync
                     .send_request(&result.peer_id, ShareChainSyncRequest::new(0));
-            }
+            },
             None => {
                 self.sync_in_progress.store(false, Ordering::SeqCst);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
-            }
+            },
         }
     }
 
@@ -482,17 +495,17 @@ where
                         } else {
                             in_progress.store(false, Ordering::SeqCst);
                         }
-                    }
+                    },
                     Err(error) => {
                         in_progress.store(false, Ordering::SeqCst);
                         error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
-                    }
+                    },
                 }
-            }
+            },
             None => {
                 in_progress.store(false, Ordering::SeqCst);
                 error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
-            }
+            },
         }
     }
 
@@ -501,7 +514,7 @@ where
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
-            }
+            },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
@@ -509,12 +522,12 @@ where
                             self.swarm.add_peer_address(peer, addr);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         }
-                    }
+                    },
                     mdns::Event::Expired(peers) => {
                         for (peer, _addr) in peers {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
                         }
-                    }
+                    },
                 },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message {
@@ -523,10 +536,10 @@ where
                         propagation_source: _propagation_source,
                     } => {
                         self.handle_new_gossipsub_message(message).await;
-                    }
-                    gossipsub::Event::Subscribed { .. } => {}
-                    gossipsub::Event::Unsubscribed { .. } => {}
-                    gossipsub::Event::GossipsubNotSupported { .. } => {}
+                    },
+                    gossipsub::Event::Subscribed { .. } => {},
+                    gossipsub::Event::Unsubscribed { .. } => {},
+                    gossipsub::Event::GossipsubNotSupported { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::ShareChainSync(event) => match event {
                     request_response::Event::Message { peer: _peer, message } => match message {
@@ -536,27 +549,27 @@ where
                             channel,
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
-                        }
+                        },
                         request_response::Message::Response {
                             request_id: _request_id,
                             response,
                         } => {
                             self.handle_share_chain_sync_response(response).await;
-                        }
+                        },
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                    }
+                    },
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    }
-                    request_response::Event::ResponseSent { .. } => {}
+                    },
+                    request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated {
@@ -572,11 +585,11 @@ where
                         if let Some(old_peer) = old_peer {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
                         }
-                    }
+                    },
                     _ => debug!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
                 },
             },
-            _ => {}
+            _ => {},
         };
     }
 
@@ -640,6 +653,7 @@ where
         if self.config.seed_peers.is_empty() {
             return Ok(());
         }
+        let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
         for seed_peer in &self.config.seed_peers {
             let addr = seed_peer
                 .parse::<Multiaddr>()
@@ -649,7 +663,6 @@ where
                 return Err(Error::LibP2P(LibP2PError::MultiAddrEmpty));
             }
             let is_dns_addr = matches!(addr_parts.first(), Some(Protocol::Dnsaddr(_)));
-
             let peer_id = match addr.iter().last() {
                 Some(Protocol::P2p(peer_id)) => Some(peer_id),
                 _ => None,
@@ -658,48 +671,42 @@ where
                 return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
             }
 
-            if !is_dns_addr {
-                // add simple address
-                self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
-            } else {
-                // TODO: check if libp2p-dns could be used/wired somehow here
+            if is_dns_addr {
                 // lookup all addresses in dnsaddr multi address
-                let resolver = TokioAsyncResolver::tokio(
-                    ResolverConfig::cloudflare_tls(),
-                    ResolverOpts::default(),
-                );
-
-
-                // TODO: get the address properly,
                 let addr_str = match addr.iter().last() {
                     Some(Protocol::Dnsaddr(addr_str)) => Some(addr_str.to_string()),
                     _ => None,
                 };
-                if addr_str.is_some() {
-                    let lookup_result = resolver.txt_lookup(addr_str.unwrap()).await;
-
-                    // TODO: continue
-                    if let Ok(result) = lookup_result {
-                        for txt in result {
-                            if let Some(chars) = txt.txt_data().first() {
-                                match self.parse_dnsaddr_txt(chars) {
-                                    Err(error) => {
-                                        // Skip over seemingly invalid entries.
-                                    }
-                                    Ok(parsed_addr) => {
-                                        let peer_id = match parsed_addr.iter().last() {
-                                            Some(Protocol::P2p(peer_id)) => Some(peer_id),
-                                            _ => None,
-                                        };
-                                        if peer_id.is_some() {
-                                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), parsed_addr);
-                                        }
+                if let Some(addr_str) = addr_str {
+                    match dns_resolver.txt_lookup(format!("_dnsaddr.{}", addr_str)).await {
+                        Ok(result) => {
+                            for txt in result {
+                                if let Some(chars) = txt.txt_data().first() {
+                                    match self.parse_dnsaddr_txt(chars) {
+                                        Ok(parsed_addr) => {
+                                            let peer_id = match parsed_addr.iter().last() {
+                                                Some(Protocol::P2p(peer_id)) => Some(peer_id),
+                                                _ => None,
+                                            };
+                                            if let Some(peer_id) = peer_id {
+                                                self.swarm.behaviour_mut().kademlia.add_address(&peer_id, parsed_addr);
+                                            }
+                                        },
+                                        Err(error) => {
+                                            warn!("Skipping invalid DNS entry: {:?}: {error:?}", chars);
+                                        },
                                     }
                                 }
                             }
-                        }
+                        },
+                        Err(error) => {
+                            error!("Failed to lookup domain records: {error:?}");
+                        },
                     }
                 }
+            } else {
+                // add simple address
+                self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
             }
         }
 
@@ -708,17 +715,15 @@ where
         Ok(())
     }
 
-    // TODO: use custom error
-    fn parse_dnsaddr_txt(&self, txt: &[u8]) -> io::Result<Multiaddr> {
-        let s = String::from_utf8(txt.to_vec()).map_err(Self::invalid_data)?;
-        match s.strip_prefix("dnsaddr=") {
-            None => Err(Self::invalid_data("Missing `dnsaddr=` prefix.")),
-            Some(a) => Ok(Multiaddr::try_from(a).map_err(Self::invalid_data)?),
+    fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
+        let txt_str =
+            String::from_utf8(txt.to_vec()).map_err(|error| Error::LibP2P(LibP2PError::ConvertBytesToString(error)))?;
+        match txt_str.strip_prefix("dnsaddr=") {
+            None => Err(Error::LibP2P(LibP2PError::InvalidDnsEntry(
+                "Missing `dnsaddr=` prefix.".to_string(),
+            ))),
+            Some(a) => Ok(Multiaddr::try_from(a).map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?),
         }
-    }
-
-    fn invalid_data(e: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
-        io::Error::new(io::ErrorKind::InvalidData, e)
     }
 
     fn bootstrap_kademlia(&mut self) -> Result<(), Error> {
@@ -758,7 +763,7 @@ where
                 share_chain_sync_tx,
                 Duration::from_secs(30),
             )
-                .await;
+            .await;
         });
 
         self.main_loop().await

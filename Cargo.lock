@@ -1690,10 +1690,13 @@ dependencies = [
  "ipnet",
  "once_cell",
  "rand",
+ "rustls 0.21.12",
+ "rustls-pemfile 1.0.4",
  "socket2",
  "thiserror",
  "tinyvec",
  "tokio",
+ "tokio-rustls 0.24.1",
  "tracing",
  "url",
 ]
@@ -1713,9 +1716,11 @@ dependencies = [
  "parking_lot",
  "rand",
  "resolv-conf",
+ "rustls 0.21.12",
  "smallvec",
  "thiserror",
  "tokio",
+ "tokio-rustls 0.24.1",
  "tracing",
 ]
 
@@ -4274,6 +4279,7 @@ dependencies = [
  "digest",
  "dirs",
  "hex",
+ "hickory-resolver",
  "itertools 0.13.0",
  "libp2p",
  "log",
@@ -4294,7 +4300,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "trust-dns-resolver",
 ]
 
 [[package]]
@@ -5457,7 +5462,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "trust-dns-proto 0.21.2",
+ "trust-dns-proto",
  "webpki",
 ]
 
@@ -5489,59 +5494,6 @@ dependencies = [
  "tokio-rustls 0.23.4",
  "url",
  "webpki",
-]
-
-[[package]]
-name = "trust-dns-proto"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3119112651c157f4488931a01e586aa459736e9d6046d3bd9105ffb69352d374"
-dependencies = [
- "async-trait",
- "cfg-if",
- "data-encoding",
- "enum-as-inner 0.6.0",
- "futures-channel",
- "futures-io",
- "futures-util",
- "idna 0.4.0",
- "ipnet",
- "once_cell",
- "rand",
- "rustls 0.21.12",
- "rustls-pemfile 1.0.4",
- "rustls-webpki 0.101.7",
- "smallvec",
- "thiserror",
- "tinyvec",
- "tokio",
- "tokio-rustls 0.24.1",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "trust-dns-resolver"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a3e6c3aff1718b3c73e395d1f35202ba2ffa847c6a62eea0db8fb4cfe30be6"
-dependencies = [
- "cfg-if",
- "futures-util",
- "ipconfig",
- "lru-cache",
- "once_cell",
- "parking_lot",
- "rand",
- "resolv-conf",
- "rustls 0.21.12",
- "smallvec",
- "thiserror",
- "tokio",
- "tokio-rustls 0.24.1",
- "tracing",
- "trust-dns-proto 0.23.2",
- "webpki-roots",
 ]
 
 [[package]]
@@ -5807,12 +5759,6 @@ dependencies = [
  "ring 0.17.8",
  "untrusted 0.9.0",
 ]
-
-[[package]]
-name = "webpki-roots"
-version = "0.25.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
 name = "which"

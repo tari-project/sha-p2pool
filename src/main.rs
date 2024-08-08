@@ -9,6 +9,7 @@ use clap::{
     Parser,
 };
 use libp2p::identity::Keypair;
+use tari_common::configuration::Network;
 use tari_common::initialize_logging;
 
 use crate::server::p2p;
@@ -51,9 +52,14 @@ struct Cli {
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
     ///
-    /// Please note that these addresses must be in libp2p multi address format and must contain peer ID!
+    /// Please note that these addresses must be in libp2p multi address format and must contain peer ID
+    /// or use a dnsaddr multi address!
     ///
-    /// e.g.: /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
+    /// By default a Tari provided seed peer is added.
+    ///
+    /// e.g.:
+    /// /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
+    /// /dnsaddr/esme.p2pool.tari.com
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
 
@@ -139,9 +145,19 @@ async fn main() -> anyhow::Result<()> {
     if let Some(p2p_port) = cli.p2p_port {
         config_builder.with_p2p_port(p2p_port);
     }
-    if let Some(seed_peers) = cli.seed_peers.clone() {
-        config_builder.with_seed_peers(seed_peers);
+
+    // set default tari network specific seed peer address
+    let mut seed_peers = vec![];
+    let network = Network::get_current_or_user_setting_or_default();
+    if network != Network::LocalNet {
+        let default_seed_peer = format!("/dnsaddr/{}.p2pool.tari.com", network.as_key_str());
+        seed_peers.push(default_seed_peer);
     }
+    if let Some(cli_seed_peers) = cli.seed_peers.clone() {
+        seed_peers.extend(cli_seed_peers.iter().cloned());
+    }
+    config_builder.with_seed_peers(seed_peers);
+
     config_builder.with_stable_peer(cli.stable_peer);
     config_builder.with_private_key_folder(cli.private_key_folder.clone());
 

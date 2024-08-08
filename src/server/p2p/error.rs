@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::string::FromUtf8Error;
+
 use libp2p::{
     gossipsub::PublishError, identity::DecodingError, kad::NoKnownPeers, multiaddr, noise, swarm::DialError,
     TransportError,
@@ -45,4 +47,8 @@ pub enum LibP2PError {
     MissingPeerId(String),
     #[error("Key decode error: {0}")]
     KeyDecoding(#[from] DecodingError),
+    #[error("Invalid DNS entry: {0}")]
+    InvalidDnsEntry(String),
+    #[error("Failed to convert bytes to string: {0}")]
+    ConvertBytesToString(#[from] FromUtf8Error),
 }
