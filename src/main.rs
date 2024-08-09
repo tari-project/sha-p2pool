@@ -4,10 +4,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use clap::{
-    builder::{Styles, styling::AnsiColor},
-    Parser,
-};
+use clap::{builder::{Styles, styling::AnsiColor}, Parser, Subcommand};
 use libp2p::identity::Keypair;
 use tari_common::configuration::Network;
 use tari_common::initialize_logging;
@@ -31,13 +28,8 @@ fn cli_styles() -> Styles {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Parser)]
-#[command(version)]
-#[command(styles = cli_styles())]
-#[command(about = "⛏ Decentralized mining pool for Tari network ⛏", long_about = None)]
-struct Cli {
-    base_dir: Option<PathBuf>,
-
+#[derive(Clone, Parser, Debug)]
+struct StartArgs {
     /// (Optional) gRPC port to use.
     #[arg(short, long, value_name = "grpc-port")]
     grpc_port: Option<u16>,
@@ -73,7 +65,9 @@ struct Cli {
 
     /// Tribe to enter (a team of miners).
     /// A tribe can have any name.
-    #[arg(long, value_name = "tribe", default_value = "default")]
+    #[arg(
+        long, value_name = "tribe", default_value = "default", value_parser = validate_tribe
+    )]
     tribe: String,
 
     /// Private key folder.
@@ -106,13 +100,44 @@ struct Cli {
     /// If set, local stats HTTP server is disabled.
     #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
     stats_server_disabled: bool,
+}
 
-    /// Generate identity
-    ///
-    /// If set, sha_p2pool will only generate a private key in `--private-key-folder`
-    /// and output a stable peer ID, that could be used later when running as a stable peer.
-    #[arg(long, value_name = "generate-identity", default_value_t = false)]
-    generate_identity: bool,
+#[derive(Subcommand, Clone, Debug)]
+enum Commands {
+    /// Starts sha-p2pool node.
+    Start {
+        #[clap(flatten)]
+        args: StartArgs,
+    },
+
+    /// Generating new identity.
+    GenerateIdentity,
+
+    /// Listing all tribes that are present on the network.
+    ListTribes,
+}
+
+#[derive(Clone, Parser)]
+#[command(version)]
+#[command(styles = cli_styles())]
+#[command(about = "⛏ Decentralized mining pool for Tari network ⛏", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    /// (Optional) base dir.
+    #[arg(short, long, value_name = "base-dir")]
+    base_dir: Option<PathBuf>,
+}
+
+fn validate_tribe(tribe: &str) -> Result<(), String> {
+    if tribe.trim().is_empty() {
+        return Err(String::from(
+            "tribe must be set",
+        ));
+    }
+
+    Ok(())
 }
 
 impl Cli {
@@ -123,17 +148,7 @@ impl Cli {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-
-    // generate identity
-    if cli.generate_identity {
-        let result = p2p::util::generate_identity().await?;
-        print!("{}", serde_json::to_value(result)?);
-        return Ok(());
-    }
-
+async fn start(cli: &Cli, args: &StartArgs) -> anyhow::Result<()> {
     // logger setup
     if let Err(e) = initialize_logging(
         &cli.base_dir().join("configs/logs.yml"),
@@ -145,12 +160,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut config_builder = server::Config::builder();
-    if let Some(grpc_port) = cli.grpc_port {
+    if let Some(grpc_port) = args.grpc_port {
         config_builder.with_grpc_port(grpc_port);
     }
-    if let Some(p2p_port) = cli.p2p_port {
+    if let Some(p2p_port) = args.p2p_port {
         config_builder.with_p2p_port(p2p_port);
     }
+
+    config_builder.with_tribe(Tribe::from(args.tribe.clone()));
 
     // set default tari network specific seed peer address
     let mut seed_peers = vec![];
@@ -159,13 +176,13 @@ async fn main() -> anyhow::Result<()> {
         let default_seed_peer = format!("/dnsaddr/{}.p2pool.tari.com", network.as_key_str());
         seed_peers.push(default_seed_peer);
     }
-    if let Some(cli_seed_peers) = cli.seed_peers.clone() {
+    if let Some(cli_seed_peers) = args.seed_peers.clone() {
         seed_peers.extend(cli_seed_peers.iter().cloned());
     }
     config_builder.with_seed_peers(seed_peers);
 
-    config_builder.with_stable_peer(cli.stable_peer);
-    config_builder.with_private_key_folder(cli.private_key_folder.clone());
+    config_builder.with_stable_peer(args.stable_peer);
+    config_builder.with_private_key_folder(args.private_key_folder.clone());
 
     // try to extract env var based private key
     if let Ok(identity_cbor) = env::var("SHA_P2POOL_IDENTITY") {
@@ -174,19 +191,37 @@ async fn main() -> anyhow::Result<()> {
         config_builder.with_private_key(Some(private_key));
     }
 
-    config_builder.with_mining_enabled(!cli.mining_disabled);
-    config_builder.with_mdns_enabled(!cli.mdns_disabled);
-    config_builder.with_stats_server_enabled(!cli.stats_server_disabled);
-    if let Some(stats_server_port) = cli.stats_server_port {
+    config_builder.with_mining_enabled(!args.mining_disabled);
+    config_builder.with_mdns_enabled(!args.mdns_disabled);
+    config_builder.with_stats_server_enabled(!args.stats_server_disabled);
+    if let Some(stats_server_port) = args.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }
-    // TODO: check for empty tribe
-    config_builder.with_tribe(Tribe::from(cli.tribe));
 
-    // server start
+    // start server
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();
     let mut server = server::Server::new(config, share_chain).await?;
     server.start().await?;
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    let cli_ref = &cli;
+    match &cli.command {
+        Commands::Start { args } => {
+            start(cli_ref, args).await?;
+        }
+        Commands::GenerateIdentity => {
+            let result = p2p::util::generate_identity().await?;
+            print!("{}", serde_json::to_value(result)?);
+        }
+        Commands::ListTribes => {}
+    }
+
     Ok(())
 }

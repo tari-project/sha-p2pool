@@ -62,7 +62,7 @@ const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "p2pool::server::p2p";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tribe {
     inner: String,
 }
@@ -70,7 +70,7 @@ pub struct Tribe {
 impl From<String> for Tribe {
     fn from(value: String) -> Self {
         Self {
-            inner: value.to_case(Case::Snake)
+            inner: value.to_case(Case::Lower).to_case(Case::Snake)
         }
     }
 }
@@ -85,11 +85,11 @@ impl Display for Tribe {
 pub struct Config {
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
-    pub tribe: Tribe,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,
     pub mdns_enabled: bool,
+    pub tribe: Tribe,
 }
 
 impl Default for Config {
@@ -97,11 +97,11 @@ impl Default for Config {
         Self {
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(5),
-            tribe: "default".to_string(),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
+            tribe: Tribe::from("default".to_string()),
         }
     }
 }
@@ -288,14 +288,14 @@ where
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)), peer_info_raw)
+            .publish(IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)), peer_info_raw.clone())
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         // broadcast peer info to tribe
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(Self::tribe_topic(self.config.tribe.as_str(), PEER_INFO_TOPIC)), peer_info_raw)
+            .publish(IdentTopic::new(Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC)), peer_info_raw)
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         Ok(())
@@ -316,7 +316,7 @@ where
                             .swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(IdentTopic::new(Self::network_topic(NEW_BLOCK_TOPIC)), block_raw)
+                            .publish(IdentTopic::new(Self::tribe_topic(&self.config.tribe, NEW_BLOCK_TOPIC)), block_raw)
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
                             Ok(_) => {}
@@ -343,20 +343,17 @@ where
 
     /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
     /// blocks and peers with different Tari networks and the given tribe name.
-    fn tribe_topic(tribe: &str, topic: &str) -> String {
+    fn tribe_topic(tribe: &Tribe, topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
         format!("{network}_{tribe}_{topic}")
     }
 
     /// Subscribing to a gossipsub topic.
-    fn subscribe(&mut self, topic: &str, tribe: Option<&str>) {
-        let topic = match tribe {
-            Some(tribe) => {
-                Self::tribe_topic(tribe, topic)
-            }
-            None => {
-                Self::network_topic(topic)
-            }
+    fn subscribe(&mut self, topic: &str, tribe: bool) {
+        let topic = if tribe {
+            Self::tribe_topic(&self.config.tribe, topic)
+        } else {
+            Self::network_topic(topic)
         };
         self.swarm
             .behaviour_mut()
@@ -366,11 +363,10 @@ where
     }
 
     /// Subscribes to all topics we need.
-    fn subscribe_to_topics(&mut self) {
-        let tribe = self.config.tribe.clone();
-        self.subscribe(PEER_INFO_TOPIC, Some(tribe.as_str()));
-        self.subscribe(PEER_INFO_TOPIC, None);
-        self.subscribe(NEW_BLOCK_TOPIC, None);
+    async fn subscribe_to_topics(&mut self) {
+        self.subscribe(PEER_INFO_TOPIC, false);
+        self.subscribe(PEER_INFO_TOPIC, true);
+        self.subscribe(NEW_BLOCK_TOPIC, true);
     }
 
     /// Main method to handle any message comes from gossipsub.
@@ -385,7 +381,7 @@ where
         let topic = message.topic.to_string();
 
         match topic {
-            topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
+            topic if topic == Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
                     self.peer_store.add(peer, payload).await;
@@ -403,7 +399,7 @@ where
             },
             // TODO: send a signature that proves that the actual block was coming from this peer
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like 20%))
-            topic if topic == Self::network_topic(NEW_BLOCK_TOPIC) => {
+            topic if topic == Self::tribe_topic(&self.config.tribe, NEW_BLOCK_TOPIC) => {
                 if self.sync_in_progress.load(Ordering::SeqCst) {
                     return;
                 }
@@ -795,7 +791,7 @@ where
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
         self.join_seed_peers().await?;
-        self.subscribe_to_topics();
+        self.subscribe_to_topics().await;
 
         // start initial share chain sync
         let in_progress = self.sync_in_progress.clone();
