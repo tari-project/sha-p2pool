@@ -57,7 +57,7 @@ struct StartArgs {
     seed_peers: Option<Vec<String>>,
 
     /// If set, Tari provided seed peers will NOT be automatically added to seed peers list.
-    #[arg(long, value_name = "no_default_seed_peers", default_value_t = false)]
+    #[arg(long, value_name = "no-default-seed-peers", default_value_t = false)]
     no_default_seed_peers: bool,
 
     /// Starts the node as a stable peer.

@@ -15,21 +15,8 @@ use convert_case::{Case, Casing};
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
-use libp2p::{
-    futures::StreamExt,
-    gossipsub,
-    gossipsub::{IdentTopic, Message, PublishError},
-    identity::Keypair,
-    kad,
-    kad::{Event, Mode, store::MemoryStore},
-    mdns,
-    mdns::tokio::Tokio,
-    Multiaddr,
-    multiaddr::Protocol, noise,
-    request_response,
-    request_response::{cbor, ResponseChannel},
-    StreamProtocol, swarm::{NetworkBehaviour, SwarmEvent}, Swarm, tcp, yamux,
-};
+use libp2p::{futures::StreamExt, gossipsub, gossipsub::{IdentTopic, Message, PublishError}, identify, identity::Keypair, kad, kad::{Event, Mode, store::MemoryStore}, mdns, mdns::tokio::Tokio, Multiaddr, multiaddr::Protocol, noise, request_response, request_response::{cbor, ResponseChannel}, StreamProtocol, swarm::{NetworkBehaviour, SwarmEvent}, Swarm, tcp, yamux};
+use libp2p::kad::{GetProvidersOk, QueryResult};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use log::{debug, error, info, warn};
 use log::kv::{ToValue, Value};
@@ -120,6 +107,7 @@ pub struct ServerNetworkBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
     pub kademlia: kad::Behaviour<MemoryStore>,
+    pub identify: identify::Behaviour,
 }
 
 /// Service is the implementation that holds every peer-to-peer related logic
@@ -270,6 +258,10 @@ where
                         key_pair.public().to_peer_id(),
                         MemoryStore::new(key_pair.public().to_peer_id()),
                     ),
+                    identify: identify::Behaviour::new(identify::Config::new(
+                        "/ipfs/id/1.0.0".to_string(),
+                        key_pair.public(),
+                    )),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -546,7 +538,7 @@ where
         } // wait for the first height
         match peer_store.tip_of_block_height().await {
             Some(result) => {
-                info!(target: LOG_TARGET, tribe = &tribe; "Found highest block height: {result:?}");
+                debug!(target: LOG_TARGET, tribe = &tribe; "Found highest block height: {result:?}");
                 match share_chain.tip_height().await {
                     Ok(tip) => {
                         if tip < result.height {
@@ -652,6 +644,18 @@ where
                     }
                     _ => debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[KADEMLIA] {event:?}"),
                 },
+                ServerNetworkBehaviourEvent::Identify(event) => if let identify::Event::Received { peer_id, info } = event {
+                    for addr in info.listen_addrs {
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .add_address(&peer_id, addr);
+                    }
+                    self.swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .add_explicit_peer(&peer_id);
+                }
             },
             _ => {}
         };
