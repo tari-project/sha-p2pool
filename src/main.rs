@@ -56,6 +56,10 @@ struct StartArgs {
     #[arg(short, long, value_name = "seed-peers")]
     seed_peers: Option<Vec<String>>,
 
+    /// If set, Tari provided seed peers will NOT be automatically added to seed peers list.
+    #[arg(long, value_name = "no_default_seed_peers", default_value_t = false)]
+    no_default_seed_peers: bool,
+
     /// Starts the node as a stable peer.
     ///
     /// Identity of the peer will be saved locally (to --private-key-location)
@@ -172,7 +176,7 @@ async fn start(cli: &Cli, args: &StartArgs) -> anyhow::Result<()> {
     // set default tari network specific seed peer address
     let mut seed_peers = vec![];
     let network = Network::get_current_or_user_setting_or_default();
-    if network != Network::LocalNet {
+    if network != Network::LocalNet && !args.no_default_seed_peers {
         let default_seed_peer = format!("/dnsaddr/{}.p2pool.tari.com", network.as_key_str());
         seed_peers.push(default_seed_peer);
     }
