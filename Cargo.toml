@@ -33,7 +33,7 @@ tokio = { version = "1.38.0", features = ["full"] }
 thiserror = "1.0"
 serde = "1.0.203"
 anyhow = "1.0"
-log = "0.4.21"
+log = { version = "0.4.21", features = ["kv"] }
 tonic = "0.8.3"
 async-trait = "0.1.80"
 serde_cbor = "0.11.2"

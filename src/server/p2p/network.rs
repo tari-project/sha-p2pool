@@ -32,6 +32,8 @@ use libp2p::{
 };
 use libp2p::swarm::behaviour::toggle::Toggle;
 use log::{debug, error, info, warn};
+use log::kv::{ToValue, Value};
+use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_utilities::hex::Hex;
 use tokio::{
@@ -62,9 +64,15 @@ const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "p2pool::server::p2p";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tribe {
     inner: String,
+}
+
+impl ToValue for Tribe {
+    fn to_value(&self) -> Value {
+        Value::from(self.inner.as_str())
+    }
 }
 
 impl From<String> for Tribe {
@@ -123,7 +131,8 @@ where
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
     share_chain: Arc<S>,
-    peer_store: Arc<PeerStore>,
+    tribe_peer_store: Arc<PeerStore>,
+    network_peer_store: Arc<PeerStore>,
     config: Config,
     sync_in_progress: Arc<AtomicBool>,
     share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
@@ -144,7 +153,8 @@ where
     pub async fn new(
         config: &config::Config,
         share_chain: Arc<S>,
-        peer_store: Arc<PeerStore>,
+        tribe_peer_store: Arc<PeerStore>,
+        network_peer_store: Arc<PeerStore>,
         sync_in_progress: Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config).await?;
@@ -157,7 +167,8 @@ where
             swarm,
             port: config.p2p_port,
             share_chain,
-            peer_store,
+            tribe_peer_store,
+            network_peer_store,
             config: config.p2p_service.clone(),
             client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
@@ -282,20 +293,21 @@ where
         // get peer info
         let share_chain = self.share_chain.clone();
         let current_height = share_chain.tip_height().await.map_err(Error::ShareChain)?;
-        let peer_info_raw: Vec<u8> = PeerInfo::new(current_height).try_into()?;
+        let peer_info_network_raw: Vec<u8> = PeerInfo::new(current_height, self.config.tribe.clone()).try_into()?;
+        let peer_info_tribe_raw: Vec<u8> = PeerInfo::new(current_height, self.config.tribe.clone()).try_into()?;
 
         // broadcast peer info to network
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)), peer_info_raw.clone())
+            .publish(IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)), peer_info_network_raw.clone())
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         // broadcast peer info to tribe
         self.swarm
             .behaviour_mut()
             .gossipsub
-            .publish(IdentTopic::new(Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC)), peer_info_raw)
+            .publish(IdentTopic::new(Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC)), peer_info_tribe_raw)
             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
 
         Ok(())
@@ -321,16 +333,16 @@ where
                         {
                             Ok(_) => {}
                             Err(error) => {
-                                error!(target: LOG_TARGET, "Failed to broadcast new block: {error:?}")
+                                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to broadcast new block: {error:?}")
                             }
                         }
                     }
                     Err(error) => {
-                        error!(target: LOG_TARGET, "Failed to convert block to bytes: {error:?}")
+                        error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to convert block to bytes: {error:?}")
                     }
                 }
             }
-            Err(error) => error!(target: LOG_TARGET, "Failed to receive new block: {error:?}"),
+            Err(error) => error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to receive new block: {error:?}"),
         }
     }
 
@@ -381,11 +393,20 @@ where
         let topic = message.topic.to_string();
 
         match topic {
+            topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
+                Ok(payload) => {
+                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
+                    self.network_peer_store.add(peer, payload).await;
+                }
+                Err(error) => {
+                    error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize peer info payload: {:?}", error);
+                }
+            },
             topic if topic == Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
-                    debug!(target: LOG_TARGET, "New peer info: {peer:?} -> {payload:?}");
-                    self.peer_store.add(peer, payload).await;
-                    if let Some(tip) = self.peer_store.tip_of_block_height().await {
+                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[TRIBE] New peer info: {peer:?} -> {payload:?}");
+                    self.tribe_peer_store.add(peer, payload).await;
+                    if let Some(tip) = self.tribe_peer_store.tip_of_block_height().await {
                         if let Ok(curr_height) = self.share_chain.tip_height().await {
                             if curr_height < tip.height {
                                 self.sync_share_chain().await;
@@ -394,7 +415,7 @@ where
                     }
                 }
                 Err(error) => {
-                    error!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
+                    error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize peer info payload: {:?}", error);
                 }
             },
             // TODO: send a signature that proves that the actual block was coming from this peer
@@ -406,7 +427,7 @@ where
 
                 match Block::try_from(message) {
                     Ok(payload) => {
-                        info!(target: LOG_TARGET,"🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
+                        info!(target: LOG_TARGET, tribe = &self.config.tribe; "🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
                         match self.share_chain.submit_block(&payload).await {
                             Ok(result) => {
                                 if result.need_sync {
@@ -414,17 +435,17 @@ where
                                 }
                             }
                             Err(error) => {
-                                error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
+                                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Could not add new block to local share chain: {error:?}");
                             }
                         }
                     }
                     Err(error) => {
-                        error!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
+                        error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize broadcast block payload: {:?}", error);
                     }
                 }
             }
             _ => {
-                warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
+                warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Unknown topic {topic:?}!");
             }
         }
     }
@@ -435,7 +456,7 @@ where
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
-        debug!(target: LOG_TARGET, "Incoming Share chain sync request: {request:?}");
+        debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Incoming Share chain sync request: {request:?}");
         match self.share_chain.blocks(request.from_height).await {
             Ok(blocks) => {
                 if self
@@ -445,10 +466,10 @@ where
                     .send_response(channel, ShareChainSyncResponse::new(blocks.clone()))
                     .is_err()
                 {
-                    error!(target: LOG_TARGET, "Failed to send block sync response");
+                    error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to send block sync response");
                 }
             }
-            Err(error) => error!(target: LOG_TARGET, "Failed to get blocks from height: {error:?}"),
+            Err(error) => error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to get blocks from height: {error:?}"),
         }
     }
 
@@ -458,7 +479,7 @@ where
         if self.sync_in_progress.load(Ordering::SeqCst) {
             self.sync_in_progress.store(false, Ordering::SeqCst);
         }
-        debug!(target: LOG_TARGET, "Share chain sync response: {response:?}");
+        debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Share chain sync response: {response:?}");
         match self.share_chain.submit_blocks(response.blocks, true).await {
             Ok(result) => {
                 if result.need_sync {
@@ -466,7 +487,7 @@ where
                 }
             }
             Err(error) => {
-                error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
+                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to add synced blocks to share chain: {error:?}");
             }
         }
     }
@@ -475,16 +496,15 @@ where
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
     async fn sync_share_chain(&mut self) {
         if self.sync_in_progress.load(Ordering::SeqCst) {
-            debug!("Sync already in progress...");
             return;
         }
         self.sync_in_progress.store(true, Ordering::SeqCst);
 
-        debug!(target: LOG_TARGET, "Syncing share chain...");
-        match self.peer_store.tip_of_block_height().await {
+        debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Syncing share chain...");
+        match self.tribe_peer_store.tip_of_block_height().await {
             Some(result) => {
-                debug!(target: LOG_TARGET, "Found highest known block height: {result:?}");
-                debug!(target: LOG_TARGET, "Send share chain sync request: {result:?}");
+                debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Found highest known block height: {result:?}");
+                debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Send share chain sync request: {result:?}");
                 // we always send from_height as zero now, to not miss any blocks
                 self.swarm
                     .behaviour_mut()
@@ -493,7 +513,7 @@ where
             }
             None => {
                 self.sync_in_progress.store(false, Ordering::SeqCst);
-                error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
+                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to get peer with highest share chain height!")
             }
         }
     }
@@ -507,8 +527,9 @@ where
         share_chain: Arc<S>,
         share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
         timeout: Duration,
+        tribe: Tribe,
     ) {
-        info!(target: LOG_TARGET, "Initially syncing share chain (timeout: {timeout:?})...");
+        info!(target: LOG_TARGET, tribe = &tribe; "Initially syncing share chain (timeout: {timeout:?})...");
         in_progress.store(true, Ordering::SeqCst);
         let start = Instant::now();
         loop {
@@ -525,7 +546,7 @@ where
         } // wait for the first height
         match peer_store.tip_of_block_height().await {
             Some(result) => {
-                debug!(target: LOG_TARGET, "Found highest block height: {result:?}");
+                info!(target: LOG_TARGET, tribe = &tribe; "Found highest block height: {result:?}");
                 match share_chain.tip_height().await {
                     Ok(tip) => {
                         if tip < result.height {
@@ -533,7 +554,7 @@ where
                                 result.peer_id,
                                 ShareChainSyncRequest::new(0),
                             )) {
-                                error!("Failed to send share chain sync request: {error:?}");
+                                error!(target: LOG_TARGET, tribe = &tribe; "Failed to send share chain sync request: {error:?}");
                             }
                         } else {
                             in_progress.store(false, Ordering::SeqCst);
@@ -541,13 +562,13 @@ where
                     }
                     Err(error) => {
                         in_progress.store(false, Ordering::SeqCst);
-                        error!(target: LOG_TARGET, "Failed to get latest height of share chain: {error:?}")
+                        error!(target: LOG_TARGET, tribe = &tribe; "Failed to get latest height of share chain: {error:?}")
                     }
                 }
             }
             None => {
                 in_progress.store(false, Ordering::SeqCst);
-                error!(target: LOG_TARGET, "Failed to get peer with highest share chain height!")
+                error!(target: LOG_TARGET, tribe = &tribe; "Failed to get peer with highest share chain height!")
             }
         }
     }
@@ -556,7 +577,7 @@ where
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
-                info!(target: LOG_TARGET, "Listening on {address:?}");
+                info!(target: LOG_TARGET, tribe = &self.config.tribe; "Listening on {address:?}");
             }
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
@@ -604,13 +625,13 @@ where
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
-                        error!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                        error!(target: LOG_TARGET, tribe = &self.config.tribe; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                     }
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
-                        error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                        error!(target: LOG_TARGET, tribe = &self.config.tribe; "REQ-RES inbound failure: {peer:?} -> {error:?}");
                     }
                     request_response::Event::ResponseSent { .. } => {}
                 },
@@ -629,7 +650,7 @@ where
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
                         }
                     }
-                    _ => debug!(target: LOG_TARGET, "[KADEMLIA] {event:?}"),
+                    _ => debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[KADEMLIA] {event:?}"),
                 },
             },
             _ => {}
@@ -651,22 +672,22 @@ where
                 }
                 _ = publish_peer_info_interval.tick() => {
                     // handle case when we have some peers removed
-                    let expired_peers = self.peer_store.cleanup().await;
+                    let expired_peers = self.tribe_peer_store.cleanup().await;
                     for exp_peer in expired_peers {
                         self.swarm.behaviour_mut().kademlia.remove_peer(&exp_peer);
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
                     }
 
                     // broadcast peer info
-                    debug!(target: LOG_TARGET, "Peer count: {:?}", self.peer_store.peer_count().await);
+                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Peer count: {:?}", self.tribe_peer_store.peer_count().await);
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
-                                warn!(target: LOG_TARGET, "No peers to broadcast peer info!");
+                                warn!(target: LOG_TARGET, tribe = &self.config.tribe; "No peers to broadcast peer info!");
                             }
                             Error::LibP2P(LibP2PError::Publish(PublishError::Duplicate)) => {}
                             _ => {
-                                error!(target: LOG_TARGET, "Failed to publish node info: {error:?}");
+                                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to publish node info: {error:?}");
                             }
                         }
                     }
@@ -684,7 +705,7 @@ where
                 },
                 _ = kademlia_bootstrap_interval.tick() => {
                     if let Err(error) = self.bootstrap_kademlia() {
-                        warn!("Failed to do kademlia bootstrap: {error:?}");
+                        warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to do kademlia bootstrap: {error:?}");
                     }
                 }
             }
@@ -736,14 +757,14 @@ where
                                             }
                                         }
                                         Err(error) => {
-                                            warn!("Skipping invalid DNS entry: {:?}: {error:?}", chars);
+                                            warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Skipping invalid DNS entry: {:?}: {error:?}", chars);
                                         }
                                     }
                                 }
                             }
                         }
                         Err(error) => {
-                            error!("Failed to lookup domain records: {error:?}");
+                            error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to lookup domain records: {error:?}");
                         }
                     }
                 }
@@ -795,9 +816,10 @@ where
 
         // start initial share chain sync
         let in_progress = self.sync_in_progress.clone();
-        let peer_store = self.peer_store.clone();
+        let peer_store = self.tribe_peer_store.clone();
         let share_chain = self.share_chain.clone();
         let share_chain_sync_tx = self.share_chain_sync_tx.clone();
+        let tribe = self.config.tribe.clone();
         tokio::spawn(async move {
             Self::initial_share_chain_sync(
                 in_progress,
@@ -805,6 +827,7 @@ where
                 share_chain,
                 share_chain_sync_tx,
                 Duration::from_secs(30),
+                tribe,
             )
                 .await;
         });

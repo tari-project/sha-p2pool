@@ -7,6 +7,7 @@ use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
 use crate::{server::p2p::Error, sharechain::block::Block};
+use crate::server::p2p::Tribe;
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -42,17 +43,19 @@ where
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
     pub current_height: u64,
-    timestamp: u128,
+    pub tribe: Tribe,
+    pub timestamp: u128,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
-    pub fn new(current_height: u64) -> Self {
+    pub fn new(current_height: u64, tribe: Tribe) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
             current_height,
+            tribe,
             timestamp,
         }
     }

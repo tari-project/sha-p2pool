@@ -130,14 +130,14 @@ struct Cli {
     base_dir: Option<PathBuf>,
 }
 
-fn validate_tribe(tribe: &str) -> Result<(), String> {
+fn validate_tribe(tribe: &str) -> Result<String, String> {
     if tribe.trim().is_empty() {
         return Err(String::from(
             "tribe must be set",
         ));
     }
 
-    Ok(())
+    Ok(String::from(tribe))
 }
 
 impl Cli {

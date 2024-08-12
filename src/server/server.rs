@@ -59,13 +59,15 @@ where
     pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
-        let peer_store = Arc::new(PeerStore::new(&config.peer_store));
+        let tribe_peer_store = Arc::new(PeerStore::new(&config.peer_store));
+        let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let stats_store = Arc::new(StatsStore::new());
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
             share_chain.clone(),
-            peer_store.clone(),
+            tribe_peer_store.clone(),
+            network_peer_store.clone(),
             sync_in_progress.clone(),
         )
             .await
@@ -93,7 +95,7 @@ where
         let stats_server = if config.stats_server.enabled {
             Some(Arc::new(StatsServer::new(
                 share_chain.clone(),
-                peer_store.clone(),
+                tribe_peer_store.clone(),
                 stats_store.clone(),
                 config.stats_server.port,
             )))
