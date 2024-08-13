@@ -1,20 +1,18 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::atomic::AtomicBool;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::Arc,
 };
+use std::sync::atomic::AtomicBool;
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
+use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
-use crate::server::http::stats::server::StatsServer;
-use crate::server::p2p::peer_store::PeerStore;
-use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
         config, grpc,
@@ -23,6 +21,9 @@ use crate::{
     },
     sharechain::ShareChain,
 };
+use crate::server::http::stats::server::StatsServer;
+use crate::server::p2p::peer_store::PeerStore;
+use crate::server::stats_store::StatsStore;
 
 const LOG_TARGET: &str = "p2pool::server::server";
 
@@ -46,14 +47,15 @@ where
     base_node_grpc_service: Option<BaseNodeServer<TariBaseNodeGrpc>>,
     p2pool_grpc_service: Option<ShaP2PoolServer<ShaP2PoolGrpc<S>>>,
     stats_server: Option<Arc<StatsServer<S>>>,
+    shutdown_signal: ShutdownSignal,
 }
 
-// TODO: add graceful shutdown
+// TODO: handle and use shutdown_signal
 impl<S> Server<S>
 where
     S: ShareChain,
 {
-    pub async fn new(config: config::Config, share_chain: S) -> Result<Self, Error> {
+    pub async fn new(config: config::Config, share_chain: S, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
         let share_chain = Arc::new(share_chain);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
         let tribe_peer_store = Arc::new(PeerStore::new(&config.peer_store));
@@ -67,8 +69,8 @@ where
             network_peer_store.clone(),
             sync_in_progress.clone(),
         )
-        .await
-        .map_err(Error::P2PService)?;
+            .await
+            .map_err(Error::P2PService)?;
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
@@ -84,8 +86,8 @@ where
                 share_chain.clone(),
                 stats_store.clone(),
             )
-            .await
-            .map_err(Error::Grpc)?;
+                .await
+                .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
@@ -106,6 +108,7 @@ where
             base_node_grpc_service: base_node_grpc_server,
             p2pool_grpc_service: p2pool_server,
             stats_server,
+            shutdown_signal,
         })
     }
 
@@ -141,10 +144,10 @@ where
             let grpc_port = self.config.grpc_port;
             tokio::spawn(async move {
                 match Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port).await {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(error) => {
                         error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
-                    },
+                    }
                 }
             });
         }
@@ -153,14 +156,18 @@ where
             let stats_server = stats_server.clone();
             tokio::spawn(async move {
                 match stats_server.start().await {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(error) => {
                         error!(target: LOG_TARGET, "Stats HTTP server encountered an error: {:?}", error);
-                    },
+                    }
                 }
             });
         }
 
         self.p2p_service.start().await.map_err(Error::P2PService)
+    }
+
+    pub fn p2p_service(&self) -> &p2p::Service<S> {
+        &self.p2p_service
     }
 }

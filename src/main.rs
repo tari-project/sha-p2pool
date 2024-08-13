@@ -3,16 +3,25 @@
 
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
+    builder::{Styles, styling::AnsiColor},
     Parser, Subcommand,
 };
+use itertools::Itertools;
+use libp2p::futures::SinkExt;
 use libp2p::identity::Keypair;
 use tari_common::configuration::Network;
 use tari_common::initialize_logging;
+use tari_shutdown::{Shutdown, ShutdownSignal};
+use tokio::{select, time};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
-use crate::server::p2p;
+use crate::server::{p2p, Server};
+use crate::server::p2p::peer_store::PeerStore;
 use crate::server::p2p::Tribe;
 use crate::sharechain::in_memory::InMemoryShareChain;
 
@@ -121,7 +130,10 @@ enum Commands {
     GenerateIdentity,
 
     /// Listing all tribes that are present on the network.
-    ListTribes,
+    ListTribes {
+        #[clap(flatten)]
+        args: StartArgs,
+    },
 }
 
 #[derive(Clone, Parser)]
@@ -153,15 +165,18 @@ impl Cli {
     }
 }
 
-async fn start(cli: &Cli, args: &StartArgs) -> anyhow::Result<()> {
-    // logger setup
-    if let Err(e) = initialize_logging(
-        &cli.base_dir().join("configs/logs.yml"),
-        &cli.base_dir(),
-        include_str!("../log4rs_sample.yml"),
-    ) {
-        eprintln!("{}", e);
-        return Err(e.into());
+async fn server(cli: Arc<Cli>, args: &StartArgs, shutdown_signal: ShutdownSignal, enable_logging: bool)
+                -> anyhow::Result<Server<InMemoryShareChain>> {
+    if enable_logging {
+        // logger setup
+        if let Err(e) = initialize_logging(
+            &cli.base_dir().join("configs/logs.yml"),
+            &cli.base_dir(),
+            include_str!("../log4rs_sample.yml"),
+        ) {
+            eprintln!("{}", e);
+            return Err(e.into());
+        }
     }
 
     let mut config_builder = server::Config::builder();
@@ -203,29 +218,62 @@ async fn start(cli: &Cli, args: &StartArgs) -> anyhow::Result<()> {
         config_builder.with_stats_server_port(stats_server_port);
     }
 
-    // start server
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();
-    let mut server = server::Server::new(config, share_chain).await?;
-    server.start().await?;
 
-    Ok(())
+    Ok(Server::new(config, share_chain, shutdown_signal).await?)
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let shutdown = Shutdown::new();
     let cli = Cli::parse();
 
-    let cli_ref = &cli;
+    let cli_ref = Arc::new(cli.clone());
     match &cli.command {
         Commands::Start { args } => {
-            start(cli_ref, args).await?;
-        },
+            server(cli_ref.clone(), args, shutdown.to_signal(), true).await?.start().await?;
+        }
         Commands::GenerateIdentity => {
             let result = p2p::util::generate_identity().await?;
             print!("{}", serde_json::to_value(result)?);
-        },
-        Commands::ListTribes => {},
+        }
+        Commands::ListTribes { args } => {
+            // start server asynchronously
+            let cli_ref = cli_ref.clone();
+            let mut args_clone = args.clone();
+            args_clone.mining_disabled = true;
+            let shutdown_signal = shutdown.to_signal();
+            let (peer_store_channel_tx, peer_store_channel_rx) =
+                oneshot::channel::<Arc<PeerStore>>();
+            let handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+                let mut server = server(cli_ref, &args_clone, shutdown_signal, false).await?;
+                let _ = peer_store_channel_tx.send(server.p2p_service().network_peer_store().clone());
+                server.start().await?;
+                Ok(())
+            });
+
+            // wait for peer store from started server
+            let peer_store = peer_store_channel_rx.await?;
+
+            // collect tribes for 30 seconds
+            let mut tribes = vec![];
+            let timeout = time::sleep(Duration::from_secs(30));
+            tokio::pin!(timeout);
+            loop {
+                select! {
+                    () = &mut timeout => {
+                        break;
+                    }
+                    current_tribes = peer_store.tribes() => {
+                        tribes = current_tribes;
+                    }
+                }
+            }
+            handle.abort();
+            let tribes = tribes.iter().map(|tribe| tribe.to_string()).collect_vec();
+            print!("{}", serde_json::to_value(tribes)?);
+        }
     }
 
     Ok(())
