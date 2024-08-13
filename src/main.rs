@@ -4,7 +4,10 @@
 use std::env;
 use std::path::PathBuf;
 
-use clap::{builder::{Styles, styling::AnsiColor}, Parser, Subcommand};
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser, Subcommand,
+};
 use libp2p::identity::Keypair;
 use tari_common::configuration::Network;
 use tari_common::initialize_logging;
@@ -136,9 +139,7 @@ struct Cli {
 
 fn validate_tribe(tribe: &str) -> Result<String, String> {
     if tribe.trim().is_empty() {
-        return Err(String::from(
-            "tribe must be set",
-        ));
+        return Err(String::from("tribe must be set"));
     }
 
     Ok(String::from(tribe))
@@ -219,12 +220,12 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Start { args } => {
             start(cli_ref, args).await?;
-        }
+        },
         Commands::GenerateIdentity => {
             let result = p2p::util::generate_identity().await?;
             print!("{}", serde_json::to_value(result)?);
-        }
-        Commands::ListTribes => {}
+        },
+        Commands::ListTribes => {},
     }
 
     Ok(())

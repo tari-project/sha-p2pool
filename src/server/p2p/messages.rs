@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
-use crate::{server::p2p::Error, sharechain::block::Block};
 use crate::server::p2p::Tribe;
+use crate::{server::p2p::Error, sharechain::block::Block};
 
 #[macro_export]
 macro_rules! impl_conversions {

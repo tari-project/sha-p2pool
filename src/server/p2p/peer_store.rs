@@ -5,7 +5,6 @@ use std::{
     sync::RwLock,
     time::{Duration, Instant},
 };
-use std::collections::HashSet;
 
 use itertools::Itertools;
 use libp2p::PeerId;
@@ -93,8 +92,9 @@ impl PeerStore {
 
     /// Collects all current tribes from all PeerInfo collected from broadcasts.
     pub async fn tribes(&self) -> Vec<Tribe> {
-        self.peers.iter()
-            .map(|(_, record)| { record.peer_info.tribe })
+        self.peers
+            .iter()
+            .map(|(_, record)| record.peer_info.tribe)
             .unique()
             .collect_vec()
     }
