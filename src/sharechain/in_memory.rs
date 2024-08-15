@@ -153,7 +153,12 @@ impl InMemoryShareChain {
             let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)?
                 - i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
             if block_height_diff > 1 {
-                warn!(target: LOG_TARGET, "Out-of-sync chain, do a sync now...");
+                warn!(target: LOG_TARGET,
+                    "Out-of-sync chain, do a sync now... Height Diff: {:?}, Last: {:?}, New: {:?}",
+                    block_height_diff,
+                    last_block.height(),
+                    block.height(),
+                );
                 return Ok(ValidateBlockResult::new(false, true));
             }
 
@@ -249,8 +254,8 @@ impl ShareChain for InMemoryShareChain {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
                 if last_block.hash() != genesis_block().hash()
-                    && usize::try_from(last_block.height()).map_err(Error::FromIntConversion)? < MAX_BLOCKS_COUNT
-                    && usize::try_from(blocks[0].height()).map_err(Error::FromIntConversion)? > MAX_BLOCKS_COUNT
+                    && last_block.height() < blocks[0].height()
+                    && (blocks[0].height() - last_block.height()) > 1
                 {
                     block_levels_write_lock.clear();
                 }
@@ -268,7 +273,7 @@ impl ShareChain for InMemoryShareChain {
 
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
 
         Ok(SubmitBlockResult::new(false))
     }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use axum::routing::get;
 use axum::Router;
 use log::info;
+use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 use tokio::io;
 
@@ -45,6 +46,7 @@ where
     peer_store: Arc<PeerStore>,
     stats_store: Arc<StatsStore>,
     port: u16,
+    shutdown_signal: ShutdownSignal,
 }
 
 #[derive(Clone)]
@@ -58,12 +60,19 @@ impl<S> StatsServer<S>
 where
     S: ShareChain,
 {
-    pub fn new(share_chain: Arc<S>, peer_store: Arc<PeerStore>, stats_store: Arc<StatsStore>, port: u16) -> Self {
+    pub fn new(
+        share_chain: Arc<S>,
+        peer_store: Arc<PeerStore>,
+        stats_store: Arc<StatsStore>,
+        port: u16,
+        shutdown_signal: ShutdownSignal,
+    ) -> Self {
         Self {
             share_chain,
             peer_store,
             stats_store,
             port,
+            shutdown_signal,
         }
     }
 
@@ -85,6 +94,11 @@ where
             .await
             .map_err(Error::IO)?;
         info!(target: LOG_TARGET, "Starting Stats HTTP server at http://127.0.0.1:{}", self.port);
-        axum::serve(listener, router).await.map_err(Error::IO)
+        axum::serve(listener, router)
+            .with_graceful_shutdown(self.shutdown_signal.clone())
+            .await
+            .map_err(Error::IO)?;
+        info!(target: LOG_TARGET, "Stats HTTP server stopped!");
+        Ok(())
     }
 }

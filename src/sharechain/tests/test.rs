@@ -8,12 +8,10 @@ mod tests {
     use tari_common_types::tari_address::{TariAddress, TariAddressFeatures};
     use tari_crypto::{keys::PublicKey as CryptoPubKey, ristretto::RistrettoPublicKey};
 
-    use crate::{
-        sharechain::{
-            block::{Block as ShareChainBlock, BlockBuilder},
-            ShareChain,
-        },
-        InMemoryShareChain,
+    use crate::sharechain::in_memory::InMemoryShareChain;
+    use crate::sharechain::{
+        block::{Block as ShareChainBlock, BlockBuilder},
+        ShareChain,
     };
 
     fn new_random_address() -> TariAddress {
