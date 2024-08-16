@@ -7,6 +7,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("Tonic error: {0}")]
     Tonic(#[from] TonicError),
+    #[error("Shutdown")]
+    Shutdown,
 }
 
 #[derive(Error, Debug)]

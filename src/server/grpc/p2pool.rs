@@ -10,6 +10,7 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockRequest, SubmitBlockResponse,
 };
 use tari_core::proof_of_work::sha3x_difficulty;
+use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -53,9 +54,12 @@ where
         p2p_client: p2p::ServiceClient,
         share_chain: Arc<S>,
         stats_store: Arc<StatsStore>,
+        shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
+            client: Arc::new(Mutex::new(
+                util::connect_base_node(base_node_address, shutdown_signal).await?,
+            )),
             p2p_client,
             share_chain,
             stats_store,

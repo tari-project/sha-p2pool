@@ -75,9 +75,10 @@ where
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
         if config.mining_enabled {
-            let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone())
-                .await
-                .map_err(Error::Grpc)?;
+            let base_node_grpc_service =
+                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone())
+                    .await
+                    .map_err(Error::Grpc)?;
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
 
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
@@ -85,6 +86,7 @@ where
                 p2p_service.client(),
                 share_chain.clone(),
                 stats_store.clone(),
+                shutdown_signal.clone(),
             )
             .await
             .map_err(Error::Grpc)?;

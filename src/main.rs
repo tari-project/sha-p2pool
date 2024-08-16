@@ -12,9 +12,6 @@ mod sharechain;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut cli_shutdown = Shutdown::new();
-    let cli_shutdown_signal = cli_shutdown.to_signal();
-    ctrlc::set_handler(move || cli_shutdown.trigger()).expect("Error setting termination handler");
-    Cli::parse().handle_command(cli_shutdown_signal).await?;
+    Cli::parse().handle_command(Shutdown::new().to_signal()).await?;
     Ok(())
 }
