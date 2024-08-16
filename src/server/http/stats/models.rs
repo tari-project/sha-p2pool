@@ -74,10 +74,24 @@ impl BlockStats {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct TribeDetails {
+    pub id: String,
+    pub name: String,
+}
+impl TribeDetails {
+    pub fn new(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Stats {
     pub connected: bool,
     pub connected_since: Option<EpochTime>,
-    pub tribe: String,
+    pub tribe: TribeDetails,
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,

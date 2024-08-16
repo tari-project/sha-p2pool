@@ -56,7 +56,7 @@ pub struct AppState {
     pub share_chain: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
-    pub tribe: String,
+    pub tribe: Tribe,
 }
 
 impl<S> StatsServer<S>
@@ -89,7 +89,7 @@ where
                 share_chain: self.share_chain.clone(),
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
-                tribe: self.tribe.to_string(),
+                tribe: self.tribe.clone(),
             })
     }
 

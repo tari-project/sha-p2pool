@@ -18,7 +18,7 @@ use crate::server::http::stats::{
     MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
     P2POOL_STAT_REJECTED_BLOCKS_COUNT,
 };
-use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats};
+use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
 use crate::server::http::stats::server::AppState;
 use crate::server::stats_store::StatsStore;
 use crate::sharechain::SHARE_COUNT;
@@ -144,7 +144,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         estimated_earnings,
         miner_block_stats: miner_block_stats(state.stats_store.clone()).await,
         p2pool_block_stats: p2pool_block_stats(state.stats_store.clone()).await,
-        tribe: state.tribe.clone(),
+        tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),
     }))
 }
 
