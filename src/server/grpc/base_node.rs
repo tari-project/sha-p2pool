@@ -21,6 +21,7 @@ use minotari_app_grpc::{
         ValueAtHeightResponse,
     },
 };
+use tari_shutdown::ShutdownSignal;
 use tokio::sync::Mutex;
 use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
@@ -100,9 +101,11 @@ pub struct TariBaseNodeGrpc {
 }
 
 impl TariBaseNodeGrpc {
-    pub async fn new(base_node_address: String) -> Result<Self, Error> {
+    pub async fn new(base_node_address: String, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
+            client: Arc::new(Mutex::new(
+                util::connect_base_node(base_node_address, shutdown_signal).await?,
+            )),
         })
     }
 }
