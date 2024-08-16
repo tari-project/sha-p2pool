@@ -14,6 +14,10 @@ use crate::cli::util::validate_tribe;
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser, Debug)]
 pub struct StartArgs {
+    /// (Optional) base dir.
+    #[arg(short, long, value_name = "base-dir")]
+    base_dir: Option<PathBuf>,
+
     /// (Optional) gRPC port to use.
     #[arg(short, long, value_name = "grpc-port")]
     pub grpc_port: Option<u16>,
@@ -115,17 +119,25 @@ pub enum Commands {
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
-
-    /// (Optional) base dir.
-    #[arg(short, long, value_name = "base-dir")]
-    base_dir: Option<PathBuf>,
 }
 
 impl Cli {
     pub fn base_dir(&self) -> PathBuf {
-        self.base_dir
-            .clone()
-            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
+        match &self.command {
+            Commands::Start { args } => {
+                args.base_dir
+                    .clone()
+                    .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
+            }
+            Commands::GenerateIdentity => {
+                dirs::home_dir().unwrap().join(".tari/p2pool")
+            }
+            Commands::ListTribes { args } => {
+                args.base_dir
+                    .clone()
+                    .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
+            }
+        }
     }
 
     /// Handles CLI command.
@@ -137,13 +149,13 @@ impl Cli {
         match &self.command {
             Commands::Start { args } => {
                 commands::handle_start(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            },
+            }
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
-            },
+            }
             Commands::ListTribes { args } => {
                 commands::handle_list_tribes(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            },
+            }
         }
 
         Ok(())
