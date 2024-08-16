@@ -77,6 +77,7 @@ impl BlockStats {
 pub struct Stats {
     pub connected: bool,
     pub connected_since: Option<EpochTime>,
+    pub tribe: String,
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,

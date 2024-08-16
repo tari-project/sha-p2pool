@@ -1,21 +1,18 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::atomic::AtomicBool;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::Arc,
 };
+use std::sync::atomic::AtomicBool;
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
-use crate::server::http::stats::server::StatsServer;
-use crate::server::p2p::peer_store::PeerStore;
-use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
         config, grpc,
@@ -24,6 +21,9 @@ use crate::{
     },
     sharechain::ShareChain,
 };
+use crate::server::http::stats::server::StatsServer;
+use crate::server::p2p::peer_store::PeerStore;
+use crate::server::stats_store::StatsStore;
 
 const LOG_TARGET: &str = "p2pool::server::server";
 
@@ -69,8 +69,8 @@ where
             sync_in_progress.clone(),
             shutdown_signal.clone(),
         )
-        .await
-        .map_err(Error::P2PService)?;
+            .await
+            .map_err(Error::P2PService)?;
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
@@ -88,8 +88,8 @@ where
                 stats_store.clone(),
                 shutdown_signal.clone(),
             )
-            .await
-            .map_err(Error::Grpc)?;
+                .await
+                .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
@@ -99,6 +99,7 @@ where
                 tribe_peer_store.clone(),
                 stats_store.clone(),
                 config.stats_server.port,
+                config.p2p_service.tribe.clone(),
                 shutdown_signal.clone(),
             )))
         } else {

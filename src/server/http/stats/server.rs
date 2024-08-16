@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
@@ -12,6 +12,7 @@ use tokio::io;
 
 use crate::server::http::stats::handlers;
 use crate::server::p2p::peer_store::PeerStore;
+use crate::server::p2p::Tribe;
 use crate::server::stats_store::StatsStore;
 use crate::sharechain::ShareChain;
 
@@ -46,6 +47,7 @@ where
     peer_store: Arc<PeerStore>,
     stats_store: Arc<StatsStore>,
     port: u16,
+    tribe: Tribe,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -54,6 +56,7 @@ pub struct AppState {
     pub share_chain: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
+    pub tribe: String,
 }
 
 impl<S> StatsServer<S>
@@ -65,6 +68,7 @@ where
         peer_store: Arc<PeerStore>,
         stats_store: Arc<StatsStore>,
         port: u16,
+        tribe: Tribe,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -72,6 +76,7 @@ where
             peer_store,
             stats_store,
             port,
+            tribe,
             shutdown_signal,
         }
     }
@@ -84,6 +89,7 @@ where
                 share_chain: self.share_chain.clone(),
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
+                tribe: self.tribe.to_string(),
             })
     }
 
