@@ -1,9 +1,10 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::{collections::HashMap, sync::Arc};
 use std::ops::{Add, Div};
 use std::slice::Iter;
-use std::{collections::HashMap, sync::Arc};
+use std::str::FromStr;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -18,9 +19,9 @@ use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{
-    error::{BlockConvertError, Error},
-    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT,
-    SHARE_COUNT,
+    Block,
+    BLOCKS_WINDOW, error::{BlockConvertError, Error}, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult, SubmitBlockResult,
+    ValidateBlockResult,
 };
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
@@ -329,7 +330,7 @@ impl ShareChain for InMemoryShareChain {
             .with_height(last_block.height() + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
-                TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
+                TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
             )
             .build())
     }
