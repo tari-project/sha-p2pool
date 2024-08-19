@@ -74,8 +74,13 @@ impl Block {
     pub fn set_height(&mut self, height: u64) {
         self.height = height;
     }
+
     pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
         &self.miner_wallet_address
+    }
+
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash;
     }
 }
 

@@ -1,22 +1,26 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops::{Add, Div};
 use std::slice::Iter;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use log::{debug, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use num::{BigUint, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
-use tari_core::blocks::BlockHeader;
+use tari_core::blocks;
 use tari_core::proof_of_work::sha3x_difficulty;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{
     error::{BlockConvertError, Error},
-    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, MAX_BLOCKS_COUNT, SHARE_COUNT,
+    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT,
+    SHARE_COUNT,
 };
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
@@ -117,9 +121,9 @@ impl InMemoryShareChain {
     }
 
     /// Generating number of shares for all the miners.
-    fn miners_with_shares(&self, chain_iter: Iter<'_, Block>) -> HashMap<String, u64> {
+    fn miners_with_shares(&self, chain: Vec<&Block>) -> HashMap<String, u64> {
         let mut result: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
-        chain_iter.for_each(|block| {
+        chain.iter().for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
                 let addr = miner_wallet_address.to_base58();
                 if let Some(curr_hash_rate) = result.get(&addr) {
@@ -149,14 +153,13 @@ impl InMemoryShareChain {
             let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)?
                 - i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
             if block_height_diff > 1 {
-                warn!("Out-of-sync chain, do a sync now...");
+                warn!(target: LOG_TARGET,
+                    "Out-of-sync chain, do a sync now... Height Diff: {:?}, Last: {:?}, New: {:?}",
+                    block_height_diff,
+                    last_block.height(),
+                    block.height(),
+                );
                 return Ok(ValidateBlockResult::new(false, true));
-            }
-
-            // validate hash
-            if block.hash() != block.generate_hash() {
-                warn!(target: LOG_TARGET, "❌ Invalid block, hashes do not match");
-                return Ok(ValidateBlockResult::new(false, false));
             }
 
             // validate PoW
@@ -215,16 +218,16 @@ impl InMemoryShareChain {
                 > 0;
             if !found {
                 found_level.add_block(block.clone())?;
-                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
             }
         } else if let Some(last_block) = last_block {
             if last_block.height() < block.height() {
                 block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-                info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
             }
         } else {
             block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-            info!(target: LOG_TARGET, "🆕 New block added: {:?}", block.hash().to_hex());
+            info!(target: LOG_TARGET, "🆕 New block added at height {:?}: {:?}", block.height(), block.hash().to_hex());
         }
 
         Ok(SubmitBlockResult::new(validate_result.need_sync))
@@ -240,7 +243,7 @@ impl ShareChain for InMemoryShareChain {
             .await;
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "⬆️  Current height: {:?}", last_block.height());
+        info!(target: LOG_TARGET, "⬆️ Current height: {:?}", last_block.height());
         result
     }
 
@@ -251,8 +254,8 @@ impl ShareChain for InMemoryShareChain {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
                 if last_block.hash() != genesis_block().hash()
-                    && usize::try_from(last_block.height()).map_err(Error::FromIntConversion)? < MAX_BLOCKS_COUNT
-                    && usize::try_from(blocks[0].height()).map_err(Error::FromIntConversion)? > MAX_BLOCKS_COUNT
+                    && last_block.height() < blocks[0].height()
+                    && (blocks[0].height() - last_block.height()) > 1
                 {
                     block_levels_write_lock.clear();
                 }
@@ -284,7 +287,9 @@ impl ShareChain for InMemoryShareChain {
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
         let mut result = vec![];
-        let miners = self.miners_with_shares(self.chain(self.block_levels.read().await.iter()).iter());
+        let chain = self.chain(self.block_levels.read().await.iter());
+        let windowed_chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
+        let miners = self.miners_with_shares(windowed_chain);
 
         // calculate full hash rate and shares
         miners
@@ -310,13 +315,10 @@ impl ShareChain for InMemoryShareChain {
             .block
             .as_ref()
             .ok_or_else(|| BlockConvertError::MissingField("block".to_string()))?;
-        let origin_block_header_grpc = origin_block_grpc
-            .header
-            .as_ref()
-            .ok_or_else(|| BlockConvertError::MissingField("header".to_string()))?;
-        let origin_block_header = BlockHeader::try_from(origin_block_header_grpc.clone())
-            .map_err(BlockConvertError::GrpcBlockHeaderConvert)?;
+        let origin_block =
+            blocks::Block::try_from(origin_block_grpc.clone()).map_err(BlockConvertError::GrpcBlockConvert)?; // TODO: use different error
 
+        // get current share chain
         let block_levels_read_lock = self.block_levels.read().await;
         let chain = self.chain(block_levels_read_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -325,7 +327,7 @@ impl ShareChain for InMemoryShareChain {
             .with_timestamp(EpochTime::now())
             .with_prev_hash(last_block.generate_hash())
             .with_height(last_block.height() + 1)
-            .with_original_block_header(origin_block_header)
+            .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
                 TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
             )
@@ -340,5 +342,52 @@ impl ShareChain for InMemoryShareChain {
             .filter(|block| block.height() > from_height)
             .cloned()
             .collect())
+    }
+
+    async fn hash_rate(&self) -> ShareChainResult<BigUint> {
+        let block_levels = self.block_levels.read().await;
+        if block_levels.is_empty() {
+            return Ok(BigUint::zero());
+        }
+
+        let blocks = block_levels
+            .iter()
+            .flat_map(|level| level.blocks.clone())
+            .sorted_by(|block1, block2| block1.timestamp().cmp(&block2.timestamp()))
+            .tail(BLOCKS_WINDOW);
+
+        // calculate average block time
+        let blocks = blocks.collect_vec();
+        let mut block_times_sum = 0;
+        let mut block_times_count: u64 = 0;
+        for i in 0..blocks.len() {
+            let current_block = blocks.get(i);
+            let next_block = blocks.get(i + 1);
+            if let Some(current_block) = current_block {
+                if let Some(next_block) = next_block {
+                    block_times_sum += next_block.timestamp().as_u64() - current_block.timestamp().as_u64();
+                    block_times_count += 1;
+                }
+            }
+        }
+
+        // return to avoid division by zero
+        if block_times_sum == 0 || block_times_count == 0 {
+            return Ok(BigUint::zero());
+        }
+
+        let avg_block_time = BigUint::from(block_times_sum).div(BigUint::from(block_times_count));
+
+        // collect all hash rates
+        let mut hash_rates_sum = BigUint::zero();
+        let mut hash_rates_count = BigUint::zero();
+        for block in blocks {
+            let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
+            let current_hash_rate = BigUint::from(difficulty.as_u64()).div(avg_block_time.clone());
+            hash_rates_sum = hash_rates_sum.add(current_hash_rate);
+            hash_rates_count.inc();
+        }
+
+        Ok(hash_rates_sum.div(hash_rates_count))
     }
 }

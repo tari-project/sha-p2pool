@@ -3,10 +3,9 @@
 
 use std::cmp::max;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use log::{debug, info, warn};
+use log::{info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
     GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo,
@@ -15,11 +14,18 @@ use minotari_app_grpc::tari_rpc::{
 use tari_common_types::types::FixedHash;
 use tari_core::blocks::BlockHeader;
 use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::{PowAlgorithm, randomx_difficulty, sha3x_difficulty};
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
+use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
+use tari_shutdown::ShutdownSignal;
+use tari_utilities::hex::Hex;
 use tokio::sync::Mutex;
-use tonic::{Code, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
+use crate::server::http::stats::{
+    MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+    P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+};
+use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
         grpc::{error::Error, util},
@@ -33,7 +39,7 @@ const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     /// Base node client
     client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
@@ -41,7 +47,8 @@ where
     p2p_client: p2p::ServiceClient,
     /// Current share chain
     share_chain: Arc<S>,
-    sync_in_progress: Arc<AtomicBool>,
+    /// Stats store
+    stats_store: Arc<StatsStore>,
     random_xfactory: RandomXFactory,
     consensus_manager: ConsensusManager,
     genesis_block_hash: FixedHash,
@@ -54,22 +61,25 @@ where
 
 impl<S> ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     pub async fn new(
         base_node_address: String,
         p2p_client: p2p::ServiceClient,
         share_chain: Arc<S>,
-        sync_in_progress: Arc<AtomicBool>,
+        stats_store: Arc<StatsStore>,
+        shutdown_signal: ShutdownSignal,
         random_xfactory: RandomXFactory,
         consensus_manager: ConsensusManager,
-        genesis_block_hash: FixedHash
+        genesis_block_hash: FixedHash,
     ) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
+            client: Arc::new(Mutex::new(
+                util::connect_base_node(base_node_address, shutdown_signal).await?,
+            )),
             p2p_client,
             share_chain,
-            sync_in_progress,
+            stats_store,
             random_xfactory,
             consensus_manager,
             genesis_block_hash,
@@ -82,26 +92,32 @@ where
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            warn!(target: LOG_TARGET, "Share chain syncing is in progress...");
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
+        match self.share_chain.submit_block(block).await {
+            Ok(_) => {
+                self.stats_store
+                    .inc(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
+                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
+                self.p2p_client
+                    .broadcast_block(block)
+                    .await
+                    .map_err(|error| Status::internal(error.to_string()))
+            },
+            Err(error) => {
+                warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
+                self.stats_store
+                    .inc(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
+                Ok(())
+            },
         }
-
-        if let Err(error) = self.share_chain.submit_block(block).await {
-            warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
-        }
-        debug!(target: LOG_TARGET, "Broadcast new block with height: {:?}", block.height());
-        self.p2p_client
-            .broadcast_block(block)
-            .await
-            .map_err(|error| Status::internal(error.to_string()))
     }
 }
 
 #[tonic::async_trait]
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 where
-    S: ShareChain + Send + Sync + 'static,
+    S: ShareChain,
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
@@ -109,11 +125,6 @@ where
         &self,
         _request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            warn!(target: LOG_TARGET, "Share chain syncing is in progress...");
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
-        }
-
         let mut pow_algo = PowAlgo::default();
         // TODO: use config
         pow_algo.set_pow_algo(PowAlgos::Randomx);
@@ -151,7 +162,10 @@ where
             .ok_or_else(|| Status::internal("missing miner data"))?;
         if let Some(header) = &response.block {
             let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
-            self.block_height_difficulty_cache.lock().await.insert(height, miner_data.target_difficulty);
+            self.block_height_difficulty_cache
+                .lock()
+                .await
+                .insert(height, miner_data.target_difficulty);
         }
         let target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
         miner_data.target_difficulty = target_difficulty;
@@ -170,12 +184,6 @@ where
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
-        dbg!("Submit received");
-        if self.sync_in_progress.load(Ordering::Relaxed) {
-            warn!(target: LOG_TARGET, "Share chain syncing is in progress...");
-            return Err(Status::new(Code::Unavailable, "Share chain syncing is in progress..."));
-        }
-
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block
             .block
@@ -199,8 +207,9 @@ where
                 origin_block_header,
                 &self.random_xfactory,
                 &self.genesis_block_hash,
-                &self.consensus_manager
-            ).map_err(|error| Status::internal(error.to_string()))?,
+                &self.consensus_manager,
+            )
+            .map_err(|error| Status::internal(error.to_string()))?,
         };
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
@@ -224,7 +233,12 @@ where
         //         network_difficulty_matches = true;
         //     }
         // }
-        let network_difficulty_matches = match self.block_height_difficulty_cache.lock().await.get(&(origin_block_header.height)) {
+        let network_difficulty_matches = match self
+            .block_height_difficulty_cache
+            .lock()
+            .await
+            .get(&(origin_block_header.height))
+        {
             Some(difficulty) => request_block_difficulty.as_u64() >= *difficulty,
             None => false,
         };
@@ -235,7 +249,10 @@ where
 
         let mut accepted = self.stats_accepted_by_main_chain.lock().await;
         let mut rejected = self.stats_rejected_by_main_chain.lock().await;
-        info!("Submit stats... max/accepted/rejected: {}/{}/{}", max_difficulty, accepted, rejected);
+        info!(
+            "Submit stats... max/accepted/rejected: {}/{}/{}",
+            max_difficulty, accepted, rejected
+        );
 
         if !network_difficulty_matches {
             block.set_sent_to_main_chain(false);
@@ -257,17 +274,21 @@ where
         let (metadata, extensions, _inner) = request.into_parts();
         info!("🔗 Submitting block to base node...");
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-             match self.client.lock().await.submit_block(grpc_request).await {
+        match self.client.lock().await.submit_block(grpc_request).await {
             Ok(resp) => {
-                *accepted += 1;
-                *max_difficulty = 0;
+                self.stats_store
+                    .inc(&P2POOL_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
                 info!("💰 New matching block found and sent to network!");
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             },
-            Err(_) => {
-                *rejected += 1;
+            Err(error) => {
+                warn!("Failed to submit block to Tari network: {error:?}");
+                self.stats_store
+                    .inc(&P2POOL_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
+                    .await;
                 block.set_sent_to_main_chain(false);
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {

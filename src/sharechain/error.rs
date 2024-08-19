@@ -4,6 +4,8 @@
 use std::num::TryFromIntError;
 
 use tari_common_types::tari_address::TariAddressError;
+use tari_core::consensus::ConsensusBuilderError;
+use tari_core::proof_of_work::DifficultyError;
 use thiserror::Error;
 
 use crate::sharechain::block::Block;
@@ -12,7 +14,7 @@ use crate::sharechain::block::Block;
 pub enum Error {
     #[error("gRPC Block conversion error: {0}")]
     BlockConvert(#[from] BlockConvertError),
-    #[error("Share chain is empty, no genesis block found as well!")]
+    #[error("Share chain is empty!")]
     Empty,
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),
@@ -20,12 +22,16 @@ pub enum Error {
     InvalidBlock(Block),
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
+    #[error("Difficulty calculation error: {0}")]
+    Difficulty(#[from] DifficultyError),
+    #[error("Consensus builder error: {0}")]
+    ConsensusBuilder(#[from] ConsensusBuilderError),
 }
 
 #[derive(Error, Debug)]
 pub enum BlockConvertError {
     #[error("Missing field: {0}")]
     MissingField(String),
-    #[error("Converting gRPC block header error: {0}")]
-    GrpcBlockHeaderConvert(String),
+    #[error("Converting gRPC block error: {0}")]
+    GrpcBlockConvert(String),
 }

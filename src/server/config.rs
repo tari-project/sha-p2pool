@@ -3,6 +3,10 @@
 
 use std::{path::PathBuf, time::Duration};
 
+use libp2p::identity::Keypair;
+
+use crate::server::http::stats;
+use crate::server::p2p::Tribe;
 use crate::server::{p2p, p2p::peer_store::PeerStoreConfig};
 
 /// Config is the server configuration struct.
@@ -15,6 +19,7 @@ pub struct Config {
     pub peer_store: PeerStoreConfig,
     pub p2p_service: p2p::Config,
     pub mining_enabled: bool,
+    pub stats_server: stats::server::Config,
 }
 
 impl Default for Config {
@@ -27,6 +32,7 @@ impl Default for Config {
             peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
             mining_enabled: true,
+            stats_server: stats::server::Config::default(),
         }
     }
 }
@@ -60,6 +66,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_tribe(&mut self, tribe: Tribe) -> &mut Self {
+        self.config.p2p_service.tribe = tribe;
+        self
+    }
+
     pub fn with_peer_store_config(&mut self, config: PeerStoreConfig) -> &mut Self {
         self.config.peer_store = config;
         self
@@ -85,6 +96,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_private_key(&mut self, config: Option<Keypair>) -> &mut Self {
+        self.config.p2p_service.private_key = config;
+        self
+    }
+
     pub fn with_mining_enabled(&mut self, config: bool) -> &mut Self {
         self.config.mining_enabled = config;
         self
@@ -92,6 +108,16 @@ impl ConfigBuilder {
 
     pub fn with_mdns_enabled(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.mdns_enabled = config;
+        self
+    }
+
+    pub fn with_stats_server_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.stats_server.enabled = config;
+        self
+    }
+
+    pub fn with_stats_server_port(&mut self, config: u16) -> &mut Self {
+        self.config.stats_server.port = config;
         self
     }
 

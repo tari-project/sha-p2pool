@@ -21,6 +21,7 @@ use minotari_app_grpc::{
         ValueAtHeightResponse,
     },
 };
+use tari_shutdown::ShutdownSignal;
 use tokio::sync::Mutex;
 use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
@@ -100,75 +101,59 @@ pub struct TariBaseNodeGrpc {
 }
 
 impl TariBaseNodeGrpc {
-    pub async fn new(base_node_address: String) -> Result<Self, Error> {
+    pub async fn new(base_node_address: String, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(util::connect_base_node(base_node_address).await?)),
+            client: Arc::new(Mutex::new(
+                util::connect_base_node(base_node_address, shutdown_signal).await?,
+            )),
         })
     }
 }
 
 #[tonic::async_trait]
 impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
-    type FetchMatchingUtxosStream = mpsc::Receiver<Result<tari_rpc::FetchMatchingUtxosResponse, Status>>;
-    type GetActiveValidatorNodesStream = mpsc::Receiver<Result<tari_rpc::GetActiveValidatorNodesResponse, Status>>;
-    type GetBlocksStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
-    type GetMempoolTransactionsStream = mpsc::Receiver<Result<tari_rpc::GetMempoolTransactionsResponse, Status>>;
-    type GetNetworkDifficultyStream = mpsc::Receiver<Result<tari_rpc::NetworkDifficultyResponse, Status>>;
-    type GetPeersStream = mpsc::Receiver<Result<tari_rpc::GetPeersResponse, Status>>;
-    type GetSideChainUtxosStream = mpsc::Receiver<Result<tari_rpc::GetSideChainUtxosResponse, Status>>;
-    type GetTemplateRegistrationsStream = mpsc::Receiver<Result<tari_rpc::GetTemplateRegistrationResponse, Status>>;
-    type GetTokensInCirculationStream = mpsc::Receiver<Result<ValueAtHeightResponse, Status>>;
     type ListHeadersStream = mpsc::Receiver<Result<BlockHeaderResponse, Status>>;
-    type SearchKernelsStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
-    type SearchUtxosStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
-
     async fn list_headers(
         &self,
         request: Request<ListHeadersRequest>,
     ) -> Result<Response<Self::ListHeadersStream>, Status> {
         proxy_stream_result!(self, list_headers, request, LIST_HEADERS_PAGE_SIZE)
     }
-
     async fn get_header_by_hash(
         &self,
         request: Request<GetHeaderByHashRequest>,
     ) -> Result<Response<BlockHeaderResponse>, Status> {
         proxy_simple_result!(self, get_header_by_hash, request)
     }
-
+    type GetBlocksStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
     async fn get_blocks(&self, request: Request<GetBlocksRequest>) -> Result<Response<Self::GetBlocksStream>, Status> {
         proxy_stream_result!(self, get_blocks, request, GET_BLOCKS_PAGE_SIZE)
     }
-
     async fn get_block_timing(&self, request: Request<HeightRequest>) -> Result<Response<BlockTimingResponse>, Status> {
         proxy_simple_result!(self, get_block_timing, request)
     }
-
     async fn get_constants(&self, request: Request<BlockHeight>) -> Result<Response<ConsensusConstants>, Status> {
         proxy_simple_result!(self, get_constants, request)
     }
-
     async fn get_block_size(
         &self,
         request: Request<BlockGroupRequest>,
     ) -> Result<Response<BlockGroupResponse>, Status> {
         proxy_simple_result!(self, get_block_size, request)
     }
-
     async fn get_block_fees(
         &self,
         request: Request<BlockGroupRequest>,
     ) -> Result<Response<BlockGroupResponse>, Status> {
         proxy_simple_result!(self, get_block_fees, request)
     }
-
     async fn get_version(&self, request: Request<Empty>) -> Result<Response<StringValue>, Status> {
         proxy_simple_result!(self, get_version, request)
     }
-
     async fn check_for_updates(&self, request: Request<Empty>) -> Result<Response<SoftwareUpdate>, Status> {
         proxy_simple_result!(self, check_for_updates, request)
     }
+    type GetTokensInCirculationStream = mpsc::Receiver<Result<ValueAtHeightResponse, Status>>;
 
     async fn get_tokens_in_circulation(
         &self,
@@ -181,6 +166,8 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
             GET_TOKENS_IN_CIRCULATION_PAGE_SIZE
         )
     }
+
+    type GetNetworkDifficultyStream = mpsc::Receiver<Result<tari_rpc::NetworkDifficultyResponse, Status>>;
 
     async fn get_network_difficulty(
         &self,
@@ -251,12 +238,16 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         proxy_simple_result!(self, get_tip_info, request)
     }
 
+    type SearchKernelsStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
+
     async fn search_kernels(
         &self,
         request: Request<SearchKernelsRequest>,
     ) -> Result<Response<Self::SearchKernelsStream>, Status> {
         proxy_stream_result!(self, search_kernels, request, GET_BLOCKS_PAGE_SIZE)
     }
+
+    type SearchUtxosStream = mpsc::Receiver<Result<HistoricalBlock, Status>>;
 
     async fn search_utxos(
         &self,
@@ -265,6 +256,8 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         proxy_stream_result!(self, search_utxos, request, GET_BLOCKS_PAGE_SIZE)
     }
 
+    type FetchMatchingUtxosStream = mpsc::Receiver<Result<tari_rpc::FetchMatchingUtxosResponse, Status>>;
+
     async fn fetch_matching_utxos(
         &self,
         request: Request<FetchMatchingUtxosRequest>,
@@ -272,9 +265,13 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         proxy_stream_result!(self, fetch_matching_utxos, request, GET_BLOCKS_PAGE_SIZE)
     }
 
+    type GetPeersStream = mpsc::Receiver<Result<tari_rpc::GetPeersResponse, Status>>;
+
     async fn get_peers(&self, request: Request<GetPeersRequest>) -> Result<Response<Self::GetPeersStream>, Status> {
         proxy_stream_result!(self, get_peers, request, GET_BLOCKS_PAGE_SIZE)
     }
+
+    type GetMempoolTransactionsStream = mpsc::Receiver<Result<tari_rpc::GetMempoolTransactionsResponse, Status>>;
 
     async fn get_mempool_transactions(
         &self,
@@ -309,6 +306,8 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         proxy_simple_result!(self, get_mempool_stats, request)
     }
 
+    type GetActiveValidatorNodesStream = mpsc::Receiver<Result<tari_rpc::GetActiveValidatorNodesResponse, Status>>;
+
     async fn get_active_validator_nodes(
         &self,
         request: Request<GetActiveValidatorNodesRequest>,
@@ -323,12 +322,16 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
         proxy_simple_result!(self, get_shard_key, request)
     }
 
+    type GetTemplateRegistrationsStream = mpsc::Receiver<Result<tari_rpc::GetTemplateRegistrationResponse, Status>>;
+
     async fn get_template_registrations(
         &self,
         request: Request<GetTemplateRegistrationsRequest>,
     ) -> Result<Response<Self::GetTemplateRegistrationsStream>, Status> {
         proxy_stream_result!(self, get_template_registrations, request, 10)
     }
+
+    type GetSideChainUtxosStream = mpsc::Receiver<Result<tari_rpc::GetSideChainUtxosResponse, Status>>;
 
     async fn get_side_chain_utxos(
         &self,
