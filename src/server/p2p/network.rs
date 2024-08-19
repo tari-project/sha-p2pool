@@ -428,7 +428,7 @@ where
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
     async fn sync_share_chain(&mut self) {
         if self.sync_in_progress.load(Ordering::Relaxed) {
-            debug!("Sync already in progress...");
+            warn!(target: LOG_TARGET, "Sync already in progress...");
             return;
         }
         self.sync_in_progress.store(true, Ordering::Relaxed);
@@ -602,6 +602,14 @@ where
                         self.swarm.behaviour_mut().kademlia.remove_peer(&exp_peer);
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
                     }
+                    match self.share_chain.tip_height().await {
+                        Ok(tip) => {
+                            info!(target: LOG_TARGET, "Share chain: {tip:?}");
+                        },
+                        Err(error) => {
+                            error!(target: LOG_TARGET, "Failed to show tip height: {error:?}");
+                        },
+                    }
 
                     // broadcast peer info
                     debug!(target: LOG_TARGET, "Peer count: {:?}", self.peer_store.peer_count().await);
@@ -681,7 +689,7 @@ where
         let peer_store = self.peer_store.clone();
         let share_chain = self.share_chain.clone();
         let share_chain_sync_tx = self.share_chain_sync_tx.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             Self::initial_share_chain_sync(
                 in_progress,
                 peer_store,

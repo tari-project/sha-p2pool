@@ -10,6 +10,9 @@ use std::{
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
+use tari_common::configuration::Network;
+use tari_core::consensus::ConsensusManager;
+use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use thiserror::Error;
 
 use crate::{
@@ -31,6 +34,8 @@ pub enum Error {
     Grpc(#[from] grpc::error::Error),
     #[error("Socket address parse error: {0}")]
     AddrParse(#[from] AddrParseError),
+    #[error("Consensus manager error: {0}")]
+    ConsensusBuilderError(#[from] tari_core::consensus::ConsensusBuilderError),
 }
 
 /// Server represents the server running all the necessary components for sha-p2pool.
@@ -60,6 +65,9 @@ where
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
+        let randomx_factory = RandomXFactory::new(1);
+        let consensus_manager = ConsensusManager::builder(Network::default()).build()?;
+        let genesis_block_hash = consensus_manager.get_genesis_block().hash().clone();
         if config.mining_enabled {
             let base_node_grpc_service = TariBaseNodeGrpc::new(config.base_node_address.clone())
                 .await
@@ -71,6 +79,9 @@ where
                 p2p_service.client(),
                 share_chain.clone(),
                 sync_in_progress.clone(),
+                randomx_factory,
+                consensus_manager,
+                genesis_block_hash,
             )
             .await
             .map_err(Error::Grpc)?;
