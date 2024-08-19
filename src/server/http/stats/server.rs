@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use axum::Router;
 use axum::routing::get;
+use axum::Router;
 use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;

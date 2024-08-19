@@ -1,10 +1,10 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
 use std::ops::{Add, Div};
 use std::slice::Iter;
 use std::str::FromStr;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -19,9 +19,9 @@ use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::sharechain::{
-    Block,
-    BLOCKS_WINDOW, error::{BlockConvertError, Error}, MAX_BLOCKS_COUNT, SHARE_COUNT, ShareChain, ShareChainResult, SubmitBlockResult,
-    ValidateBlockResult,
+    error::{BlockConvertError, Error},
+    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT,
+    SHARE_COUNT,
 };
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";

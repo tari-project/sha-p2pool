@@ -14,12 +14,12 @@ use tari_core::consensus::ConsensusManager;
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::epoch_time::EpochTime;
 
+use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
+use crate::server::http::stats::server::AppState;
 use crate::server::http::stats::{
     MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
     P2POOL_STAT_REJECTED_BLOCKS_COUNT,
 };
-use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
-use crate::server::http::stats::server::AppState;
 use crate::server::stats_store::StatsStore;
 use crate::sharechain::SHARE_COUNT;
 

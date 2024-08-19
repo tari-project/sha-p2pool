@@ -80,10 +80,7 @@ pub struct TribeDetails {
 }
 impl TribeDetails {
     pub fn new(id: String, name: String) -> Self {
-        Self {
-            id,
-            name,
-        }
+        Self { id, name }
     }
 }
 

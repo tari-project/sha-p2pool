@@ -124,19 +124,15 @@ pub struct Cli {
 impl Cli {
     pub fn base_dir(&self) -> PathBuf {
         match &self.command {
-            Commands::Start { args } => {
-                args.base_dir
-                    .clone()
-                    .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
-            }
-            Commands::GenerateIdentity => {
-                dirs::home_dir().unwrap().join(".tari/p2pool")
-            }
-            Commands::ListTribes { args } => {
-                args.base_dir
-                    .clone()
-                    .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
-            }
+            Commands::Start { args } => args
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
+            Commands::GenerateIdentity => dirs::home_dir().unwrap().join(".tari/p2pool"),
+            Commands::ListTribes { args } => args
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
         }
     }
 
@@ -149,13 +145,13 @@ impl Cli {
         match &self.command {
             Commands::Start { args } => {
                 commands::handle_start(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            }
+            },
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
-            }
+            },
             Commands::ListTribes { args } => {
                 commands::handle_list_tribes(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            }
+            },
         }
 
         Ok(())

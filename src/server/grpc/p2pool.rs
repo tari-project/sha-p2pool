@@ -118,7 +118,7 @@ where
         // request new block template with shares as coinbases
         let shares = self.share_chain.generate_shares(reward).await;
 
-        let response = self
+        let mut response = self
             .client
             .lock()
             .await
@@ -136,6 +136,10 @@ where
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
         let target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
+        if let Some(mut miner_data) = response.miner_data {
+            miner_data.target_difficulty = target_difficulty;
+            response.miner_data = Some(miner_data);
+        }
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
