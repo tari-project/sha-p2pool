@@ -669,9 +669,9 @@ where
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
-                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer);
-                        let _ = self.bootstrap_kademlia();
+                        // Remove peer from peer store to try to sync from another peer,
+                        // if the peer goes online/accessible again, the peer store will have it again.
+                        self.tribe_peer_store.remove(&peer).await;
                     }
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
