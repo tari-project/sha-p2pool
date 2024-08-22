@@ -8,4 +8,3 @@ pub const P2POOL_STAT_REJECTED_BLOCKS_COUNT: &str = "p2pool_rejected_blocks_coun
 
 pub mod handlers;
 pub mod models;
-pub mod server;

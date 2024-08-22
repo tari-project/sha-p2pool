@@ -28,6 +28,7 @@ pub async fn connect_base_node(
             let mut client = None;
             tokio::pin!(shutdown_signal);
             while client.is_none() {
+                // TODO: fix
                 sleep(Duration::from_secs(5)).await;
                 match BaseNodeGrpcClient::connect(base_node_address.clone())
                     .await
