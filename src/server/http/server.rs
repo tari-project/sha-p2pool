@@ -11,6 +11,7 @@ use thiserror::Error;
 use tokio::io;
 
 use crate::server::http::stats::handlers;
+use crate::server::http::{health, version};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::p2p::Tribe;
 use crate::server::stats_store::StatsStore;
@@ -39,7 +40,7 @@ pub enum Error {
     IO(#[from] io::Error),
 }
 
-pub struct StatsServer<S>
+pub struct HttpServer<S>
 where
     S: ShareChain,
 {
@@ -59,7 +60,7 @@ pub struct AppState {
     pub tribe: Tribe,
 }
 
-impl<S> StatsServer<S>
+impl<S> HttpServer<S>
 where
     S: ShareChain,
 {
@@ -85,6 +86,8 @@ where
     pub fn routes(&self) -> Router {
         Router::new()
             .route("/stats", get(handlers::handle_get_stats))
+            .route("/health", get(health::handle_health))
+            .route("/version", get(version::handle_version))
             .with_state(AppState {
                 share_chain: self.share_chain.clone(),
                 peer_store: self.peer_store.clone(),

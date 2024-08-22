@@ -87,11 +87,11 @@ pub struct StartArgs {
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     pub mdns_disabled: bool,
 
-    /// Stats server disabled
+    /// HTTP server disabled
     ///
-    /// If set, local stats HTTP server is disabled.
-    #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
-    pub stats_server_disabled: bool,
+    /// If set, local HTTP server (stats, health-check, status etc...) is disabled.
+    #[arg(long, value_name = "http-server-disabled", default_value_t = false)]
+    pub http_server_disabled: bool,
 }
 
 #[derive(Subcommand, Clone, Debug)]

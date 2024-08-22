@@ -24,7 +24,7 @@ pub async fn handle_list_tribes(
     let cli_ref = cli.clone();
     let mut args_clone = args.clone();
     args_clone.mining_disabled = true;
-    args_clone.stats_server_disabled = true;
+    args_clone.http_server_disabled = true;
     let mut shutdown = Shutdown::new();
     let shutdown_signal = shutdown.to_signal();
     let (peer_store_channel_tx, peer_store_channel_rx) = oneshot::channel::<Arc<PeerStore>>();
