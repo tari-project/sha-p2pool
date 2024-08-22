@@ -99,6 +99,7 @@ where
                 tribe_peer_store.clone(),
                 stats_store.clone(),
                 config.stats_server.port,
+                config.p2p_service.tribe.clone(),
                 shutdown_signal.clone(),
             )))
         } else {

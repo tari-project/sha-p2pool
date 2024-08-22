@@ -71,6 +71,12 @@ pub struct Tribe {
     inner: String,
 }
 
+impl Tribe {
+    pub fn formatted(&self) -> String {
+        self.inner.to_case(Case::Lower).replace("_", " ").to_case(Case::Title)
+    }
+}
+
 impl ToValue for Tribe {
     fn to_value(&self) -> Value {
         Value::from(self.inner.as_str())
@@ -663,6 +669,9 @@ where
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                        // Remove peer from peer store to try to sync from another peer,
+                        // if the peer goes online/accessible again, the peer store will have it again.
+                        self.tribe_peer_store.remove(&peer).await;
                     },
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
@@ -689,13 +698,19 @@ where
                     },
                     _ => debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[KADEMLIA] {event:?}"),
                 },
-                ServerNetworkBehaviourEvent::Identify(event) => {
-                    if let identify::Event::Received { peer_id, info } = event {
+                ServerNetworkBehaviourEvent::Identify(event) => match event {
+                    identify::Event::Received { peer_id, info } => {
                         for addr in info.listen_addrs {
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         }
                         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                    }
+                    },
+                    identify::Event::Error { peer_id, error } => {
+                        warn!("Failed to identify peer {peer_id:?}: {error:?}");
+                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                    },
+                    _ => {},
                 },
             },
             _ => {},

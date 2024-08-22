@@ -90,6 +90,13 @@ impl PeerStore {
         self.set_last_connected().await;
     }
 
+    /// Removes a peer from store.
+    pub async fn remove(&self, peer_id: &PeerId) {
+        self.peers.remove(peer_id).await;
+        self.set_tip_of_block_height().await;
+        self.set_last_connected().await;
+    }
+
     /// Collects all current tribes from all PeerInfo collected from broadcasts.
     pub async fn tribes(&self) -> Vec<Tribe> {
         self.peers
