@@ -30,6 +30,10 @@ pub struct StartArgs {
     #[arg(long, value_name = "stats-server-port")]
     pub stats_server_port: Option<u16>,
 
+    /// (Optional) Address of the Tari base node.
+    #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18142")]
+    pub base_node_address: String,
+
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
     ///
