@@ -71,6 +71,7 @@ pub async fn server(
     if let Some(stats_server_port) = args.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }
+    config_builder.with_base_node_address(args.base_node_address.clone());
 
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();

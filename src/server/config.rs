@@ -120,6 +120,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_base_node_address(&mut self, config: String) -> &mut Self {
+        self.config.base_node_address = config;
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }
