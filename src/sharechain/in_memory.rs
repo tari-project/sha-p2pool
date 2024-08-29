@@ -3,6 +3,7 @@
 
 use std::ops::{Add, Div};
 use std::slice::Iter;
+use std::str::FromStr;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
@@ -329,7 +330,7 @@ impl ShareChain for InMemoryShareChain {
             .with_height(last_block.height() + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
-                TariAddress::from_hex(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
+                TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
             )
             .build())
     }

@@ -16,7 +16,7 @@ use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use thiserror::Error;
 
-use crate::server::http::stats::server::StatsServer;
+use crate::server::http::server::HttpServer;
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::stats_store::StatsStore;
 use crate::{
@@ -51,7 +51,7 @@ where
     p2p_service: p2p::Service<S>,
     base_node_grpc_service: Option<BaseNodeServer<TariBaseNodeGrpc>>,
     p2pool_grpc_service: Option<ShaP2PoolServer<ShaP2PoolGrpc<S>>>,
-    stats_server: Option<Arc<StatsServer<S>>>,
+    stats_server: Option<Arc<HttpServer<S>>>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -104,12 +104,13 @@ where
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
-        let stats_server = if config.stats_server.enabled {
-            Some(Arc::new(StatsServer::new(
+        let stats_server = if config.http_server.enabled {
+            Some(Arc::new(HttpServer::new(
                 share_chain.clone(),
                 tribe_peer_store.clone(),
                 stats_store.clone(),
-                config.stats_server.port,
+                config.http_server.port,
+                config.p2p_service.tribe.clone(),
                 shutdown_signal.clone(),
             )))
         } else {

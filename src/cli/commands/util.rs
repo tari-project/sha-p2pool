@@ -67,10 +67,11 @@ pub async fn server(
 
     config_builder.with_mining_enabled(!args.mining_disabled);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
-    config_builder.with_stats_server_enabled(!args.stats_server_disabled);
+    config_builder.with_http_server_enabled(!args.http_server_disabled);
     if let Some(stats_server_port) = args.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }
+    config_builder.with_base_node_address(args.base_node_address.clone());
 
     let config = config_builder.build();
     let share_chain = InMemoryShareChain::default();

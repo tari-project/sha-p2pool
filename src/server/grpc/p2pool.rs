@@ -156,7 +156,7 @@ where
             .into_inner();
 
         // set target difficulty
-        let mut miner_data = response
+        let miner_data = response
             .clone()
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
@@ -168,8 +168,10 @@ where
                 .insert(height, miner_data.target_difficulty);
         }
         let target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
-        miner_data.target_difficulty = target_difficulty;
-        response.miner_data = Some(miner_data);
+        if let Some(mut miner_data) = response.miner_data {
+            miner_data.target_difficulty = target_difficulty;
+            response.miner_data = Some(miner_data);
+        }
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),

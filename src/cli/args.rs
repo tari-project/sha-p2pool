@@ -14,6 +14,10 @@ use crate::cli::util::validate_tribe;
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser, Debug)]
 pub struct StartArgs {
+    /// (Optional) base dir.
+    #[arg(short, long, value_name = "base-dir")]
+    base_dir: Option<PathBuf>,
+
     /// (Optional) gRPC port to use.
     #[arg(short, long, value_name = "grpc-port")]
     pub grpc_port: Option<u16>,
@@ -25,6 +29,10 @@ pub struct StartArgs {
     /// (Optional) stats server port to use.
     #[arg(long, value_name = "stats-server-port")]
     pub stats_server_port: Option<u16>,
+
+    /// (Optional) Address of the Tari base node.
+    #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18142")]
+    pub base_node_address: String,
 
     /// (Optional) seed peers.
     /// Any amount of seed peers can be added to join a p2pool network.
@@ -83,11 +91,11 @@ pub struct StartArgs {
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     pub mdns_disabled: bool,
 
-    /// Stats server disabled
+    /// HTTP server disabled
     ///
-    /// If set, local stats HTTP server is disabled.
-    #[arg(long, value_name = "stats-server-disabled", default_value_t = false)]
-    pub stats_server_disabled: bool,
+    /// If set, local HTTP server (stats, health-check, status etc...) is disabled.
+    #[arg(long, value_name = "http-server-disabled", default_value_t = false)]
+    pub http_server_disabled: bool,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -115,17 +123,21 @@ pub enum Commands {
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
-
-    /// (Optional) base dir.
-    #[arg(short, long, value_name = "base-dir")]
-    base_dir: Option<PathBuf>,
 }
 
 impl Cli {
     pub fn base_dir(&self) -> PathBuf {
-        self.base_dir
-            .clone()
-            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool"))
+        match &self.command {
+            Commands::Start { args } => args
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
+            Commands::GenerateIdentity => dirs::home_dir().unwrap().join(".tari/p2pool"),
+            Commands::ListTribes { args } => args
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
+        }
     }
 
     /// Handles CLI command.
