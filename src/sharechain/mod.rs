@@ -13,7 +13,7 @@ pub const MAX_BLOCKS_COUNT: usize = 240;
 /// How many blocks are used to calculate current shares to be paid out.
 pub const BLOCKS_WINDOW: usize = 80;
 
-pub const SHARE_COUNT: u64 = 100;
+pub const SHARE_COUNT: u64 = 2096;
 
 pub mod block;
 pub mod error;

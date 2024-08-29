@@ -49,14 +49,13 @@ where
     share_chain: Arc<S>,
     /// Stats store
     stats_store: Arc<StatsStore>,
+
+
     random_xfactory: RandomXFactory,
     consensus_manager: ConsensusManager,
     genesis_block_hash: FixedHash,
     block_height_difficulty_cache: Arc<Mutex<HashMap<u64, u64>>>,
-    // TODO: refactor into a stats service
     stats_max_difficulty_since_last_success: Arc<Mutex<u64>>,
-    stats_accepted_by_main_chain: Arc<Mutex<u64>>,
-    stats_rejected_by_main_chain: Arc<Mutex<u64>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -85,8 +84,6 @@ where
             genesis_block_hash,
             block_height_difficulty_cache: Arc::new(Mutex::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(Mutex::new(0)),
-            stats_accepted_by_main_chain: Arc::new(Mutex::new(0)),
-            stats_rejected_by_main_chain: Arc::new(Mutex::new(0)),
         })
     }
 
@@ -248,13 +245,6 @@ where
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
-
-        let mut accepted = self.stats_accepted_by_main_chain.lock().await;
-        let mut rejected = self.stats_rejected_by_main_chain.lock().await;
-        info!(
-            "Submit stats... max/accepted/rejected: {}/{}/{}",
-            max_difficulty, accepted, rejected
-        );
 
         if !network_difficulty_matches {
             block.set_sent_to_main_chain(false);

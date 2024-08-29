@@ -14,7 +14,7 @@ use num::{BigUint, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
-use tari_core::proof_of_work::sha3x_difficulty;
+use tari_core::proof_of_work::{sha3x_difficulty, PowAlgorithm, ProofOfWork};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
@@ -99,6 +99,7 @@ impl InMemoryShareChain {
                 .blocks
                 .iter()
                 .max_by(|block1, block2| {
+                    // TODO: handle randomx block
                     let diff1 = if let Ok(diff) = sha3x_difficulty(block1.original_block_header()) {
                         diff.as_u64()
                     } else {
@@ -164,10 +165,17 @@ impl InMemoryShareChain {
             }
 
             // validate PoW
-            if let Err(error) = sha3x_difficulty(block.original_block_header()) {
-                warn!(target: LOG_TARGET, "❌ Invalid PoW!");
-                debug!(target: LOG_TARGET, "Failed to calculate difficulty: {error:?}");
-                return Ok(ValidateBlockResult::new(false, false));
+            match block.original_block_header().pow.pow_algo {
+                PowAlgorithm::RandomX => {
+                    // TODO: validate randomx pow
+                }
+                PowAlgorithm::Sha3x => {
+                    if let Err(error) = sha3x_difficulty(block.original_block_header()) {
+                        warn!(target: LOG_TARGET, "❌ Invalid PoW!");
+                        debug!(target: LOG_TARGET, "Failed to calculate difficulty: {error:?}");
+                        return Ok(ValidateBlockResult::new(false, false));
+                    }
+                }
             }
 
             // TODO: check here for miners
