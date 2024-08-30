@@ -1,11 +1,13 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use crate::sharechain::{block::Block, error::Error};
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
-
-use crate::sharechain::{block::Block, error::Error};
+use tari_common_types::types::FixedHash;
+use tari_core::consensus::ConsensusManager;
+use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 
 /// How many blocks to keep overall.
 pub const MAX_BLOCKS_COUNT: usize = 240;
@@ -40,6 +42,36 @@ pub struct ValidateBlockResult {
 impl ValidateBlockResult {
     pub fn new(valid: bool, need_sync: bool) -> Self {
         Self { valid, need_sync }
+    }
+}
+
+pub struct BlockValidationParams {
+    random_x_factory: RandomXFactory,
+    consensus_manager: ConsensusManager,
+    genesis_block_hash: FixedHash,
+}
+
+impl BlockValidationParams {
+    pub fn new(random_x_factory: RandomXFactory,
+               consensus_manager: ConsensusManager,
+               genesis_block_hash: FixedHash) -> Self {
+        Self {
+            random_x_factory,
+            consensus_manager,
+            genesis_block_hash,
+        }
+    }
+
+    pub fn random_x_factory(&self) -> &RandomXFactory {
+        &self.random_x_factory
+    }
+
+    pub fn consensus_manager(&self) -> &ConsensusManager {
+        &self.consensus_manager
+    }
+
+    pub fn genesis_block_hash(&self) -> &FixedHash {
+        &self.genesis_block_hash
     }
 }
 

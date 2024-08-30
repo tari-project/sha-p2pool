@@ -9,26 +9,25 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, info, warn};
-use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
+use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, PowAlgo, SubmitBlockRequest};
 use num::{BigUint, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
-use tari_core::proof_of_work::{sha3x_difficulty, PowAlgorithm, ProofOfWork};
+use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm, ProofOfWork};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use crate::sharechain::{
-    error::{BlockConvertError, Error},
-    Block, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT,
-    SHARE_COUNT,
-};
+use crate::sharechain::{error::{BlockConvertError, Error}, Block, BlockValidationParams, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW, MAX_BLOCKS_COUNT, SHARE_COUNT};
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
 pub struct InMemoryShareChain {
     max_blocks_count: usize,
     block_levels: Arc<RwLock<Vec<BlockLevel>>>,
+    pow_algo: PowAlgorithm,
+    block_validation_params: Option<BlockValidationParams>,
 }
 
 /// A collection of blocks with the same height.
@@ -63,17 +62,26 @@ impl Default for InMemoryShareChain {
         Self {
             max_blocks_count: MAX_BLOCKS_COUNT,
             block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
+            pow_algo: PowAlgorithm::Sha3x,
+            block_validation_params: None,
         }
     }
 }
 
 #[allow(dead_code)]
 impl InMemoryShareChain {
-    pub fn new(max_blocks_count: usize) -> Self {
-        Self {
-            max_blocks_count,
-            block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
+    pub fn new(max_blocks_count: usize, pow_algo: PowAlgorithm, block_validation_params: Option<BlockValidationParams>) -> Result<Self, Error> {
+        if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
+            return Err(Error::MissingBlockValidationParams);
         }
+        Ok(
+            Self {
+                max_blocks_count,
+                block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
+                pow_algo,
+                block_validation_params,
+            }
+        )
     }
 
     /// Returns the last block in chain
@@ -91,6 +99,29 @@ impl InMemoryShareChain {
             .cloned()
     }
 
+    /// Calculates block difficulty based on it's pow algo.
+    fn block_difficulty(&self, block: &Block) -> Result<u64, Error> {
+        match block.original_block_header().pow.pow_algo {
+            PowAlgorithm::RandomX => {
+                if let Some(params) = &self.block_validation_params {
+                    let difficulty = randomx_difficulty(
+                        block.original_block_header(),
+                        params.random_x_factory(),
+                        params.genesis_block_hash(),
+                        params.consensus_manager(),
+                    ).map_err(Error::RandomXDifficulty)?;
+                    Ok(difficulty.as_u64())
+                } else {
+                    Ok(0)
+                }
+            }
+            PowAlgorithm::Sha3x => {
+                let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
+                Ok(difficulty.as_u64())
+            }
+        }
+    }
+
     /// Returns the current (strongest) chain
     fn chain(&self, block_level_iter: Iter<'_, BlockLevel>) -> Vec<Block> {
         let mut result = vec![];
@@ -99,17 +130,8 @@ impl InMemoryShareChain {
                 .blocks
                 .iter()
                 .max_by(|block1, block2| {
-                    // TODO: handle randomx block
-                    let diff1 = if let Ok(diff) = sha3x_difficulty(block1.original_block_header()) {
-                        diff.as_u64()
-                    } else {
-                        0
-                    };
-                    let diff2 = if let Ok(diff) = sha3x_difficulty(block2.original_block_header()) {
-                        diff.as_u64()
-                    } else {
-                        0
-                    };
+                    let diff1 = self.block_difficulty(block1).unwrap_or(0);
+                    let diff2 = self.block_difficulty(block2).unwrap_or(0);
                     diff1.cmp(&diff2)
                 })
                 .iter()
@@ -144,8 +166,14 @@ impl InMemoryShareChain {
         &self,
         last_block: Option<&Block>,
         block: &Block,
+        params: &BlockValidationParams,
         sync: bool,
     ) -> ShareChainResult<ValidateBlockResult> {
+        if block.original_block_header().pow.pow_algo != self.pow_algo {
+            warn!(target: LOG_TARGET, "❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo);
+            return Ok(ValidateBlockResult::new(false, false));
+        }
+
         if sync && last_block.is_none() {
             return Ok(ValidateBlockResult::new(true, false));
         }
@@ -167,12 +195,21 @@ impl InMemoryShareChain {
             // validate PoW
             match block.original_block_header().pow.pow_algo {
                 PowAlgorithm::RandomX => {
-                    // TODO: validate randomx pow
+                    if let Err(error) = randomx_difficulty(
+                        block.original_block_header(),
+                        params.random_x_factory(),
+                        &params.genesis_block_hash(),
+                        params.consensus_manager(),
+                    ) {
+                        warn!(target: LOG_TARGET, "❌ Invalid PoW!");
+                        debug!(target: LOG_TARGET, "Failed to calculate RandomX difficulty: {error:?}");
+                        return Ok(ValidateBlockResult::new(false, false));
+                    }
                 }
                 PowAlgorithm::Sha3x => {
                     if let Err(error) = sha3x_difficulty(block.original_block_header()) {
                         warn!(target: LOG_TARGET, "❌ Invalid PoW!");
-                        debug!(target: LOG_TARGET, "Failed to calculate difficulty: {error:?}");
+                        debug!(target: LOG_TARGET, "Failed to calculate SHA3x difficulty: {error:?}");
                         return Ok(ValidateBlockResult::new(false, false));
                     }
                 }
@@ -192,13 +229,16 @@ impl InMemoryShareChain {
         &self,
         block_levels: &mut RwLockWriteGuard<'_, Vec<BlockLevel>>,
         block: &Block,
+        params: Option<&BlockValidationParams>,
         sync: bool,
     ) -> ShareChainResult<SubmitBlockResult> {
         let chain = self.chain(block_levels.iter());
         let last_block = chain.last();
 
+
+        // TODO: continue impl
         // validate
-        let validate_result = self.validate_block(last_block, block, sync).await?;
+        let validate_result = self.validate_block(last_block, block, params, sync).await?;
         if !validate_result.valid {
             return if validate_result.need_sync {
                 Ok(SubmitBlockResult::new(true))
@@ -248,7 +288,7 @@ impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
         let result = self
-            .submit_block_with_lock(&mut block_levels_write_lock, block, false)
+            .submit_block_with_lock(&mut block_levels_write_lock, block, self.block_validation_params.as_ref(), false)
             .await;
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -273,7 +313,7 @@ impl ShareChain for InMemoryShareChain {
 
         for block in blocks {
             let result = self
-                .submit_block_with_lock(&mut block_levels_write_lock, &block, sync)
+                .submit_block_with_lock(&mut block_levels_write_lock, &block, self.block_validation_params.as_ref(), sync)
                 .await?;
             if result.need_sync {
                 return Ok(SubmitBlockResult::new(true));
@@ -391,8 +431,8 @@ impl ShareChain for InMemoryShareChain {
         let mut hash_rates_sum = BigUint::zero();
         let mut hash_rates_count = BigUint::zero();
         for block in blocks {
-            let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
-            let current_hash_rate = BigUint::from(difficulty.as_u64()).div(avg_block_time.clone());
+            let difficulty = self.block_difficulty(&block);
+            let current_hash_rate = BigUint::from(difficulty).div(avg_block_time.clone());
             hash_rates_sum = hash_rates_sum.add(current_hash_rate);
             hash_rates_count.inc();
         }

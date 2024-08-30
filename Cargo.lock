@@ -2817,8 +2817,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "1.0.0-pre.15"
-source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -2830,12 +2830,13 @@ dependencies = [
  "rand",
  "rcgen",
  "subtle",
- "tari_common_types",
- "tari_comms",
- "tari_core",
+ "tari_common_types 1.3.0-pre.0",
+ "tari_comms 1.3.0-pre.0",
+ "tari_core 1.3.0-pre.0",
  "tari_crypto",
- "tari_features",
- "tari_script",
+ "tari_features 1.3.0-pre.0",
+ "tari_max_size",
+ "tari_script 1.3.0-pre.0",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -2845,9 +2846,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "minotari_ledger_wallet_common"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "bs58 0.5.1",
+]
+
+[[package]]
 name = "minotari_node_grpc_client"
 version = "0.1.0"
-source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -4302,11 +4311,11 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
- "tari_common",
- "tari_common_types",
- "tari_core",
+ "tari_common 1.0.0-pre.15",
+ "tari_common_types 1.0.0-pre.15",
+ "tari_core 1.0.0-pre.15",
  "tari_crypto",
- "tari_shutdown",
+ "tari_shutdown 1.0.0-pre.15",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -4645,7 +4654,31 @@ dependencies = [
  "sha2",
  "structopt",
  "tari_crypto",
- "tari_features",
+ "tari_features 1.0.0-pre.15",
+ "tempfile",
+ "thiserror",
+ "toml 0.5.11",
+]
+
+[[package]]
+name = "tari_common"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "anyhow",
+ "config",
+ "dirs-next",
+ "log",
+ "log4rs",
+ "multiaddr 0.14.0",
+ "path-clean",
+ "prost-build",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "structopt",
+ "tari_features 1.3.0-pre.0",
  "tempfile",
  "thiserror",
  "toml 0.5.11",
@@ -4655,6 +4688,20 @@ dependencies = [
 name = "tari_common_sqlite"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+dependencies = [
+ "diesel",
+ "diesel_migrations",
+ "log",
+ "serde",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "tari_common_sqlite"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -4684,7 +4731,33 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
- "tari_common",
+ "tari_common 1.0.0-pre.15",
+ "tari_crypto",
+ "tari_utilities",
+ "thiserror",
+]
+
+[[package]]
+name = "tari_common_types"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "base64 0.21.7",
+ "bitflags 2.6.0",
+ "blake2",
+ "borsh",
+ "bs58 0.5.1",
+ "chacha20poly1305",
+ "digest",
+ "minotari_ledger_wallet_common",
+ "newtype-ops",
+ "once_cell",
+ "primitive-types",
+ "rand",
+ "serde",
+ "strum",
+ "strum_macros",
+ "tari_common 1.3.0-pre.0",
  "tari_crypto",
  "tari_utilities",
  "thiserror",
@@ -4719,10 +4792,54 @@ dependencies = [
  "serde_derive",
  "sha3",
  "snow",
- "tari_common",
+ "tari_common 1.0.0-pre.15",
  "tari_crypto",
- "tari_shutdown",
- "tari_storage",
+ "tari_shutdown 1.0.0-pre.15",
+ "tari_storage 1.0.0-pre.15",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.6.10",
+ "tower",
+ "tracing",
+ "yamux 0.13.3",
+ "zeroize",
+]
+
+[[package]]
+name = "tari_comms"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bitflags 2.6.0",
+ "blake2",
+ "bytes 1.6.0",
+ "chrono",
+ "cidr",
+ "data-encoding",
+ "derivative",
+ "digest",
+ "futures 0.3.30",
+ "lmdb-zero",
+ "log",
+ "log-mdc",
+ "multiaddr 0.14.0",
+ "nom",
+ "once_cell",
+ "pin-project 1.1.5",
+ "prost",
+ "rand",
+ "serde",
+ "serde_derive",
+ "sha3",
+ "snow",
+ "tari_common 1.3.0-pre.0",
+ "tari_crypto",
+ "tari_shutdown 1.3.0-pre.0",
+ "tari_storage 1.3.0-pre.0",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -4755,13 +4872,48 @@ dependencies = [
  "prost",
  "rand",
  "serde",
- "tari_common",
- "tari_common_sqlite",
- "tari_comms",
- "tari_comms_rpc_macros",
+ "tari_common 1.0.0-pre.15",
+ "tari_common_sqlite 1.0.0-pre.15",
+ "tari_comms 1.0.0-pre.15",
+ "tari_comms_rpc_macros 1.0.0-pre.15",
  "tari_crypto",
- "tari_shutdown",
- "tari_storage",
+ "tari_shutdown 1.0.0-pre.15",
+ "tari_storage 1.0.0-pre.15",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+ "tower",
+ "zeroize",
+]
+
+[[package]]
+name = "tari_comms_dht"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "anyhow",
+ "bitflags 2.6.0",
+ "blake2",
+ "chacha20 0.7.3",
+ "chacha20poly1305",
+ "chrono",
+ "diesel",
+ "diesel_migrations",
+ "digest",
+ "futures 0.3.30",
+ "log",
+ "log-mdc",
+ "pin-project 0.4.30",
+ "prost",
+ "rand",
+ "serde",
+ "tari_common 1.3.0-pre.0",
+ "tari_common_sqlite 1.3.0-pre.0",
+ "tari_comms 1.3.0-pre.0",
+ "tari_comms_rpc_macros 1.3.0-pre.0",
+ "tari_crypto",
+ "tari_shutdown 1.3.0-pre.0",
+ "tari_storage 1.3.0-pre.0",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -4773,6 +4925,16 @@ dependencies = [
 name = "tari_comms_rpc_macros"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "tari_comms_rpc_macros"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4820,23 +4982,90 @@ dependencies = [
  "strum",
  "strum_macros",
  "tari-tiny-keccak",
- "tari_common",
- "tari_common_sqlite",
- "tari_common_types",
- "tari_comms",
- "tari_comms_dht",
- "tari_comms_rpc_macros",
+ "tari_common 1.0.0-pre.15",
+ "tari_common_sqlite 1.0.0-pre.15",
+ "tari_common_types 1.0.0-pre.15",
+ "tari_comms 1.0.0-pre.15",
+ "tari_comms_dht 1.0.0-pre.15",
+ "tari_comms_rpc_macros 1.0.0-pre.15",
  "tari_crypto",
- "tari_features",
- "tari_hashing",
- "tari_key_manager",
- "tari_mmr",
- "tari_p2p",
- "tari_script",
- "tari_service_framework",
- "tari_shutdown",
- "tari_storage",
- "tari_test_utils",
+ "tari_features 1.0.0-pre.15",
+ "tari_hashing 1.0.0-pre.15",
+ "tari_key_manager 1.0.0-pre.15",
+ "tari_mmr 1.0.0-pre.15",
+ "tari_p2p 1.0.0-pre.15",
+ "tari_script 1.0.0-pre.15",
+ "tari_service_framework 1.0.0-pre.15",
+ "tari_shutdown 1.0.0-pre.15",
+ "tari_storage 1.0.0-pre.15",
+ "tari_test_utils 1.0.0-pre.15",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
+name = "tari_core"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "bitflags 2.6.0",
+ "blake2",
+ "borsh",
+ "bytes 0.5.6",
+ "chacha20poly1305",
+ "chrono",
+ "decimal-rs",
+ "derivative",
+ "digest",
+ "dirs-next",
+ "fs2",
+ "futures 0.3.30",
+ "hex",
+ "integer-encoding",
+ "lmdb-zero",
+ "log",
+ "log-mdc",
+ "monero",
+ "newtype-ops",
+ "num-derive",
+ "num-format",
+ "num-traits",
+ "once_cell",
+ "primitive-types",
+ "prost",
+ "rand",
+ "randomx-rs",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "sha2",
+ "sha3",
+ "strum",
+ "strum_macros",
+ "tari-tiny-keccak",
+ "tari_common 1.3.0-pre.0",
+ "tari_common_sqlite 1.3.0-pre.0",
+ "tari_common_types 1.3.0-pre.0",
+ "tari_comms 1.3.0-pre.0",
+ "tari_comms_dht 1.3.0-pre.0",
+ "tari_comms_rpc_macros 1.3.0-pre.0",
+ "tari_crypto",
+ "tari_features 1.3.0-pre.0",
+ "tari_hashing 1.3.0-pre.0",
+ "tari_key_manager 1.3.0-pre.0",
+ "tari_max_size",
+ "tari_mmr 1.3.0-pre.0",
+ "tari_p2p 1.3.0-pre.0",
+ "tari_script 1.3.0-pre.0",
+ "tari_service_framework 1.3.0-pre.0",
+ "tari_shutdown 1.3.0-pre.0",
+ "tari_storage 1.3.0-pre.0",
+ "tari_test_utils 1.3.0-pre.0",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -4874,9 +5103,24 @@ version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
 
 [[package]]
+name = "tari_features"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+
+[[package]]
 name = "tari_hashing"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+dependencies = [
+ "borsh",
+ "digest",
+ "tari_crypto",
+]
+
+[[package]]
+name = "tari_hashing"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "borsh",
  "digest",
@@ -4906,14 +5150,58 @@ dependencies = [
  "strum",
  "strum_macros",
  "subtle",
- "tari_common_sqlite",
- "tari_common_types",
+ "tari_common_sqlite 1.0.0-pre.15",
+ "tari_common_types 1.0.0-pre.15",
  "tari_crypto",
- "tari_service_framework",
+ "tari_service_framework 1.0.0-pre.15",
  "tari_utilities",
  "thiserror",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "tari_key_manager"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "argon2",
+ "async-trait",
+ "blake2",
+ "chacha20 0.7.3",
+ "chacha20poly1305",
+ "chrono",
+ "crc32fast",
+ "derivative",
+ "diesel",
+ "diesel_migrations",
+ "digest",
+ "futures 0.3.30",
+ "log",
+ "rand",
+ "serde",
+ "strum",
+ "strum_macros",
+ "subtle",
+ "tari_common_sqlite 1.3.0-pre.0",
+ "tari_common_types 1.3.0-pre.0",
+ "tari_crypto",
+ "tari_service_framework 1.3.0-pre.0",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "tari_max_size"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "borsh",
+ "serde",
+ "tari_utilities",
+ "thiserror",
 ]
 
 [[package]]
@@ -4925,7 +5213,21 @@ dependencies = [
  "digest",
  "log",
  "serde",
- "tari_common",
+ "tari_common 1.0.0-pre.15",
+ "tari_crypto",
+ "tari_utilities",
+ "thiserror",
+]
+
+[[package]]
+name = "tari_mmr"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "borsh",
+ "digest",
+ "log",
+ "serde",
  "tari_crypto",
  "tari_utilities",
  "thiserror",
@@ -4945,13 +5247,43 @@ dependencies = [
  "rand",
  "rustls 0.20.9",
  "serde",
- "tari_common",
- "tari_comms",
- "tari_comms_dht",
+ "tari_common 1.0.0-pre.15",
+ "tari_comms 1.0.0-pre.15",
+ "tari_comms_dht 1.0.0-pre.15",
  "tari_crypto",
- "tari_service_framework",
- "tari_shutdown",
- "tari_storage",
+ "tari_service_framework 1.0.0-pre.15",
+ "tari_shutdown 1.0.0-pre.15",
+ "tari_storage 1.0.0-pre.15",
+ "tari_utilities",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "trust-dns-client",
+ "webpki",
+]
+
+[[package]]
+name = "tari_p2p"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "anyhow",
+ "fs2",
+ "futures 0.3.30",
+ "lmdb-zero",
+ "log",
+ "prost",
+ "rand",
+ "rustls 0.20.9",
+ "serde",
+ "tari_common 1.3.0-pre.0",
+ "tari_comms 1.3.0-pre.0",
+ "tari_comms_dht 1.3.0-pre.0",
+ "tari_crypto",
+ "tari_service_framework 1.3.0-pre.0",
+ "tari_shutdown 1.3.0-pre.0",
+ "tari_storage 1.3.0-pre.0",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -4979,6 +5311,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_script"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "blake2",
+ "borsh",
+ "digest",
+ "integer-encoding",
+ "serde",
+ "sha2",
+ "sha3",
+ "tari_crypto",
+ "tari_max_size",
+ "tari_utilities",
+ "thiserror",
+]
+
+[[package]]
 name = "tari_service_framework"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
@@ -4987,7 +5337,22 @@ dependencies = [
  "async-trait",
  "futures 0.3.30",
  "log",
- "tari_shutdown",
+ "tari_shutdown 1.0.0-pre.15",
+ "thiserror",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "tari_service_framework"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures 0.3.30",
+ "log",
+ "tari_shutdown 1.3.0-pre.0",
  "thiserror",
  "tokio",
  "tower-service",
@@ -4997,6 +5362,14 @@ dependencies = [
 name = "tari_shutdown"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
+dependencies = [
+ "futures 0.3.30",
+]
+
+[[package]]
+name = "tari_shutdown"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
 dependencies = [
  "futures 0.3.30",
 ]
@@ -5014,14 +5387,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_storage"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "bincode",
+ "lmdb-zero",
+ "log",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "tari_test_utils"
 version = "1.0.0-pre.15"
 source = "git+https://github.com/tari-project/tari.git#2b22c1ad8c70350e838db979d008f1369552fbc4"
 dependencies = [
  "futures 0.3.30",
  "rand",
- "tari_comms",
- "tari_shutdown",
+ "tari_comms 1.0.0-pre.15",
+ "tari_shutdown 1.0.0-pre.15",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "tari_test_utils"
+version = "1.3.0-pre.0"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-randomx-support#a091f87bda67270af67faa445106d44bb728d973"
+dependencies = [
+ "futures 0.3.30",
+ "rand",
+ "tari_comms 1.3.0-pre.0",
+ "tari_shutdown 1.3.0-pre.0",
  "tempfile",
  "tokio",
 ]

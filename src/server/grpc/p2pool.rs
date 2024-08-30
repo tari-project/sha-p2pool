@@ -26,6 +26,7 @@ use crate::server::http::stats::{
     P2POOL_STAT_REJECTED_BLOCKS_COUNT,
 };
 use crate::server::stats_store::StatsStore;
+use crate::sharechain::BlockValidationParams;
 use crate::{
     server::{
         grpc::{error::Error, util},
@@ -50,10 +51,8 @@ where
     /// Stats store
     stats_store: Arc<StatsStore>,
 
+    submit_block_params: BlockValidationParams,
 
-    random_xfactory: RandomXFactory,
-    consensus_manager: ConsensusManager,
-    genesis_block_hash: FixedHash,
     block_height_difficulty_cache: Arc<Mutex<HashMap<u64, u64>>>,
     stats_max_difficulty_since_last_success: Arc<Mutex<u64>>,
 }
@@ -68,7 +67,7 @@ where
         share_chain: Arc<S>,
         stats_store: Arc<StatsStore>,
         shutdown_signal: ShutdownSignal,
-        random_xfactory: RandomXFactory,
+        random_x_factory: RandomXFactory,
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
     ) -> Result<Self, Error> {
@@ -79,9 +78,11 @@ where
             p2p_client,
             share_chain,
             stats_store,
-            random_xfactory,
-            consensus_manager,
-            genesis_block_hash,
+            submit_block_params: BlockValidationParams::new(
+                random_x_factory,
+                consensus_manager,
+                genesis_block_hash,
+            ),
             block_height_difficulty_cache: Arc::new(Mutex::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(Mutex::new(0)),
         })
@@ -89,7 +90,7 @@ where
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        match self.share_chain.submit_block(block).await {
+        match self.share_chain.submit_block(block, &self.submit_block_params).await {
             Ok(_) => {
                 self.stats_store
                     .inc(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
@@ -99,14 +100,14 @@ where
                     .broadcast_block(block)
                     .await
                     .map_err(|error| Status::internal(error.to_string()))
-            },
+            }
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
                 self.stats_store
                     .inc(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
                     .await;
                 Ok(())
-            },
+            }
         }
     }
 }
@@ -120,11 +121,9 @@ where
     /// from the current share chain as coinbase transactions.
     async fn get_new_block(
         &self,
-        _request: Request<GetNewBlockRequest>,
+        request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        let mut pow_algo = PowAlgo::default();
-        // TODO: use config
-        pow_algo.set_pow_algo(PowAlgos::Randomx);
+        let pow_algo = request.into_inner().pow.ok_or(Status::invalid_argument("missing pow in request"))?;
 
         // request original block template to get reward
         let req = NewBlockTemplateRequest {
@@ -201,14 +200,14 @@ where
         let request_block_difficulty = match origin_block_header.pow.pow_algo {
             PowAlgorithm::Sha3x => {
                 sha3x_difficulty(origin_block_header).map_err(|error| Status::internal(error.to_string()))?
-            },
+            }
             PowAlgorithm::RandomX => randomx_difficulty(
                 origin_block_header,
-                &self.random_xfactory,
-                &self.genesis_block_hash,
-                &self.consensus_manager,
+                self.submit_block_params.random_x_factory(),
+                self.submit_block_params.genesis_block_hash(),
+                self.submit_block_params.consensus_manager(),
             )
-            .map_err(|error| Status::internal(error.to_string()))?,
+                .map_err(|error| Status::internal(error.to_string()))?,
         };
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
@@ -252,10 +251,10 @@ where
             match self.submit_share_chain_block(&block).await {
                 Ok(_) => {
                     info!("🔗 Block submitted to share chain!");
-                },
+                }
                 Err(error) => {
                     warn!("Failed to submit block to share chain: {error:?}");
-                },
+                }
             };
             return Ok(Response::new(SubmitBlockResponse {
                 block_hash: block.hash().to_vec(),
@@ -275,7 +274,7 @@ where
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            },
+            }
             Err(error) => {
                 warn!("Failed to submit block to Tari network: {error:?}");
                 self.stats_store
@@ -286,7 +285,7 @@ where
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            },
+            }
         }
     }
 }
