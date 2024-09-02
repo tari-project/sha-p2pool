@@ -3,11 +3,11 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use libp2p::PeerId;
-use serde::{Deserialize, Serialize};
-
 use crate::server::p2p::Tribe;
 use crate::{server::p2p::Error, sharechain::block::Block};
+use libp2p::PeerId;
+use serde::{Deserialize, Serialize};
+use tari_core::proof_of_work::PowAlgorithm;
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -45,16 +45,18 @@ where
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
-    pub current_height: u64,
+    pub current_sha3x_height: u64,
+    pub current_random_x_height: u64,
     pub tribe: Tribe,
     pub timestamp: u128,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
-    pub fn new(current_height: u64, tribe: Tribe) -> Self {
+    pub fn new(current_sha3x_height: u64, current_random_x_height: u64, tribe: Tribe) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
-            current_height,
+            current_sha3x_height,
+            current_random_x_height,
             tribe,
             timestamp,
         }
@@ -63,12 +65,13 @@ impl PeerInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncRequest {
+    pub algo: PowAlgorithm,
     pub from_height: u64,
 }
 
 impl ShareChainSyncRequest {
-    pub fn new(from_height: u64) -> Self {
-        Self { from_height }
+    pub fn new(algo: PowAlgorithm, from_height: u64) -> Self {
+        Self { algo, from_height }
     }
 }
 
@@ -86,11 +89,12 @@ impl LocalShareChainSyncRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
+    pub algo: PowAlgorithm,
     pub blocks: Vec<Block>,
 }
 
 impl ShareChainSyncResponse {
-    pub fn new(blocks: Vec<Block>) -> Self {
-        Self { blocks }
+    pub fn new(algo: PowAlgorithm, blocks: Vec<Block>) -> Self {
+        Self { algo, blocks }
     }
 }

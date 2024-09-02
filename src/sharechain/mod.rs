@@ -52,9 +52,11 @@ pub struct BlockValidationParams {
 }
 
 impl BlockValidationParams {
-    pub fn new(random_x_factory: RandomXFactory,
-               consensus_manager: ConsensusManager,
-               genesis_block_hash: FixedHash) -> Self {
+    pub fn new(
+        random_x_factory: RandomXFactory,
+        consensus_manager: ConsensusManager,
+        genesis_block_hash: FixedHash,
+    ) -> Self {
         Self {
             random_x_factory,
             consensus_manager,

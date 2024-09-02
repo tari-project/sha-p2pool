@@ -1,18 +1,16 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::cmp::max;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use log::{info, warn};
 use minotari_app_grpc::tari_rpc::{
-    base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
-    GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo,
-    SubmitBlockRequest, SubmitBlockResponse,
+    base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
+    GetNewBlockTemplateWithCoinbasesRequest, HeightRequest, NewBlockTemplateRequest, PowAlgo, SubmitBlockRequest,
+    SubmitBlockResponse,
 };
 use tari_common_types::types::FixedHash;
-use tari_core::blocks::BlockHeader;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
@@ -78,11 +76,7 @@ where
             p2p_client,
             share_chain,
             stats_store,
-            submit_block_params: BlockValidationParams::new(
-                random_x_factory,
-                consensus_manager,
-                genesis_block_hash,
-            ),
+            submit_block_params: BlockValidationParams::new(random_x_factory, consensus_manager, genesis_block_hash),
             block_height_difficulty_cache: Arc::new(Mutex::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(Mutex::new(0)),
         })
@@ -90,7 +84,7 @@ where
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        match self.share_chain.submit_block(block, &self.submit_block_params).await {
+        match self.share_chain.submit_block(block).await {
             Ok(_) => {
                 self.stats_store
                     .inc(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string(), 1)
@@ -100,14 +94,14 @@ where
                     .broadcast_block(block)
                     .await
                     .map_err(|error| Status::internal(error.to_string()))
-            }
+            },
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
                 self.stats_store
                     .inc(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string(), 1)
                     .await;
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -123,7 +117,10 @@ where
         &self,
         request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        let pow_algo = request.into_inner().pow.ok_or(Status::invalid_argument("missing pow in request"))?;
+        let pow_algo = request
+            .into_inner()
+            .pow
+            .ok_or(Status::invalid_argument("missing pow in request"))?;
 
         // request original block template to get reward
         let req = NewBlockTemplateRequest {
@@ -200,14 +197,14 @@ where
         let request_block_difficulty = match origin_block_header.pow.pow_algo {
             PowAlgorithm::Sha3x => {
                 sha3x_difficulty(origin_block_header).map_err(|error| Status::internal(error.to_string()))?
-            }
+            },
             PowAlgorithm::RandomX => randomx_difficulty(
                 origin_block_header,
                 self.submit_block_params.random_x_factory(),
                 self.submit_block_params.genesis_block_hash(),
                 self.submit_block_params.consensus_manager(),
             )
-                .map_err(|error| Status::internal(error.to_string()))?,
+            .map_err(|error| Status::internal(error.to_string()))?,
         };
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
@@ -251,10 +248,10 @@ where
             match self.submit_share_chain_block(&block).await {
                 Ok(_) => {
                     info!("🔗 Block submitted to share chain!");
-                }
+                },
                 Err(error) => {
                     warn!("Failed to submit block to share chain: {error:?}");
-                }
+                },
             };
             return Ok(Response::new(SubmitBlockResponse {
                 block_hash: block.hash().to_vec(),
@@ -274,7 +271,7 @@ where
                 block.set_sent_to_main_chain(true);
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
-            }
+            },
             Err(error) => {
                 warn!("Failed to submit block to Tari network: {error:?}");
                 self.stats_store
@@ -285,7 +282,7 @@ where
                 Ok(Response::new(SubmitBlockResponse {
                     block_hash: block.hash().to_vec(),
                 }))
-            }
+            },
         }
     }
 }

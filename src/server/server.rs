@@ -10,15 +10,16 @@ use std::{
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
-use tari_shutdown::ShutdownSignal;
 use tari_common::configuration::Network;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
+use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
 use crate::server::http::server::HttpServer;
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::stats_store::StatsStore;
+use crate::sharechain::BlockValidationParams;
 use crate::{
     server::{
         config, grpc,
@@ -59,8 +60,15 @@ impl<S> Server<S>
 where
     S: ShareChain,
 {
-    pub async fn new(config: config::Config, share_chain: S, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
-        let share_chain = Arc::new(share_chain);
+    pub async fn new(
+        config: config::Config,
+        share_chain_sha3x: S,
+        share_chain_random_x: S,
+        block_validation_params: Arc<BlockValidationParams>,
+        shutdown_signal: ShutdownSignal,
+    ) -> Result<Self, Error> {
+        let share_chain_sha3x = Arc::new(share_chain_sha3x);
+        let share_chain_random_x = Arc::new(share_chain_random_x);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
         let tribe_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));

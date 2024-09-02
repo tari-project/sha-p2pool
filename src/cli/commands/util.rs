@@ -7,6 +7,9 @@ use std::sync::Arc;
 use libp2p::identity::Keypair;
 use tari_common::configuration::Network;
 use tari_common::initialize_logging;
+use tari_core::consensus::ConsensusManager;
+use tari_core::proof_of_work::randomx_factory::RandomXFactory;
+use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
 
 use crate::cli::args::{Cli, StartArgs};
@@ -14,6 +17,7 @@ use crate::server as main_server;
 use crate::server::p2p::Tribe;
 use crate::server::Server;
 use crate::sharechain::in_memory::InMemoryShareChain;
+use crate::sharechain::{BlockValidationParams, MAX_BLOCKS_COUNT};
 
 pub async fn server(
     cli: Arc<Cli>,
@@ -74,7 +78,27 @@ pub async fn server(
     config_builder.with_base_node_address(args.base_node_address.clone());
 
     let config = config_builder.build();
-    let share_chain = InMemoryShareChain::default();
+    let randomx_factory = RandomXFactory::new(1);
+    let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
+    let genesis_block_hash = consensus_manager.get_genesis_block().hash().clone();
+    let block_validation_params = Arc::new(BlockValidationParams::new(
+        randomx_factory,
+        consensus_manager,
+        genesis_block_hash,
+    ));
+    let share_chain_sha3x = InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None)?;
+    let share_chain_random_x = InMemoryShareChain::new(
+        MAX_BLOCKS_COUNT,
+        PowAlgorithm::RandomX,
+        Some(block_validation_params.clone()),
+    )?;
 
-    Ok(Server::new(config, share_chain, shutdown_signal).await?)
+    Ok(Server::new(
+        config,
+        share_chain_sha3x,
+        share_chain_random_x,
+        block_validation_params.clone(),
+        shutdown_signal,
+    )
+    .await?)
 }

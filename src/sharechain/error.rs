@@ -4,9 +4,11 @@
 use std::num::TryFromIntError;
 
 use tari_common_types::tari_address::TariAddressError;
+use tari_common_types::types::FixedHashSizeError;
 use tari_core::consensus::ConsensusBuilderError;
 use tari_core::proof_of_work::monero_rx::MergeMineError;
 use tari_core::proof_of_work::DifficultyError;
+use tari_utilities::message_format::MessageFormatError;
 use thiserror::Error;
 
 use crate::sharechain::block::Block;
@@ -31,7 +33,10 @@ pub enum Error {
     ConsensusBuilder(#[from] ConsensusBuilderError),
     #[error("Missing block validation params!")]
     MissingBlockValidationParams,
-
+    #[error("Failed to convert to block hash: {0}")]
+    BlockHashConversion(#[from] FixedHashSizeError),
+    #[error("Failed to convert to private key: {0}")]
+    PrivateKeyConversion(MessageFormatError),
 }
 
 #[derive(Error, Debug)]

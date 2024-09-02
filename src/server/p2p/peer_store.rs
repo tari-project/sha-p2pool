@@ -65,8 +65,10 @@ pub struct PeerStore {
     peers: Cache<PeerId, PeerStoreRecord>,
     /// Max time to live for the items to avoid non-existing peers in list.
     ttl: Duration,
-    /// Peer with the highest share chain height.
-    tip_of_block_height: RwLock<Option<PeerStoreBlockHeightTip>>,
+    /// Peer with the highest share chain height in SHA-3 share chain.
+    tip_of_block_height_sha3x: RwLock<Option<PeerStoreBlockHeightTip>>,
+    /// Peer with the highest share chain height in RandomX share chain.
+    tip_of_block_height_random_x: RwLock<Option<PeerStoreBlockHeightTip>>,
     /// The last time when we had more than 0 peers.
     last_connected: RwLock<Option<EpochTime>>,
 }
@@ -77,7 +79,8 @@ impl PeerStore {
         Self {
             peers: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
             ttl: config.peer_record_ttl,
-            tip_of_block_height: RwLock::new(None),
+            tip_of_block_height_sha3x: RwLock::new(None),
+            tip_of_block_height_random_x: RwLock::new(None),
             last_connected: RwLock::new(None),
         }
     }
