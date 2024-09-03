@@ -10,6 +10,7 @@ use itertools::Itertools;
 use libp2p::PeerId;
 use log::{debug, warn};
 use moka::future::{Cache, CacheBuilder};
+use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::p2p::messages::PeerInfo;
@@ -89,14 +90,14 @@ impl PeerStore {
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
         self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
-        self.set_tip_of_block_height().await;
+        self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
     }
 
     /// Removes a peer from store.
     pub async fn remove(&self, peer_id: &PeerId) {
         self.peers.remove(peer_id).await;
-        self.set_tip_of_block_height().await;
+        self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
     }
 
@@ -116,22 +117,41 @@ impl PeerStore {
         self.peers.entry_count()
     }
 
+    async fn set_tip_of_block_heights(&self) {
+        self.set_tip_of_block_height(PowAlgorithm::RandomX).await;
+        self.set_tip_of_block_height(PowAlgorithm::Sha3x).await;
+    }
+
     /// Sets the actual highest block height with peer.
-    async fn set_tip_of_block_height(&self) {
-        if let Some((k, v)) = self
-            .peers
-            .iter()
-            .max_by(|(_k1, v1), (_k2, v2)| v1.peer_info.current_height.cmp(&v2.peer_info.current_height))
-        {
+    async fn set_tip_of_block_height(&self, pow: PowAlgorithm) {
+        let tip_of_block = match pow {
+            PowAlgorithm::RandomX => &self.tip_of_block_height_random_x,
+            PowAlgorithm::Sha3x => &self.tip_of_block_height_sha3x,
+        };
+        if let Some((k, v)) = self.peers.iter().max_by(|(_k1, v1), (_k2, v2)| {
+            let current_height_v1 = match pow {
+                PowAlgorithm::RandomX => v1.peer_info.current_random_x_height,
+                PowAlgorithm::Sha3x => v1.peer_info.current_sha3x_height,
+            };
+            let current_height_v2 = match pow {
+                PowAlgorithm::RandomX => v2.peer_info.current_random_x_height,
+                PowAlgorithm::Sha3x => v2.peer_info.current_sha3x_height,
+            };
+            current_height_v1.cmp(&current_height_v2)
+        }) {
             // save result
-            if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
+            if let Ok(mut tip_height_opt) = tip_of_block.write() {
+                let current_height = match pow {
+                    PowAlgorithm::RandomX => v.peer_info.current_random_x_height,
+                    PowAlgorithm::Sha3x => v.peer_info.current_sha3x_height,
+                };
                 if tip_height_opt.is_none() {
-                    let _ = tip_height_opt.insert(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
+                    let _ = tip_height_opt.insert(PeerStoreBlockHeightTip::new(*k, current_height));
                 } else {
-                    *tip_height_opt = Some(PeerStoreBlockHeightTip::new(*k, v.peer_info.current_height));
+                    *tip_height_opt = Some(PeerStoreBlockHeightTip::new(*k, current_height));
                 }
             }
-        } else if let Ok(mut tip_height_opt) = self.tip_of_block_height.write() {
+        } else if let Ok(mut tip_height_opt) = tip_of_block.write() {
             *tip_height_opt = None;
         } else {
             warn!(target: LOG_TARGET, "Failed to set tip height!");
@@ -139,8 +159,12 @@ impl PeerStore {
     }
 
     /// Returns peer with the highest share chain height.
-    pub async fn tip_of_block_height(&self) -> Option<PeerStoreBlockHeightTip> {
-        if let Ok(result) = self.tip_of_block_height.read() {
+    pub async fn tip_of_block_height(&self, pow: PowAlgorithm) -> Option<PeerStoreBlockHeightTip> {
+        let tip_of_block_height = match pow {
+            PowAlgorithm::RandomX => &self.tip_of_block_height_random_x,
+            PowAlgorithm::Sha3x => &self.tip_of_block_height_sha3x,
+        };
+        if let Ok(result) = tip_of_block_height.read() {
             if result.is_some() {
                 return Some(result.unwrap());
             }
@@ -163,7 +187,7 @@ impl PeerStore {
             }
         }
 
-        self.set_tip_of_block_height().await;
+        self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
 
         expired_peers

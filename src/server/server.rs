@@ -19,7 +19,6 @@ use thiserror::Error;
 use crate::server::http::server::HttpServer;
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::stats_store::StatsStore;
-use crate::sharechain::BlockValidationParams;
 use crate::{
     server::{
         config, grpc,
@@ -40,7 +39,7 @@ pub enum Error {
     #[error("Socket address parse error: {0}")]
     AddrParse(#[from] AddrParseError),
     #[error("Consensus manager error: {0}")]
-    ConsensusBuilderError(#[from] tari_core::consensus::ConsensusBuilderError),
+    ConsensusBuilder(#[from] tari_core::consensus::ConsensusBuilderError),
 }
 
 /// Server represents the server running all the necessary components for sha-p2pool.
@@ -64,7 +63,6 @@ where
         config: config::Config,
         share_chain_sha3x: S,
         share_chain_random_x: S,
-        block_validation_params: Arc<BlockValidationParams>,
         shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
@@ -76,7 +74,8 @@ where
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
-            share_chain.clone(),
+            share_chain_sha3x.clone(),
+            share_chain_random_x.clone(),
             tribe_peer_store.clone(),
             network_peer_store.clone(),
             sync_in_progress.clone(),
@@ -100,7 +99,8 @@ where
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
                 config.base_node_address.clone(),
                 p2p_service.client(),
-                share_chain.clone(),
+                share_chain_sha3x.clone(),
+                share_chain_random_x.clone(),
                 stats_store.clone(),
                 shutdown_signal.clone(),
                 randomx_factory,
@@ -114,7 +114,8 @@ where
 
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
-                share_chain.clone(),
+                share_chain_sha3x.clone(),
+                share_chain_random_x.clone(),
                 tribe_peer_store.clone(),
                 stats_store.clone(),
                 config.http_server.port,

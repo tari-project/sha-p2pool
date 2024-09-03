@@ -442,10 +442,21 @@ where
                     Ok(payload) => {
                         debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[TRIBE] New peer info: {peer:?} -> {payload:?}");
                         self.tribe_peer_store.add(peer, payload).await;
-                        if let Some(tip) = self.tribe_peer_store.tip_of_block_height().await {
-                            if let Ok(curr_height) = self.share_chain.tip_height().await {
+
+                        // check for SHA-3 tip height
+                        if let Some(tip) = self.tribe_peer_store.tip_of_block_height(PowAlgorithm::Sha3x).await {
+                            if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
                                 if curr_height < tip.height {
-                                    self.sync_share_chain().await;
+                                    self.sync_share_chain(PowAlgorithm::Sha3x).await;
+                                }
+                            }
+                        }
+
+                        // check for RandomX tip height
+                        if let Some(tip) = self.tribe_peer_store.tip_of_block_height(PowAlgorithm::RandomX).await {
+                            if let Ok(curr_height) = self.share_chain_random_x.tip_height().await {
+                                if curr_height < tip.height {
+                                    self.sync_share_chain(PowAlgorithm::RandomX).await;
                                 }
                             }
                         }
@@ -528,10 +539,14 @@ where
             self.sync_in_progress.store(false, Ordering::SeqCst);
         }
         debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Share chain sync response: {response:?}");
-        match self.share_chain.submit_blocks(response.blocks, true).await {
+        let share_chain = match response.algo {
+            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+        };
+        match share_chain.submit_blocks(response.blocks, true).await {
             Ok(result) => {
                 if result.need_sync {
-                    self.sync_share_chain().await;
+                    self.sync_share_chain(response.algo).await;
                 }
             },
             Err(error) => {
@@ -550,7 +565,7 @@ where
         self.sync_in_progress.store(true, Ordering::SeqCst);
 
         debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Syncing share chain...");
-        match self.tribe_peer_store.tip_of_block_height().await {
+        match self.tribe_peer_store.tip_of_block_height(algo).await {
             Some(result) => {
                 debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Found highest known block height: {result:?}");
                 debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Send share chain sync request: {result:?}");
@@ -573,7 +588,8 @@ where
     async fn initial_share_chain_sync(
         in_progress: Arc<AtomicBool>,
         peer_store: Arc<PeerStore>,
-        share_chain: Arc<S>,
+        share_chain_sha3x: Arc<S>,
+        share_chain_random_x: Arc<S>,
         share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
         timeout: Duration,
         tribe: Tribe,
@@ -594,8 +610,8 @@ where
                     return;
                 }
                 else => {
-                    if let Some(result) = peer_store.tip_of_block_height().await {
-                        if let Ok(tip) = share_chain.tip_height().await {
+                    if let Some(result) = peer_store.tip_of_block_height(PowAlgorithm::Sha3x).await {
+                        if let Ok(tip) = share_chain_sha3x.tip_height().await {
                             if tip < result.height {
                                 break;
                             }
@@ -605,32 +621,38 @@ where
             }
         } // wait for the first height
 
-        match peer_store.tip_of_block_height().await {
-            Some(result) => {
-                debug!(target: LOG_TARGET, tribe = &tribe; "Found highest block height: {result:?}");
-                match share_chain.tip_height().await {
-                    Ok(tip) => {
-                        if tip < result.height {
-                            if let Err(error) = share_chain_sync_tx.send(LocalShareChainSyncRequest::new(
-                                result.peer_id,
-                                ShareChainSyncRequest::new(0),
-                            )) {
-                                error!(target: LOG_TARGET, tribe = &tribe; "Failed to send share chain sync request: {error:?}");
+        let to_sync = vec![
+            (PowAlgorithm::Sha3x, share_chain_sha3x.clone()),
+            (PowAlgorithm::RandomX, share_chain_random_x.clone()),
+        ];
+        for (algo, share_chain) in to_sync {
+            match peer_store.tip_of_block_height(algo).await {
+                Some(result) => {
+                    debug!(target: LOG_TARGET, tribe = &tribe; "Found highest block height: {result:?}");
+                    match share_chain.tip_height().await {
+                        Ok(tip) => {
+                            if tip < result.height {
+                                if let Err(error) = share_chain_sync_tx.send(LocalShareChainSyncRequest::new(
+                                    result.peer_id,
+                                    ShareChainSyncRequest::new(algo, 0),
+                                )) {
+                                    error!(target: LOG_TARGET, tribe = &tribe; "Failed to send share chain sync request: {error:?}");
+                                }
+                            } else {
+                                in_progress.store(false, Ordering::SeqCst);
                             }
-                        } else {
+                        },
+                        Err(error) => {
                             in_progress.store(false, Ordering::SeqCst);
-                        }
-                    },
-                    Err(error) => {
-                        in_progress.store(false, Ordering::SeqCst);
-                        error!(target: LOG_TARGET, tribe = &tribe; "Failed to get latest height of share chain: {error:?}")
-                    },
-                }
-            },
-            None => {
-                in_progress.store(false, Ordering::SeqCst);
-                error!(target: LOG_TARGET, tribe = &tribe; "Failed to get peer with highest share chain height!")
-            },
+                            error!(target: LOG_TARGET, tribe = &tribe; "Failed to get latest height of share chain: {error:?}")
+                        },
+                    }
+                },
+                None => {
+                    in_progress.store(false, Ordering::SeqCst);
+                    error!(target: LOG_TARGET, tribe = &tribe; "Failed to get peer with highest share chain height!")
+                },
+            }
         }
     }
 
@@ -760,14 +782,6 @@ where
                     for exp_peer in expired_peers {
                         self.swarm.behaviour_mut().kademlia.remove_peer(&exp_peer);
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
-                    }
-                    match self.share_chain.tip_height().await {
-                        Ok(tip) => {
-                            info!(target: LOG_TARGET, "Share chain: {tip:?}");
-                        },
-                        Err(error) => {
-                            error!(target: LOG_TARGET, "Failed to show tip height: {error:?}");
-                        },
                     }
 
                     // broadcast peer info
@@ -909,7 +923,8 @@ where
         // start initial share chain sync
         let in_progress = self.sync_in_progress.clone();
         let peer_store = self.tribe_peer_store.clone();
-        let share_chain = self.share_chain.clone();
+        let share_chain_sha3x = self.share_chain_sha3x.clone();
+        let share_chain_random_x = self.share_chain_random_x.clone();
         let share_chain_sync_tx = self.share_chain_sync_tx.clone();
         let tribe = self.config.tribe.clone();
         let shutdown_signal = self.shutdown_signal.clone();
@@ -917,7 +932,8 @@ where
             Self::initial_share_chain_sync(
                 in_progress,
                 peer_store,
-                share_chain,
+                share_chain_sha3x,
+                share_chain_random_x,
                 share_chain_sync_tx,
                 Duration::from_secs(30),
                 tribe,

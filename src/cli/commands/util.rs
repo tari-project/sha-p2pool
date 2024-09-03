@@ -80,7 +80,7 @@ pub async fn server(
     let config = config_builder.build();
     let randomx_factory = RandomXFactory::new(1);
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
-    let genesis_block_hash = consensus_manager.get_genesis_block().hash().clone();
+    let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
     let block_validation_params = Arc::new(BlockValidationParams::new(
         randomx_factory,
         consensus_manager,
@@ -93,12 +93,5 @@ pub async fn server(
         Some(block_validation_params.clone()),
     )?;
 
-    Ok(Server::new(
-        config,
-        share_chain_sha3x,
-        share_chain_random_x,
-        block_validation_params.clone(),
-        shutdown_signal,
-    )
-    .await?)
+    Ok(Server::new(config, share_chain_sha3x, share_chain_random_x, shutdown_signal).await?)
 }

@@ -9,12 +9,12 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
-use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, PowAlgo, SubmitBlockRequest};
+use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::{BlockHash, PrivateKey};
+use tari_common_types::types::BlockHash;
 use tari_core::blocks;
-use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm, ProofOfWork};
+use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 

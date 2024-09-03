@@ -4,18 +4,12 @@ version = "0.1.4-pre.1"
 edition = "2021"
 
 [dependencies]
-#minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" }
-minotari_app_grpc = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
-#minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" }
-minotari_node_grpc_client = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
-#tari_common_types = { git = "https://github.com/tari-project/tari.git" }
-tari_common_types = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
-#tari_common = { git = "https://github.com/tari-project/tari.git" }
-tari_common = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
-#tari_core = { git = "https://github.com/tari-project/tari.git" }
-tari_core = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
-#tari_shutdown = { git = "https://github.com/tari-project/tari.git" }
-tari_shutdown = { git = "https://github.com/ksrichard/tari.git", branch = "feature/p2pool-randomx-support" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git" }
+tari_common = { git = "https://github.com/tari-project/tari.git" }
+tari_core = { git = "https://github.com/tari-project/tari.git" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git" }
 
 tari_crypto = "0.20.1"
 tari_utilities = { version = "0.7", features = ["borsh"] }
