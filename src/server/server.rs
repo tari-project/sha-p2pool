@@ -88,7 +88,7 @@ where
         let mut p2pool_server = None;
         let randomx_factory = RandomXFactory::new(1);
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
-        let genesis_block_hash = consensus_manager.get_genesis_block().hash().clone();
+        let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
         if config.mining_enabled {
             let base_node_grpc_service =
                 TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone())

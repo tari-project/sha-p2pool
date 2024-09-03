@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use log::{info, warn};
+use log::{error, info, warn};
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
@@ -215,8 +215,11 @@ where
         let grpc_block_header_pow = grpc_block_header
             .pow
             .ok_or_else(|| Status::internal("missing block header pow in request"))?;
-        let grpc_pow_algo = PowAlgos::from_i32(grpc_block_header_pow.pow_algo as i32)
-            .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
+        let grpc_pow_algo = PowAlgos::from_i32(i32::try_from(grpc_block_header_pow.pow_algo).map_err(|error| {
+            error!("Failed to get pow algo: {error:?}");
+            Status::internal("general error")
+        })?)
+        .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
 
         // get new share chain block
         let pow_algo = match grpc_pow_algo {

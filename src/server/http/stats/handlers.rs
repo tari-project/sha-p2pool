@@ -39,6 +39,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Hash
     Ok(Json(result))
 }
 
+#[allow(clippy::too_many_lines)]
 async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusCode> {
     let share_chain = match algo {
         PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
@@ -95,7 +96,6 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
     let pool_total_rewards: u64 = blocks
         .iter()
         .filter(|block| block.sent_to_main_chain())
