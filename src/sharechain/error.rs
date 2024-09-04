@@ -4,7 +4,9 @@
 use std::num::TryFromIntError;
 
 use tari_common_types::tari_address::TariAddressError;
+use tari_common_types::types::FixedHashSizeError;
 use tari_core::consensus::ConsensusBuilderError;
+use tari_core::proof_of_work::monero_rx::MergeMineError;
 use tari_core::proof_of_work::DifficultyError;
 use thiserror::Error;
 
@@ -24,8 +26,14 @@ pub enum Error {
     FromIntConversion(#[from] TryFromIntError),
     #[error("Difficulty calculation error: {0}")]
     Difficulty(#[from] DifficultyError),
+    #[error("RandomX difficulty calculation error: {0}")]
+    RandomXDifficulty(#[from] MergeMineError),
     #[error("Consensus builder error: {0}")]
     ConsensusBuilder(#[from] ConsensusBuilderError),
+    #[error("Missing block validation params!")]
+    MissingBlockValidationParams,
+    #[error("Failed to convert to block hash: {0}")]
+    BlockHashConversion(#[from] FixedHashSizeError),
 }
 
 #[derive(Error, Debug)]

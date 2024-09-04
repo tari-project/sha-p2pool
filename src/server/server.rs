@@ -10,6 +10,9 @@ use std::{
 
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
+use tari_common::configuration::Network;
+use tari_core::consensus::ConsensusManager;
+use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
@@ -35,6 +38,8 @@ pub enum Error {
     Grpc(#[from] grpc::error::Error),
     #[error("Socket address parse error: {0}")]
     AddrParse(#[from] AddrParseError),
+    #[error("Consensus manager error: {0}")]
+    ConsensusBuilder(#[from] tari_core::consensus::ConsensusBuilderError),
 }
 
 /// Server represents the server running all the necessary components for sha-p2pool.
@@ -54,8 +59,14 @@ impl<S> Server<S>
 where
     S: ShareChain,
 {
-    pub async fn new(config: config::Config, share_chain: S, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
-        let share_chain = Arc::new(share_chain);
+    pub async fn new(
+        config: config::Config,
+        share_chain_sha3x: S,
+        share_chain_random_x: S,
+        shutdown_signal: ShutdownSignal,
+    ) -> Result<Self, Error> {
+        let share_chain_sha3x = Arc::new(share_chain_sha3x);
+        let share_chain_random_x = Arc::new(share_chain_random_x);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
         let tribe_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
@@ -63,7 +74,8 @@ where
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
-            share_chain.clone(),
+            share_chain_sha3x.clone(),
+            share_chain_random_x.clone(),
             tribe_peer_store.clone(),
             network_peer_store.clone(),
             sync_in_progress.clone(),
@@ -74,6 +86,9 @@ where
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
+        let randomx_factory = RandomXFactory::new(1);
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
+        let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
         if config.mining_enabled {
             let base_node_grpc_service =
                 TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone())
@@ -84,9 +99,13 @@ where
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
                 config.base_node_address.clone(),
                 p2p_service.client(),
-                share_chain.clone(),
+                share_chain_sha3x.clone(),
+                share_chain_random_x.clone(),
                 stats_store.clone(),
                 shutdown_signal.clone(),
+                randomx_factory,
+                consensus_manager,
+                genesis_block_hash,
             )
             .await
             .map_err(Error::Grpc)?;
@@ -95,7 +114,8 @@ where
 
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
-                share_chain.clone(),
+                share_chain_sha3x.clone(),
+                share_chain_random_x.clone(),
                 tribe_peer_store.clone(),
                 stats_store.clone(),
                 config.http_server.port,

@@ -11,22 +11,41 @@ use itertools::Itertools;
 use log::error;
 use tari_common::configuration::Network;
 use tari_core::consensus::ConsensusManager;
+use tari_core::proof_of_work::PowAlgorithm;
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::http::server::AppState;
 use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
 use crate::server::http::stats::{
-    MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
-    P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+    algo_stat_key, MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT,
+    P2POOL_STAT_ACCEPTED_BLOCKS_COUNT, P2POOL_STAT_REJECTED_BLOCKS_COUNT,
 };
 use crate::server::stats_store::StatsStore;
 use crate::sharechain::SHARE_COUNT;
 
 const LOG_TARGET: &str = "p2pool::server::stats::get";
 
-pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stats>, StatusCode> {
-    let chain = state.share_chain.blocks(0).await.map_err(|error| {
+pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
+    let mut result = HashMap::with_capacity(2);
+    result.insert(
+        PowAlgorithm::Sha3x.to_string().to_lowercase(),
+        get_stats(state.clone(), PowAlgorithm::Sha3x).await?,
+    );
+    result.insert(
+        PowAlgorithm::RandomX.to_string().to_lowercase(),
+        get_stats(state.clone(), PowAlgorithm::RandomX).await?,
+    );
+    Ok(Json(result))
+}
+
+#[allow(clippy::too_many_lines)]
+async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusCode> {
+    let share_chain = match algo {
+        PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
+        PowAlgorithm::Sha3x => state.share_chain_sha3x.clone(),
+    };
+    let chain = share_chain.blocks(0).await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -51,13 +70,13 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         .cloned()
         .map(|block| block.into());
 
-    let share_chain_height = state.share_chain.tip_height().await.map_err(|error| {
+    let share_chain_height = share_chain.tip_height().await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get tip height of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     // hash rate
-    let pool_hash_rate = state.share_chain.hash_rate().await.map_err(|error| {
+    let pool_hash_rate = share_chain.hash_rate().await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get hash rate of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -73,11 +92,10 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
     })?;
 
     // calculate estimated earnings for all wallet addresses
-    let blocks = state.share_chain.blocks(0).await.map_err(|error| {
+    let blocks = share_chain.blocks(0).await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
     let pool_total_rewards: u64 = blocks
         .iter()
         .filter(|block| block.sent_to_main_chain())
@@ -131,7 +149,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
     }
 
-    Ok(Json(Stats {
+    Ok(Stats {
         connected,
         num_of_miners,
         last_block_won,
@@ -142,22 +160,30 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stat
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
         total_earnings: miners_with_rewards,
         estimated_earnings,
-        miner_block_stats: miner_block_stats(state.stats_store.clone()).await,
-        p2pool_block_stats: p2pool_block_stats(state.stats_store.clone()).await,
+        miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
+        p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
         tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),
-    }))
+    })
 }
 
-async fn miner_block_stats(stats_store: Arc<StatsStore>) -> BlockStats {
+async fn miner_block_stats(stats_store: Arc<StatsStore>, algo: PowAlgorithm) -> BlockStats {
     BlockStats::new(
-        stats_store.get(&MINER_STAT_ACCEPTED_BLOCKS_COUNT.to_string()).await,
-        stats_store.get(&MINER_STAT_REJECTED_BLOCKS_COUNT.to_string()).await,
+        stats_store
+            .get(&algo_stat_key(algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT))
+            .await,
+        stats_store
+            .get(&algo_stat_key(algo, MINER_STAT_REJECTED_BLOCKS_COUNT))
+            .await,
     )
 }
 
-async fn p2pool_block_stats(stats_store: Arc<StatsStore>) -> BlockStats {
+async fn p2pool_block_stats(stats_store: Arc<StatsStore>, algo: PowAlgorithm) -> BlockStats {
     BlockStats::new(
-        stats_store.get(&P2POOL_STAT_ACCEPTED_BLOCKS_COUNT.to_string()).await,
-        stats_store.get(&P2POOL_STAT_REJECTED_BLOCKS_COUNT.to_string()).await,
+        stats_store
+            .get(&algo_stat_key(algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT))
+            .await,
+        stats_store
+            .get(&algo_stat_key(algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT))
+            .await,
     )
 }

@@ -44,7 +44,8 @@ pub struct HttpServer<S>
 where
     S: ShareChain,
 {
-    share_chain: Arc<S>,
+    share_chain_sha3x: Arc<S>,
+    share_chain_random_x: Arc<S>,
     peer_store: Arc<PeerStore>,
     stats_store: Arc<StatsStore>,
     port: u16,
@@ -54,7 +55,8 @@ where
 
 #[derive(Clone)]
 pub struct AppState {
-    pub share_chain: Arc<dyn ShareChain>,
+    pub share_chain_sha3x: Arc<dyn ShareChain>,
+    pub share_chain_random_x: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
     pub tribe: Tribe,
@@ -65,7 +67,8 @@ where
     S: ShareChain,
 {
     pub fn new(
-        share_chain: Arc<S>,
+        share_chain_sha3x: Arc<S>,
+        share_chain_random_x: Arc<S>,
         peer_store: Arc<PeerStore>,
         stats_store: Arc<StatsStore>,
         port: u16,
@@ -73,7 +76,8 @@ where
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
-            share_chain,
+            share_chain_sha3x,
+            share_chain_random_x,
             peer_store,
             stats_store,
             port,
@@ -89,7 +93,8 @@ where
             .route("/health", get(health::handle_health))
             .route("/version", get(version::handle_version))
             .with_state(AppState {
-                share_chain: self.share_chain.clone(),
+                share_chain_sha3x: self.share_chain_sha3x.clone(),
+                share_chain_random_x: self.share_chain_random_x.clone(),
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
                 tribe: self.tribe.clone(),
