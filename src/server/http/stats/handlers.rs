@@ -41,6 +41,12 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Hash
 
 #[allow(clippy::too_many_lines)]
 async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusCode> {
+    // return from cache if possible
+    let stats_cache = state.stats_cache.clone();
+    if let Some(stats) = stats_cache.stats().await {
+        return Ok(stats);
+    }
+
     let share_chain = match algo {
         PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
         PowAlgorithm::Sha3x => state.share_chain_sha3x.clone(),
@@ -149,12 +155,12 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
     }
 
-    Ok(Stats {
+    let result = Stats {
         connected,
         num_of_miners,
         last_block_won,
         share_chain_height,
-        pool_hash_rate,
+        pool_hash_rate: pool_hash_rate.to_string(),
         connected_since,
         pool_total_earnings: MicroMinotari::from(pool_total_rewards),
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
@@ -163,7 +169,11 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
         p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
         tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),
-    })
+    };
+
+    stats_cache.update(result.clone()).await;
+
+    Ok(result)
 }
 
 async fn miner_block_stats(stats_store: Arc<StatsStore>, algo: PowAlgorithm) -> BlockStats {

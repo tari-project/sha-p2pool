@@ -15,3 +15,4 @@ pub fn algo_stat_key(algo: PowAlgorithm, stat_key: &str) -> String {
 
 pub mod handlers;
 pub mod models;
+pub mod cache;
