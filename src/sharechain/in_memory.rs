@@ -115,16 +115,16 @@ impl InMemoryShareChain {
                         params.genesis_block_hash(),
                         params.consensus_manager(),
                     )
-                        .map_err(Error::RandomXDifficulty)?;
+                    .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
                     Ok(0)
                 }
-            }
+            },
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
                 Ok(difficulty.as_u64())
-            }
+            },
         }
     }
 
@@ -212,11 +212,11 @@ impl InMemoryShareChain {
                             debug!(target: LOG_TARGET, "Failed to calculate RandomX difficulty: {error:?}");
                             return Ok(ValidateBlockResult::new(false, false));
                         }
-                    }
+                    },
                     None => {
                         error!(target: LOG_TARGET, "❌ Cannot calculate PoW! Missing validation parameters!");
                         return Ok(ValidateBlockResult::new(false, false));
-                    }
+                    },
                 },
                 PowAlgorithm::Sha3x => {
                     if let Err(error) = sha3x_difficulty(block.original_block_header()) {
@@ -224,7 +224,7 @@ impl InMemoryShareChain {
                         debug!(target: LOG_TARGET, "Failed to calculate SHA3x difficulty: {error:?}");
                         return Ok(ValidateBlockResult::new(false, false));
                     }
-                }
+                },
             }
 
             // TODO: check here for miners
