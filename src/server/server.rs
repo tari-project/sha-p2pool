@@ -113,7 +113,7 @@ where
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
-        let http_stats_cache = Arc::new(StatsCache::new(Duration::from_secs(30))); // TODO: update
+        let http_stats_cache = Arc::new(StatsCache::new(Duration::from_secs(10)));
 
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
