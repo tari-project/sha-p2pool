@@ -115,16 +115,16 @@ impl InMemoryShareChain {
                         params.genesis_block_hash(),
                         params.consensus_manager(),
                     )
-                    .map_err(Error::RandomXDifficulty)?;
+                        .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
                     Ok(0)
                 }
-            },
+            }
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
                 Ok(difficulty.as_u64())
-            },
+            }
         }
     }
 
@@ -212,11 +212,11 @@ impl InMemoryShareChain {
                             debug!(target: LOG_TARGET, "Failed to calculate RandomX difficulty: {error:?}");
                             return Ok(ValidateBlockResult::new(false, false));
                         }
-                    },
+                    }
                     None => {
                         error!(target: LOG_TARGET, "❌ Cannot calculate PoW! Missing validation parameters!");
                         return Ok(ValidateBlockResult::new(false, false));
-                    },
+                    }
                 },
                 PowAlgorithm::Sha3x => {
                     if let Err(error) = sha3x_difficulty(block.original_block_header()) {
@@ -224,7 +224,7 @@ impl InMemoryShareChain {
                         debug!(target: LOG_TARGET, "Failed to calculate SHA3x difficulty: {error:?}");
                         return Ok(ValidateBlockResult::new(false, false));
                     }
-                },
+                }
             }
 
             // TODO: check here for miners
@@ -446,15 +446,15 @@ impl ShareChain for InMemoryShareChain {
             return Ok(BigUint::zero());
         }
 
-        let avg_block_time = BigUint::from(block_times_sum).div(BigUint::from(block_times_count));
+        let avg_block_time: f64 = (block_times_sum / block_times_count) as f64;
 
         // collect all hash rates
         let mut hash_rates_sum = BigUint::zero();
         let mut hash_rates_count = BigUint::zero();
         for block in blocks {
             let difficulty = self.block_difficulty(&block)?;
-            let current_hash_rate = BigUint::from(difficulty).div(avg_block_time.clone());
-            hash_rates_sum = hash_rates_sum.add(current_hash_rate);
+            let current_hash_rate = difficulty as f64 / avg_block_time;
+            hash_rates_sum = hash_rates_sum.add(current_hash_rate as u64);
             hash_rates_count.inc();
         }
 
