@@ -82,8 +82,8 @@ where
             sync_in_progress.clone(),
             shutdown_signal.clone(),
         )
-            .await
-            .map_err(Error::P2PService)?;
+        .await
+        .map_err(Error::P2PService)?;
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
@@ -108,8 +108,8 @@ where
                 consensus_manager,
                 genesis_block_hash,
             )
-                .await
-                .map_err(Error::Grpc)?;
+            .await
+            .map_err(Error::Grpc)?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 

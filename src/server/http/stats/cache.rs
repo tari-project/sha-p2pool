@@ -12,10 +12,7 @@ pub struct CachedStats {
 
 impl CachedStats {
     pub fn new(stats: Stats, last_update: Instant) -> Self {
-        Self {
-            stats,
-            last_update,
-        }
+        Self { stats, last_update }
     }
 
     pub fn stats(&self) -> &Stats {
@@ -26,7 +23,6 @@ impl CachedStats {
         self.last_update
     }
 }
-
 
 pub struct StatsCache {
     ttl: Duration,
@@ -47,10 +43,10 @@ impl StatsCache {
             Some(curr_stats) => {
                 curr_stats.stats = stats;
                 curr_stats.last_update = Instant::now();
-            }
+            },
             None => {
                 *stats_lock = Some(CachedStats::new(stats, Instant::now()));
-            }
+            },
         }
     }
 
@@ -64,4 +60,3 @@ impl StatsCache {
         (*lock).as_ref().map(|cached_stats| cached_stats.stats.clone())
     }
 }
-

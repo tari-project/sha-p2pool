@@ -570,6 +570,7 @@ where
                 debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Found highest known block height: {result:?}");
                 debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Send share chain sync request: {result:?}");
                 // we always send from_height as zero now, to not miss any blocks
+                info!(target: LOG_TARGET, "[{:?}] Syncing share chain...", algo);
                 self.swarm
                     .behaviour_mut()
                     .share_chain_sync
@@ -577,7 +578,7 @@ where
             },
             None => {
                 self.sync_in_progress.store(false, Ordering::SeqCst);
-                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to get peer with highest share chain height!")
+                error!(target: LOG_TARGET, tribe = &self.config.tribe; "[{:?}] Failed to get peer with highest share chain height!", algo)
             },
         }
     }
@@ -610,12 +611,26 @@ where
                     return;
                 }
                 else => {
+                    let mut sha3_ready = false;
                     if let Some(result) = peer_store.tip_of_block_height(PowAlgorithm::Sha3x).await {
                         if let Ok(tip) = share_chain_sha3x.tip_height().await {
                             if tip < result.height {
-                                break;
+                                sha3_ready = true;
                             }
                         }
+                    }
+
+                    let mut randomx_ready = false;
+                    if let Some(result) = peer_store.tip_of_block_height(PowAlgorithm::RandomX).await {
+                        if let Ok(tip) = share_chain_random_x.tip_height().await {
+                            if tip < result.height {
+                                randomx_ready = true;
+                            }
+                        }
+                    }
+
+                    if sha3_ready && randomx_ready {
+                        break;
                     }
                 }
             }
