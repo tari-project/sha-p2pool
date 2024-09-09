@@ -48,6 +48,7 @@ use tokio::{
 };
 
 use crate::server::p2p::messages::LocalShareChainSyncRequest;
+use crate::sharechain::block::CURRENT_CHAIN_ID;
 use crate::{
     server::{
         config,
@@ -392,7 +393,7 @@ where
     /// blocks and peers with different Tari networks and the given tribe name.
     fn tribe_topic(tribe: &Tribe, topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
-        format!("{network}_{tribe}_{topic}")
+        format!("{network}_{}_{tribe}_{topic}", CURRENT_CHAIN_ID.clone())
     }
 
     /// Subscribing to a gossipsub topic.

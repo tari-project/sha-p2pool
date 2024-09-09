@@ -4308,6 +4308,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "itertools 0.13.0",
+ "lazy_static",
  "libp2p",
  "log",
  "log4rs",

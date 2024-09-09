@@ -3,7 +3,6 @@
 
 use crate::server::http::stats::cache::StatsCache;
 use crate::server::http::stats::handlers;
-use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
 use crate::server::http::{health, version};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::p2p::Tribe;
@@ -13,12 +12,9 @@ use axum::routing::get;
 use axum::Router;
 use log::info;
 use std::sync::Arc;
-use std::time::Duration;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 use tokio::io;
-use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
-use tokio::time::Instant;
 
 const LOG_TARGET: &str = "p2pool::server::stats";
 

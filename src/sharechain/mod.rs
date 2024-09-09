@@ -9,6 +9,10 @@ use tari_common_types::types::FixedHash;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 
+/// Chain ID is an identifier which makes sure we apply the same rules to blocks.
+/// Note: This must be updated when new logic applied to blocks handling.
+pub const CHAIN_ID: usize = 1;
+
 /// How many blocks to keep overall.
 pub const MAX_BLOCKS_COUNT: usize = 240;
 

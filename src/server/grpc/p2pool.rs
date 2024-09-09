@@ -10,7 +10,9 @@ use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest, NewBlockTemplateRequest, SubmitBlockRequest, SubmitBlockResponse,
 };
+use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
+use tari_core::consensus;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
@@ -34,6 +36,21 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
+
+pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
+    let network = Network::get_current_or_user_setting_or_default();
+    let consensus_constants = match network {
+        Network::MainNet => consensus::ConsensusConstants::mainnet(),
+        Network::StageNet => consensus::ConsensusConstants::stagenet(),
+        Network::NextNet => consensus::ConsensusConstants::nextnet(),
+        Network::LocalNet => consensus::ConsensusConstants::localnet(),
+        Network::Igor => consensus::ConsensusConstants::igor(),
+        Network::Esmeralda => consensus::ConsensusConstants::esmeralda(),
+    };
+    let consensus_constants = consensus_constants.first().ok_or(Error::NoConsensusConstants)?;
+
+    Ok(consensus_constants.min_pow_difficulty(pow).as_u64())
+}
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub struct ShaP2PoolGrpc<S>
@@ -183,7 +200,12 @@ where
                 .await
                 .insert(height, miner_data.target_difficulty);
         }
-        let target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
+        let min_difficulty =
+            min_difficulty(pow_algo).map_err(|_| Status::internal("failed to get minimum difficulty"))?;
+        let mut target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
+        if target_difficulty < min_difficulty {
+            target_difficulty = min_difficulty;
+        }
         if let Some(mut miner_data) = response.miner_data {
             miner_data.target_difficulty = target_difficulty;
             response.miner_data = Some(miner_data);

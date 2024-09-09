@@ -4,7 +4,6 @@
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
@@ -113,7 +112,7 @@ where
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
-        let http_stats_cache = Arc::new(StatsCache::new(Duration::from_secs(10)));
+        let http_stats_cache = Arc::new(StatsCache::default());
 
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(

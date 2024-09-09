@@ -14,19 +14,17 @@ impl CachedStats {
     pub fn new(stats: Stats, last_update: Instant) -> Self {
         Self { stats, last_update }
     }
-
-    pub fn stats(&self) -> &Stats {
-        &self.stats
-    }
-
-    pub fn last_update(&self) -> Instant {
-        self.last_update
-    }
 }
 
 pub struct StatsCache {
     ttl: Duration,
     stats: Arc<RwLock<Option<CachedStats>>>,
+}
+
+impl Default for StatsCache {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(10))
+    }
 }
 
 impl StatsCache {
@@ -52,7 +50,9 @@ impl StatsCache {
 
     pub async fn stats(&self) -> Option<Stats> {
         let lock = self.stats.read().await;
-        if lock.is_some() && Instant::now().duration_since(lock.as_ref()?.last_update) > self.ttl {
+        let last_update = lock.as_ref()?.last_update;
+        if lock.is_some() && Instant::now().duration_since(last_update) > self.ttl {
+            drop(lock);
             let mut lock = self.stats.write().await;
             *lock = None;
             return None;

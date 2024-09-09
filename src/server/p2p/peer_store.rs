@@ -3,9 +3,8 @@
 
 use itertools::Itertools;
 use libp2p::PeerId;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use moka::future::{Cache, CacheBuilder};
-use std::ops::Add;
 use std::{
     sync::RwLock,
     time::{Duration, Instant},
