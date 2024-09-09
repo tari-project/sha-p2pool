@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "sha_p2pool"
-version = "0.1.5-pre.3"
+version = "0.1.5-pre.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4308,6 +4308,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "itertools 0.13.0",
+ "lazy_static",
  "libp2p",
  "log",
  "log4rs",

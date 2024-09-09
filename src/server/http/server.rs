@@ -1,21 +1,20 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
-
-use axum::routing::get;
-use axum::Router;
-use log::info;
-use tari_shutdown::ShutdownSignal;
-use thiserror::Error;
-use tokio::io;
-
+use crate::server::http::stats::cache::StatsCache;
 use crate::server::http::stats::handlers;
 use crate::server::http::{health, version};
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::p2p::Tribe;
 use crate::server::stats_store::StatsStore;
 use crate::sharechain::ShareChain;
+use axum::routing::get;
+use axum::Router;
+use log::info;
+use std::sync::Arc;
+use tari_shutdown::ShutdownSignal;
+use thiserror::Error;
+use tokio::io;
 
 const LOG_TARGET: &str = "p2pool::server::stats";
 
@@ -50,6 +49,7 @@ where
     stats_store: Arc<StatsStore>,
     port: u16,
     tribe: Tribe,
+    stats_cache: Arc<StatsCache>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -60,6 +60,7 @@ pub struct AppState {
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
     pub tribe: Tribe,
+    pub stats_cache: Arc<StatsCache>,
 }
 
 impl<S> HttpServer<S>
@@ -73,6 +74,7 @@ where
         stats_store: Arc<StatsStore>,
         port: u16,
         tribe: Tribe,
+        stats_cache: Arc<StatsCache>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -82,6 +84,7 @@ where
             stats_store,
             port,
             tribe,
+            stats_cache,
             shutdown_signal,
         }
     }
@@ -98,6 +101,7 @@ where
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
                 tribe: self.tribe.clone(),
+                stats_cache: self.stats_cache.clone(),
             })
     }
 

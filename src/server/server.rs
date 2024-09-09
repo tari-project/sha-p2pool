@@ -1,15 +1,14 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use log::{error, info};
+use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use std::sync::atomic::AtomicBool;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::Arc,
 };
-
-use log::{error, info};
-use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
@@ -17,6 +16,7 @@ use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
 use crate::server::http::server::HttpServer;
+use crate::server::http::stats::cache::StatsCache;
 use crate::server::p2p::peer_store::PeerStore;
 use crate::server::stats_store::StatsStore;
 use crate::{
@@ -112,6 +112,8 @@ where
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
+        let http_stats_cache = Arc::new(StatsCache::default());
+
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
                 share_chain_sha3x.clone(),
@@ -120,6 +122,7 @@ where
                 stats_store.clone(),
                 config.http_server.port,
                 config.p2p_service.tribe.clone(),
+                http_stats_cache.clone(),
                 shutdown_signal.clone(),
             )))
         } else {

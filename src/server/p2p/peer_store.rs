@@ -1,15 +1,14 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    sync::RwLock,
-    time::{Duration, Instant},
-};
-
 use itertools::Itertools;
 use libp2p::PeerId;
 use log::{debug, warn};
 use moka::future::{Cache, CacheBuilder};
+use std::{
+    sync::RwLock,
+    time::{Duration, Instant},
+};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
@@ -17,16 +16,19 @@ use crate::server::p2p::messages::PeerInfo;
 use crate::server::p2p::Tribe;
 
 const LOG_TARGET: &str = "p2pool::server::p2p::peer_store";
+const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
 
 #[derive(Copy, Clone, Debug)]
 pub struct PeerStoreConfig {
     pub peer_record_ttl: Duration,
+    pub peers_max_fail: u64,
 }
 
 impl Default for PeerStoreConfig {
     fn default() -> Self {
         Self {
             peer_record_ttl: Duration::from_secs(10),
+            peers_max_fail: 2,
         }
     }
 }
@@ -66,12 +68,15 @@ pub struct PeerStore {
     peers: Cache<PeerId, PeerStoreRecord>,
     /// Max time to live for the items to avoid non-existing peers in list.
     ttl: Duration,
+    peers_max_fail: u64,
     /// Peer with the highest share chain height in SHA-3 share chain.
     tip_of_block_height_sha3x: RwLock<Option<PeerStoreBlockHeightTip>>,
     /// Peer with the highest share chain height in RandomX share chain.
     tip_of_block_height_random_x: RwLock<Option<PeerStoreBlockHeightTip>>,
     /// The last time when we had more than 0 peers.
     last_connected: RwLock<Option<EpochTime>>,
+    peer_removals: Cache<PeerId, u64>,
+    banned_peers: Cache<PeerId, ()>,
 }
 
 impl PeerStore {
@@ -80,16 +85,28 @@ impl PeerStore {
         Self {
             peers: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
             ttl: config.peer_record_ttl,
+            peers_max_fail: config.peers_max_fail,
             tip_of_block_height_sha3x: RwLock::new(None),
             tip_of_block_height_random_x: RwLock::new(None),
             last_connected: RwLock::new(None),
+            peer_removals: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
+            banned_peers: CacheBuilder::new(100_000).time_to_live(PEER_BAN_TIME).build(),
         }
     }
 
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
-        self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+        let removal_count = self.peer_removals.get(&peer_id).await.unwrap_or(0);
+        if removal_count >= self.peers_max_fail {
+            warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
+            self.peer_removals.remove(&peer_id).await;
+            self.banned_peers.insert(peer_id, ()).await;
+        } else {
+            self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+            self.peer_removals.insert(peer_id, removal_count).await;
+        }
+
         self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
     }
@@ -97,6 +114,25 @@ impl PeerStore {
     /// Removes a peer from store.
     pub async fn remove(&self, peer_id: &PeerId) {
         self.peers.remove(peer_id).await;
+
+        // counting peer removals
+        let removal_count = match self.peer_removals.get(peer_id).await {
+            Some(value) => {
+                let removals = value + 1;
+                self.peer_removals.insert(*peer_id, removals).await;
+                removals
+            },
+            None => {
+                self.peer_removals.insert(*peer_id, 1).await;
+                1
+            },
+        };
+        if removal_count >= self.peers_max_fail {
+            warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
+            self.peer_removals.remove(peer_id).await;
+            self.banned_peers.insert(*peer_id, ()).await;
+        }
+
         self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
     }
@@ -128,17 +164,22 @@ impl PeerStore {
             PowAlgorithm::RandomX => &self.tip_of_block_height_random_x,
             PowAlgorithm::Sha3x => &self.tip_of_block_height_sha3x,
         };
-        if let Some((k, v)) = self.peers.iter().max_by(|(_k1, v1), (_k2, v2)| {
-            let current_height_v1 = match pow {
-                PowAlgorithm::RandomX => v1.peer_info.current_random_x_height,
-                PowAlgorithm::Sha3x => v1.peer_info.current_sha3x_height,
-            };
-            let current_height_v2 = match pow {
-                PowAlgorithm::RandomX => v2.peer_info.current_random_x_height,
-                PowAlgorithm::Sha3x => v2.peer_info.current_sha3x_height,
-            };
-            current_height_v1.cmp(&current_height_v2)
-        }) {
+        if let Some((k, v)) = self
+            .peers
+            .iter()
+            .filter(|(peer_id, _)| !self.banned_peers.contains_key(peer_id))
+            .max_by(|(_k1, v1), (_k2, v2)| {
+                let current_height_v1 = match pow {
+                    PowAlgorithm::RandomX => v1.peer_info.current_random_x_height,
+                    PowAlgorithm::Sha3x => v1.peer_info.current_sha3x_height,
+                };
+                let current_height_v2 = match pow {
+                    PowAlgorithm::RandomX => v2.peer_info.current_random_x_height,
+                    PowAlgorithm::Sha3x => v2.peer_info.current_sha3x_height,
+                };
+                current_height_v1.cmp(&current_height_v2)
+            })
+        {
             // save result
             if let Ok(mut tip_height_opt) = tip_of_block.write() {
                 let current_height = match pow {

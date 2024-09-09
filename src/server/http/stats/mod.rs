@@ -13,5 +13,6 @@ pub fn algo_stat_key(algo: PowAlgorithm, stat_key: &str) -> String {
     format!("{}_{}", algo.to_string().to_lowercase(), stat_key)
 }
 
+pub mod cache;
 pub mod handlers;
 pub mod models;

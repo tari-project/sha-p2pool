@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 
-use num::BigUint;
 use serde::{Deserialize, Serialize};
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::epoch_time::EpochTime;
@@ -11,7 +10,7 @@ use tari_utilities::hex::Hex;
 
 use crate::sharechain::block::Block;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct StatsBlock {
     pub hash: String,
     pub height: u64,
@@ -30,7 +29,7 @@ impl From<Block> for StatsBlock {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EstimatedEarnings {
     #[serde(rename = "1min")]
     pub one_minute: MicroMinotari,
@@ -56,7 +55,7 @@ impl EstimatedEarnings {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct BlockStats {
     pub accepted: u64,
     pub rejected: u64,
@@ -73,7 +72,7 @@ impl BlockStats {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TribeDetails {
     pub id: String,
     pub name: String,
@@ -84,7 +83,7 @@ impl TribeDetails {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Stats {
     pub connected: bool,
     pub connected_since: Option<EpochTime>,
@@ -92,7 +91,7 @@ pub struct Stats {
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,
-    pub pool_hash_rate: BigUint,
+    pub pool_hash_rate: String,
     pub pool_total_earnings: MicroMinotari,
     pub pool_total_estimated_earnings: EstimatedEarnings,
     pub total_earnings: HashMap<String, u64>,
