@@ -493,7 +493,7 @@ impl ShareChain for InMemoryShareChain {
         for block in blocks {
             let difficulty = self.block_difficulty(&block)?;
             let current_hash_rate = difficulty as f64 / avg_block_time;
-            hash_rates_sum = hash_rates_sum.add(u64::try_from(current_hash_rate)?); // TODO: fix
+            hash_rates_sum = hash_rates_sum.add(current_hash_rate as u64);
             hash_rates_count.inc();
         }
 
