@@ -386,14 +386,16 @@ where
     /// blocks and peers with different Tari networks.
     fn network_topic(topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
-        format!("{network}_{topic}")
+        let chain_id = CURRENT_CHAIN_ID.clone();
+        format!("{network}_{chain_id}_{topic}")
     }
 
     /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
     /// blocks and peers with different Tari networks and the given tribe name.
     fn tribe_topic(tribe: &Tribe, topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
-        format!("{network}_{}_{tribe}_{topic}", CURRENT_CHAIN_ID.clone())
+        let chain_id = CURRENT_CHAIN_ID.clone();
+        format!("{network}_{chain_id}_{tribe}_{topic}")
     }
 
     /// Subscribing to a gossipsub topic.
