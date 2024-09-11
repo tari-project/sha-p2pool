@@ -1,3 +1,6 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use crate::server::http::stats::models::Stats;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,10 +44,10 @@ impl StatsCache {
             Some(curr_stats) => {
                 curr_stats.stats = stats;
                 curr_stats.last_update = Instant::now();
-            },
+            }
             None => {
                 *stats_lock = Some(CachedStats::new(stats, Instant::now()));
-            },
+            }
         }
     }
 

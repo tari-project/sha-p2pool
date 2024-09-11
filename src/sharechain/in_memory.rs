@@ -115,16 +115,16 @@ impl InMemoryShareChain {
                         params.genesis_block_hash(),
                         params.consensus_manager(),
                     )
-                    .map_err(Error::RandomXDifficulty)?;
+                        .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
                     Ok(0)
                 }
-            },
+            }
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
                 Ok(difficulty.as_u64())
-            },
+            }
         }
     }
 
@@ -170,17 +170,17 @@ impl InMemoryShareChain {
                                 match extra_shares.get(&addr) {
                                     None => {
                                         extra_shares.insert(addr, 1);
-                                    },
+                                    }
                                     Some(extra_share_count) => {
                                         extra_shares.insert(addr, extra_share_count + 1);
-                                    },
+                                    }
                                 }
                             }
-                        },
+                        }
                         None => {
                             result.insert(addr, 1);
                             added_share_count += 1;
-                        },
+                        }
                     }
                 }
             }
@@ -200,12 +200,12 @@ impl InMemoryShareChain {
                     warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
                     return Ok(ValidateBlockResult::new(false, false));
                 }
-            },
+            }
             Err(error) => {
                 warn!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty!", self.pow_algo);
                 debug!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty: {error:?}", self.pow_algo);
                 return Ok(ValidateBlockResult::new(false, false));
-            },
+            }
         }
 
         Ok(ValidateBlockResult::new(true, false))
@@ -259,18 +259,18 @@ impl InMemoryShareChain {
                                 if !result.valid {
                                     return Ok(result);
                                 }
-                            },
+                            }
                             Err(error) => {
                                 warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
                                 debug!(target: LOG_TARGET, "[{:?}] Failed to calculate RandomX difficulty: {error:?}", self.pow_algo);
                                 return Ok(ValidateBlockResult::new(false, false));
-                            },
+                            }
                         }
-                    },
+                    }
                     None => {
                         error!(target: LOG_TARGET, "[{:?}] ❌ Cannot calculate PoW! Missing validation parameters!", self.pow_algo);
                         return Ok(ValidateBlockResult::new(false, false));
-                    },
+                    }
                 },
                 PowAlgorithm::Sha3x => match sha3x_difficulty(block.original_block_header()) {
                     Ok(curr_difficulty) => {
@@ -278,12 +278,12 @@ impl InMemoryShareChain {
                         if !result.valid {
                             return Ok(result);
                         }
-                    },
+                    }
                     Err(error) => {
                         warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
                         debug!(target: LOG_TARGET, "[{:?}] Failed to calculate SHA3x difficulty: {error:?}", self.pow_algo);
                         return Ok(ValidateBlockResult::new(false, false));
-                    },
+                    }
                 },
             }
 
