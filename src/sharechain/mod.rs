@@ -14,12 +14,13 @@ use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 pub const CHAIN_ID: usize = 1;
 
 /// How many blocks to keep overall.
-pub const MAX_BLOCKS_COUNT: usize = 240;
+pub const MAX_BLOCKS_COUNT: usize = 600;
 
 /// How many blocks are used to calculate current shares to be paid out.
-pub const BLOCKS_WINDOW: usize = 80;
+pub const BLOCKS_WINDOW: usize = 400;
 
 pub const SHARE_COUNT: u64 = 200;
+pub const MAX_SHARES_PER_MINER: u64 = 60;
 
 pub mod block;
 pub mod error;

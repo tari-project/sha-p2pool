@@ -10,13 +10,13 @@ use crate::server::grpc::p2pool::min_difficulty;
 use crate::sharechain::{
     error::{BlockConvertError, Error},
     Block, BlockValidationParams, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW,
-    MAX_BLOCKS_COUNT, SHARE_COUNT,
+    MAX_BLOCKS_COUNT, MAX_SHARES_PER_MINER, SHARE_COUNT,
 };
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use num::{BigUint, Integer, Zero};
+use num::{BigUint, FromPrimitive, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
@@ -115,16 +115,16 @@ impl InMemoryShareChain {
                         params.genesis_block_hash(),
                         params.consensus_manager(),
                     )
-                        .map_err(Error::RandomXDifficulty)?;
+                    .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
                     Ok(0)
                 }
-            }
+            },
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
                 Ok(difficulty.as_u64())
-            }
+            },
         }
     }
 
@@ -153,13 +153,35 @@ impl InMemoryShareChain {
     /// Generating number of shares for all the miners.
     fn miners_with_shares(&self, chain: Vec<&Block>) -> HashMap<String, u64> {
         let mut result: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
-        chain.iter().for_each(|block| {
+        let mut extra_shares: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
+
+        // add shares applying the max shares rule
+        let mut added_share_count: u64 = 0;
+        chain.iter().rev().for_each(|block| {
             if let Some(miner_wallet_address) = block.miner_wallet_address() {
-                let addr = miner_wallet_address.to_base58();
-                if let Some(curr_hash_rate) = result.get(&addr) {
-                    result.insert(addr, curr_hash_rate + 1);
-                } else {
-                    result.insert(addr, 1);
+                if added_share_count < SHARE_COUNT {
+                    let addr = miner_wallet_address.to_base58();
+                    match result.get(&addr) {
+                        Some(curr_share_count) => {
+                            if *curr_share_count < MAX_SHARES_PER_MINER {
+                                result.insert(addr, curr_share_count + 1);
+                                added_share_count += 1;
+                            } else {
+                                match extra_shares.get(&addr) {
+                                    None => {
+                                        extra_shares.insert(addr, 1);
+                                    },
+                                    Some(extra_share_count) => {
+                                        extra_shares.insert(addr, extra_share_count + 1);
+                                    },
+                                }
+                            }
+                        },
+                        None => {
+                            result.insert(addr, 1);
+                            added_share_count += 1;
+                        },
+                    }
                 }
             }
         });
@@ -178,12 +200,12 @@ impl InMemoryShareChain {
                     warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
                     return Ok(ValidateBlockResult::new(false, false));
                 }
-            }
+            },
             Err(error) => {
                 warn!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty!", self.pow_algo);
                 debug!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty: {error:?}", self.pow_algo);
                 return Ok(ValidateBlockResult::new(false, false));
-            }
+            },
         }
 
         Ok(ValidateBlockResult::new(true, false))
@@ -237,18 +259,18 @@ impl InMemoryShareChain {
                                 if !result.valid {
                                     return Ok(result);
                                 }
-                            }
+                            },
                             Err(error) => {
                                 warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
                                 debug!(target: LOG_TARGET, "[{:?}] Failed to calculate RandomX difficulty: {error:?}", self.pow_algo);
                                 return Ok(ValidateBlockResult::new(false, false));
-                            }
+                            },
                         }
-                    }
+                    },
                     None => {
                         error!(target: LOG_TARGET, "[{:?}] ❌ Cannot calculate PoW! Missing validation parameters!", self.pow_algo);
                         return Ok(ValidateBlockResult::new(false, false));
-                    }
+                    },
                 },
                 PowAlgorithm::Sha3x => match sha3x_difficulty(block.original_block_header()) {
                     Ok(curr_difficulty) => {
@@ -256,12 +278,12 @@ impl InMemoryShareChain {
                         if !result.valid {
                             return Ok(result);
                         }
-                    }
+                    },
                     Err(error) => {
                         warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
                         debug!(target: LOG_TARGET, "[{:?}] Failed to calculate SHA3x difficulty: {error:?}", self.pow_algo);
                         return Ok(ValidateBlockResult::new(false, false));
-                    }
+                    },
                 },
             }
 
@@ -394,7 +416,6 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
-        let mut result = vec![];
         let chain = self.chain(self.block_levels.read().await.iter());
         let windowed_chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
         let miners = self.miners_with_shares(windowed_chain);
@@ -403,19 +424,18 @@ impl ShareChain for InMemoryShareChain {
         miners
             .iter()
             .filter(|(_, share)| **share > 0)
-            .for_each(|(addr, share)| {
+            .map(|(addr, share)| {
                 let curr_reward = (reward / SHARE_COUNT) * share;
                 debug!(target: LOG_TARGET, "[{:?}] {addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}", self.pow_algo);
-                result.push(NewBlockCoinbase {
+                NewBlockCoinbase {
                     address: addr.clone(),
                     value: curr_reward,
                     stealth_payment: true,
                     revealed_value_proof: true,
                     coinbase_extra: vec![],
-                });
-            });
-
-        result
+                }
+            })
+            .collect_vec()
     }
 
     async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block> {
@@ -492,11 +512,144 @@ impl ShareChain for InMemoryShareChain {
         let mut hash_rates_count = BigUint::zero();
         for block in blocks {
             let difficulty = self.block_difficulty(&block)?;
-            let current_hash_rate = difficulty as f64 / avg_block_time;
-            hash_rates_sum = hash_rates_sum.add(current_hash_rate as u64);
+            let current_hash_rate_f64 = difficulty as f64 / avg_block_time;
+            let current_hash_rate =
+                u64::from_f64(current_hash_rate_f64).ok_or(Error::FromF64ToU64Conversion(current_hash_rate_f64))?;
+            hash_rates_sum = hash_rates_sum.add(current_hash_rate);
             hash_rates_count.inc();
         }
 
         Ok(hash_rates_sum.div(hash_rates_count))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use tari_common::configuration::Network;
+    use tari_common_types::tari_address::TariAddressFeatures;
+    use tari_crypto::keys::PublicKey;
+    use tari_crypto::ristretto::RistrettoPublicKey;
+
+    fn new_random_address() -> TariAddress {
+        let mut rng = rand::thread_rng();
+        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rng);
+        TariAddress::new_single_address(pk, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
+    }
+
+    fn add_blocks(blocks: &mut Vec<Block>, miner: TariAddress, start: u64, n: u64) -> u64 {
+        let n = start + n;
+        for i in start..n {
+            blocks.push(
+                Block::builder()
+                    .with_height(i)
+                    .with_miner_wallet_address(miner.clone())
+                    .build(),
+            );
+        }
+        n
+    }
+
+    #[test]
+    fn miners_with_shares_no_outperformers() {
+        // setup blocks and miners
+        let mut blocks = Vec::new();
+        let miner1 = new_random_address();
+        let n = add_blocks(&mut blocks, miner1.clone(), 0, 10);
+        let miner2 = new_random_address();
+        let n = add_blocks(&mut blocks, miner2.clone(), n, 20);
+        let miner3 = new_random_address();
+        let n = add_blocks(&mut blocks, miner3.clone(), n, 30);
+        let miner4 = new_random_address();
+        add_blocks(&mut blocks, miner4.clone(), n, 40);
+
+        // execute
+        let blocks = blocks.iter().collect_vec();
+        let share_chain = InMemoryShareChain::default();
+        let shares = share_chain.miners_with_shares(blocks);
+
+        // assert
+        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 10);
+        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 20);
+        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 30);
+        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 40);
+    }
+
+    #[test]
+    fn miners_with_shares_with_outperformer_dont_fill_remaining() {
+        // setup blocks and miners
+        let mut blocks = Vec::new();
+        let miner1 = new_random_address();
+        let n = add_blocks(&mut blocks, miner1.clone(), 0, 60);
+        let miner2 = new_random_address();
+        let n = add_blocks(&mut blocks, miner2.clone(), n, 60);
+        let miner3 = new_random_address();
+        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
+        let miner4 = new_random_address();
+        add_blocks(&mut blocks, miner4.clone(), n, 10);
+
+        // execute
+        let blocks = blocks.iter().collect_vec();
+        let share_chain = InMemoryShareChain::default();
+        let shares = share_chain.miners_with_shares(blocks);
+
+        // assert
+        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 10);
+    }
+
+    #[test]
+    fn miners_with_shares_with_outperformer_losing_shares() {
+        // setup blocks and miners
+        let mut blocks = Vec::new();
+        let miner1 = new_random_address();
+        let n = add_blocks(&mut blocks, miner1.clone(), 0, 100);
+        let miner2 = new_random_address();
+        let n = add_blocks(&mut blocks, miner2.clone(), n, 90);
+        let miner3 = new_random_address();
+        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
+        let miner4 = new_random_address();
+        add_blocks(&mut blocks, miner4.clone(), n, 70);
+
+        // execute
+        let blocks = blocks.iter().collect_vec();
+        let share_chain = InMemoryShareChain::default();
+        let shares = share_chain.miners_with_shares(blocks);
+
+        // assert
+        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 20);
+        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 60);
+    }
+
+    #[test]
+    fn miners_with_shares_with_outperformer_losing_all_shares() {
+        // setup blocks and miners
+        let mut blocks = Vec::new();
+        let miner1 = new_random_address();
+        let n = add_blocks(&mut blocks, miner1.clone(), 0, 100);
+        let miner2 = new_random_address();
+        let n = add_blocks(&mut blocks, miner2.clone(), n, 90);
+        let miner3 = new_random_address();
+        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
+        let miner4 = new_random_address();
+        let n = add_blocks(&mut blocks, miner4.clone(), n, 70);
+        let miner5 = new_random_address();
+        add_blocks(&mut blocks, miner5.clone(), n, 200);
+
+        // execute
+        let blocks = blocks.iter().collect_vec();
+        let share_chain = InMemoryShareChain::default();
+        let shares = share_chain.miners_with_shares(blocks);
+
+        // assert
+        assert_eq!(shares.get(&miner1.to_base58()), None);
+        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 20);
+        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 60);
+        assert_eq!(*shares.get(&miner5.to_base58()).unwrap(), 60);
     }
 }

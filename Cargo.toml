@@ -1,6 +1,6 @@
 [package]
 name = "sha_p2pool"
-version = "0.1.5-pre.4"
+version = "0.1.5-pre.5"
 edition = "2021"
 
 [dependencies]
