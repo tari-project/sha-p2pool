@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use num::{BigUint, Integer, Zero};
+use num::{BigUint, FromPrimitive, Integer, Zero};
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
 use tari_core::blocks;
@@ -512,8 +512,10 @@ impl ShareChain for InMemoryShareChain {
         let mut hash_rates_count = BigUint::zero();
         for block in blocks {
             let difficulty = self.block_difficulty(&block)?;
-            let current_hash_rate = difficulty as f64 / avg_block_time;
-            hash_rates_sum = hash_rates_sum.add(current_hash_rate as u64);
+            let current_hash_rate_f64 = difficulty as f64 / avg_block_time;
+            let current_hash_rate =
+                u64::from_f64(current_hash_rate_f64).ok_or(Error::FromF64ToU64Conversion(current_hash_rate_f64))?;
+            hash_rates_sum = hash_rates_sum.add(current_hash_rate);
             hash_rates_count.inc();
         }
 
