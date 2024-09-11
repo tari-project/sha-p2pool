@@ -43,7 +43,7 @@ pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Hash
 async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusCode> {
     // return from cache if possible
     let stats_cache = state.stats_cache.clone();
-    if let Some(stats) = stats_cache.stats().await {
+    if let Some(stats) = stats_cache.stats(algo).await {
         return Ok(stats);
     }
 
@@ -171,7 +171,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),
     };
 
-    stats_cache.update(result.clone()).await;
+    stats_cache.update(result.clone(), algo).await;
 
     Ok(result)
 }
