@@ -1,18 +1,15 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use itertools::Itertools;
 use log::{error, info, warn};
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest, NewBlockTemplateRequest, SubmitBlockRequest, SubmitBlockResponse,
 };
-use num::ToPrimitive;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tari_common::configuration::Network;
-use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::FixedHash;
 use tari_core::consensus;
 use tari_core::consensus::ConsensusManager;
@@ -28,7 +25,7 @@ use crate::server::http::stats::{
     P2POOL_STAT_ACCEPTED_BLOCKS_COUNT, P2POOL_STAT_REJECTED_BLOCKS_COUNT,
 };
 use crate::server::stats_store::StatsStore;
-use crate::sharechain::{BlockValidationParams, BLOCKS_WINDOW};
+use crate::sharechain::BlockValidationParams;
 use crate::{
     server::{
         grpc::{error::Error, util},
@@ -38,8 +35,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
-
-const MAX_SUBMITTED_BLOCKS: u64 = BLOCKS_WINDOW as u64 / 2;
 
 pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
     let network = Network::get_current_or_user_setting_or_default();
@@ -110,43 +105,6 @@ where
         })
     }
 
-    async fn submitted_shares_count(&self, pow: PowAlgorithm, miner_wallet_address: TariAddress) -> u64 {
-        let share_chain = match pow {
-            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-        };
-        match share_chain.blocks(0).await {
-            Ok(blocks) => blocks
-                .iter()
-                .tail(BLOCKS_WINDOW)
-                .filter(|block| {
-                    if let Some(addr) = block.miner_wallet_address() {
-                        return miner_wallet_address == *addr;
-                    }
-                    false
-                })
-                .count()
-                .to_u64()
-                .unwrap(),
-            Err(error) => {
-                warn!(target: LOG_TARGET, "[{}] Failed to get share chain blocks: {error:?}", pow);
-                0
-            },
-        }
-    }
-
-    async fn can_submit_block(&self, pow: PowAlgorithm, block: &Block) -> bool {
-        match block.miner_wallet_address() {
-            Some(miner_wallet_address) => {
-                self.submitted_shares_count(pow, miner_wallet_address.clone()).await < MAX_SUBMITTED_BLOCKS
-            },
-            None => {
-                warn!(target: LOG_TARGET, "Missing miner wallet address!");
-                false
-            },
-        }
-    }
-
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
         let pow_algo = block.original_block_header().pow.pow_algo;
@@ -154,10 +112,6 @@ where
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        if !self.can_submit_block(pow_algo, block).await {
-            warn!(target: LOG_TARGET, "Skipping block submission.. Too many blocks sent!");
-            return Ok(());
-        }
         match share_chain.submit_block(block).await {
             Ok(_) => {
                 self.stats_store
