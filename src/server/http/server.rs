@@ -93,6 +93,7 @@ where
     pub fn routes(&self) -> Router {
         Router::new()
             .route("/stats", get(handlers::handle_get_stats))
+            .route("/miners", get(handlers::handle_miners_with_shares))
             .route("/health", get(health::handle_health))
             .route("/version", get(version::handle_version))
             .with_state(AppState {
