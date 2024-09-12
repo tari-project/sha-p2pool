@@ -521,6 +521,13 @@ impl ShareChain for InMemoryShareChain {
 
         Ok(hash_rates_sum.div(hash_rates_count))
     }
+
+    async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>> {
+        let levels_lock = self.block_levels.read().await;
+        let chain = self.chain(levels_lock.iter());
+        let chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
+        Ok(self.miners_with_shares(chain))
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use crate::sharechain::{block::Block, error::Error};
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
+use std::collections::HashMap;
 use tari_common_types::types::FixedHash;
 use tari_core::consensus::ConsensusManager;
 use tari_core::proof_of_work::randomx_factory::RandomXFactory;
@@ -107,4 +108,7 @@ pub trait ShareChain: Send + Sync + 'static {
     /// (including all blocks and not just strongest chain).
     /// Returning number is the result in hash/second.
     async fn hash_rate(&self) -> ShareChainResult<BigUint>;
+
+    /// Returns the current miners with all the current shares in the current blocks window.
+    async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>>;
 }

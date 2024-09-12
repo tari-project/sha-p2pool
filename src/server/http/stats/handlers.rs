@@ -26,6 +26,28 @@ use crate::sharechain::SHARE_COUNT;
 
 const LOG_TARGET: &str = "p2pool::server::stats::get";
 
+pub async fn handle_miners_with_shares(
+    State(state): State<AppState>,
+) -> Result<Json<HashMap<String, HashMap<String, u64>>>, StatusCode> {
+    let mut result = HashMap::with_capacity(2);
+    result.insert(
+        PowAlgorithm::Sha3x.to_string().to_lowercase(),
+        state.share_chain_sha3x.miners_with_shares().await.map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get Sha3x miners with shares: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
+    );
+    result.insert(
+        PowAlgorithm::RandomX.to_string().to_lowercase(),
+        state.share_chain_random_x.miners_with_shares().await.map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get RandomX miners with shares: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
+    );
+
+    Ok(Json(result))
+}
+
 pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
     let mut result = HashMap::with_capacity(2);
     result.insert(
