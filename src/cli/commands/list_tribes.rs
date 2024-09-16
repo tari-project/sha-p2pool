@@ -11,13 +11,14 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::{select, time};
 
-use crate::cli::args::{Cli, StartArgs};
+use crate::cli::args::{Cli, ListTribeArgs, StartArgs};
 use crate::cli::commands::util;
 use crate::server::p2p::peer_store::PeerStore;
 
 pub async fn handle_list_tribes(
     cli: Arc<Cli>,
     args: &StartArgs,
+    list_tribe_args: &ListTribeArgs,
     cli_shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
     // start server asynchronously
@@ -41,9 +42,9 @@ pub async fn handle_list_tribes(
     // wait for peer store from started server
     let peer_store = peer_store_channel_rx.await?;
 
-    // collect tribes for 30 seconds
+    // collect tribes for the given timeout
     let mut tribes = vec![];
-    let timeout = time::sleep(Duration::from_secs(30));
+    let timeout = time::sleep(Duration::from_secs(list_tribe_args.timeout));
     tokio::pin!(timeout);
     tokio::pin!(cli_shutdown_signal);
     loop {
