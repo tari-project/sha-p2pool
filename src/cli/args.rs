@@ -104,7 +104,7 @@ pub struct ListTribeArgs {
     ///
     /// The list-tribes commands tries to look for all the currently available tribes
     /// for this amount of time maximum.
-    #[arg(long, value_name = "timeout", default_value_t = 30)]
+    #[arg(long, value_name = "timeout", default_value_t = 15)]
     pub timeout: u64,
 }
 
@@ -165,13 +165,13 @@ impl Cli {
         match &self.command {
             Commands::Start { args } => {
                 commands::handle_start(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            },
+            }
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
-            },
+            }
             Commands::ListTribes { args, list_tribe_args } => {
                 commands::handle_list_tribes(cli_ref.clone(), args, list_tribe_args, cli_shutdown.clone()).await?;
-            },
+            }
         }
 
         Ok(())
