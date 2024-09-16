@@ -71,6 +71,7 @@ pub async fn server(
 
     config_builder.with_mining_enabled(!args.mining_disabled);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
+    config_builder.with_relay_enabled(args.relay_server_enabled);
     config_builder.with_http_server_enabled(!args.http_server_disabled);
     if let Some(stats_server_port) = args.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);

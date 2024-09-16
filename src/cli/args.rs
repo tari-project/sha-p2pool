@@ -91,6 +91,13 @@ pub struct StartArgs {
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     pub mdns_disabled: bool,
 
+    /// Relay Server Enabled
+    ///
+    /// If set, this peer acts as a relay server too for other peers to exchange
+    /// messages between each other.
+    #[arg(long, value_name = "relay-server-enabled", default_value_t = false)]
+    pub relay_server_enabled: bool,
+
     /// HTTP server disabled
     ///
     /// If set, local HTTP server (stats, health-check, status etc...) is disabled.

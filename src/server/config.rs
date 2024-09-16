@@ -110,6 +110,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_relay_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.relay_enabled = config;
+        self
+    }
+
     pub fn with_http_server_enabled(&mut self, config: bool) -> &mut Self {
         self.config.http_server.enabled = config;
         self
