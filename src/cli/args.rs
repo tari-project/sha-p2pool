@@ -104,7 +104,7 @@ pub struct ListTribeArgs {
     ///
     /// The list-tribes commands tries to look for all the currently available tribes
     /// for this amount of time maximum.
-    #[arg(long, value_name = "timeout", default_value_t = 30)]
+    #[arg(long, value_name = "timeout", default_value_t = 15)]
     pub timeout: u64,
 }
 
