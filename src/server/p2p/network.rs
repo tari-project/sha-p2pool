@@ -911,11 +911,13 @@ where
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
-            // TODO: only do this if we are behind a NAT (use AutoNAT)
-            self.swarm.dial(addr.clone()
-                .with(Protocol::P2pCircuit)
-                .with(Protocol::P2p(*peer_id))
-            ).unwrap();
+            // TODO: do this if we are behind a NAT (use AutoNAT) and we are not providing a relay
+            if !self.config.relay_enabled {
+                self.swarm.dial(addr.clone()
+                    .with(Protocol::P2pCircuit)
+                    .with(Protocol::P2p(*peer_id))
+                ).unwrap();
+            }
 
             self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
         });
@@ -959,6 +961,16 @@ where
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
         let seed_peers = self.parse_seed_peers().await?;
+
+        // TODO: listen on relay address too (if behind a NAT later), example:
+        // swarm
+        //     .listen_on(opts.relay_address.with(Protocol::P2pCircuit))
+        //     .unwrap();
+        if !self.config.relay_enabled && !seed_peers.is_empty() {
+            let relay_server = seed_peers.get(seed_peers.keys().get(0)).unwrap(); // TODO: get a random seed peer instead of first one
+            // self.swarm.listen_on()
+        }
+
         self.join_seed_peers(seed_peers).await?;
         self.subscribe_to_topics().await;
 
