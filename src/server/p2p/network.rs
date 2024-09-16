@@ -911,10 +911,12 @@ where
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
+            // TODO: only do this if we are behind a NAT (use AutoNAT)
             self.swarm.dial(addr.clone()
                 .with(Protocol::P2pCircuit)
                 .with(Protocol::P2p(*peer_id))
             ).unwrap();
+
             self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
         });
 
