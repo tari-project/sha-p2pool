@@ -165,13 +165,13 @@ impl Cli {
         match &self.command {
             Commands::Start { args } => {
                 commands::handle_start(cli_ref.clone(), args, cli_shutdown.clone()).await?;
-            }
+            },
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
-            }
+            },
             Commands::ListTribes { args, list_tribe_args } => {
                 commands::handle_list_tribes(cli_ref.clone(), args, list_tribe_args, cli_shutdown.clone()).await?;
-            }
+            },
         }
 
         Ok(())
