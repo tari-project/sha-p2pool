@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use libp2p::futures::executor::block_on;
 use tari_common::configuration::Network;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
@@ -92,7 +93,7 @@ pub struct Config {
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,
     pub mdns_enabled: bool,
-    pub relay_enabled: bool,
+    pub relay_server_enabled: bool,
     pub tribe: Tribe,
 }
 
@@ -105,7 +106,7 @@ impl Default for Config {
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
-            relay_enabled: false,
+            relay_server_enabled: false,
             tribe: Tribe::from("default".to_string()),
         }
     }
@@ -912,11 +913,32 @@ where
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
             // TODO: do this if we are behind a NAT (use AutoNAT) and we are not providing a relay
-            if !self.config.relay_enabled {
-                self.swarm.dial(addr.clone()
-                    .with(Protocol::P2pCircuit)
-                    .with(Protocol::P2p(*peer_id))
-                ).unwrap();
+            if !self.config.relay_server_enabled {
+                self.swarm.dial(addr.clone()).unwrap();
+                
+                // wait for relay node 
+                block_on(async {
+                    let mut learned_observed_addr = false;
+                    let mut told_relay_observed_addr = false;
+                    loop {
+                        match self.swarm.next().await.unwrap() {
+                            SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Identify(identify::Event::Sent { .. })) => {
+                                told_relay_observed_addr = true;
+                            }
+                            SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Identify(identify::Event::Received { .. })) => {
+                                learned_observed_addr = true;
+                            }
+                            _ => {}
+                        }
+                        if learned_observed_addr && told_relay_observed_addr {
+                            break;
+                        }
+                    }
+                });
+                
+                // listen on relay node
+                self.swarm.listen_on(addr.clone().with(Protocol::P2pCircuit))
+                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e))).unwrap();
             }
 
             self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
@@ -961,17 +983,7 @@ where
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
         let seed_peers = self.parse_seed_peers().await?;
-
-        // TODO: listen on relay address too (if behind a NAT later), example:
-        // swarm
-        //     .listen_on(opts.relay_address.with(Protocol::P2pCircuit))
-        //     .unwrap();
-        if !self.config.relay_enabled && !seed_peers.is_empty() {
-            let relay_server = seed_peers.get(seed_peers.keys().get(0)).unwrap(); // TODO: get a random seed peer instead of first one
-            // self.swarm.listen_on()
-        }
-
-        self.join_seed_peers(seed_peers).await?;
+        self.join_seed_peers(seed_peers.clone()).await?;
         self.subscribe_to_topics().await;
 
         // start initial share chain sync
