@@ -916,7 +916,8 @@ where
             if !self.config.relay_server_enabled {
                 self.swarm.dial(addr.clone()).unwrap();
                 
-                // wait for relay node 
+                // TODO: add timeout if relay node errors OR check if it is possible to check if we got an error
+                // wait for relay node
                 block_on(async {
                     let mut learned_observed_addr = false;
                     let mut told_relay_observed_addr = false;

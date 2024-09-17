@@ -30,7 +30,8 @@ libp2p = { version = "0.53.2", features = [
     "cbor",
     "kad",
     "relay",
-    "dcutr"
+    "dcutr",
+    "autonat"
 ] }
 tokio = { version = "1.38.0", features = ["full"] }
 thiserror = "1.0"
