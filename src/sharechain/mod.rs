@@ -26,7 +26,6 @@ pub const MAX_SHARES_PER_MINER: u64 = 60;
 pub mod block;
 pub mod error;
 pub mod in_memory;
-pub mod tests;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 
