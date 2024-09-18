@@ -21,10 +21,10 @@ pub struct StatsBlock {
 impl From<Block> for StatsBlock {
     fn from(block: Block) -> Self {
         StatsBlock {
-            hash: block.hash().to_hex(),
-            height: block.height(),
-            timestamp: block.timestamp(),
-            miner_wallet_address: block.miner_wallet_address().clone().map(|addr| addr.to_base58()),
+            hash: block.hash.to_hex(),
+            height: block.height,
+            timestamp: block.timestamp,
+            miner_wallet_address: block.miner_wallet_address.clone().map(|addr| addr.to_base58()),
         }
     }
 }

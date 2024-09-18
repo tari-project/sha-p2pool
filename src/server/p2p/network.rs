@@ -478,16 +478,15 @@ where
 
                 match Block::try_from(message) {
                     Ok(payload) => {
-                        info!(target: LOG_TARGET, tribe = &self.config.tribe; "🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
-                        let share_chain = match payload.original_block_header().pow.pow_algo {
+                        info!(target: LOG_TARGET, tribe = &self.config.tribe; "🆕 New block from broadcast: {:?}", &payload.hash.to_hex());
+                        let share_chain = match payload.original_block_header.pow.pow_algo {
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         match share_chain.submit_block(&payload).await {
                             Ok(result) => {
                                 if result.need_sync {
-                                    self.sync_share_chain(payload.original_block_header().pow.pow_algo)
-                                        .await;
+                                    self.sync_share_chain(payload.original_block_header.pow.pow_algo).await;
                                 }
                             },
                             Err(error) => {

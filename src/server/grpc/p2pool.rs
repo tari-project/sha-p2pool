@@ -52,7 +52,7 @@ pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
 }
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
-pub struct ShaP2PoolGrpc<S>
+pub(crate) struct ShaP2PoolGrpc<S>
 where
     S: ShareChain,
 {
@@ -107,7 +107,7 @@ where
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        let pow_algo = block.original_block_header().pow.pow_algo;
+        let pow_algo = block.original_block_header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -117,7 +117,7 @@ where
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
-                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
                 self.p2p_client
                     .broadcast_block(block)
                     .await
@@ -256,7 +256,7 @@ where
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
-        let origin_block_header = block.original_block_header();
+        let origin_block_header = &block.original_block_header;
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
@@ -308,8 +308,9 @@ where
             *max_difficulty = request_block_difficulty.as_u64();
         }
 
+        dbg!("HERE");
         if !network_difficulty_matches {
-            block.set_sent_to_main_chain(false);
+            block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
                 Ok(_) => {
@@ -320,7 +321,7 @@ where
                 },
             };
             return Ok(Response::new(SubmitBlockResponse {
-                block_hash: block.hash().to_vec(),
+                block_hash: block.hash.to_vec(),
             }));
         }
 
@@ -334,7 +335,7 @@ where
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
                 info!("💰 New matching block found and sent to network!");
-                block.set_sent_to_main_chain(true);
+                block.sent_to_main_chain = true;
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             },
@@ -343,10 +344,10 @@ where
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
                     .await;
-                block.set_sent_to_main_chain(false);
+                block.sent_to_main_chain = false;
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
-                    block_hash: block.hash().to_vec(),
+                    block_hash: block.hash.to_vec(),
                 }))
             },
         }
