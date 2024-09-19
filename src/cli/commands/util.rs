@@ -1,23 +1,22 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::env;
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 use libp2p::identity::Keypair;
-use tari_common::configuration::Network;
-use tari_common::initialize_logging;
-use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::randomx_factory::RandomXFactory;
-use tari_core::proof_of_work::PowAlgorithm;
+use tari_common::{configuration::Network, initialize_logging};
+use tari_core::{
+    consensus::ConsensusManager,
+    proof_of_work::{randomx_factory::RandomXFactory, PowAlgorithm},
+};
 use tari_shutdown::ShutdownSignal;
 
-use crate::cli::args::{Cli, StartArgs};
-use crate::server as main_server;
-use crate::server::p2p::Tribe;
-use crate::server::Server;
-use crate::sharechain::in_memory::InMemoryShareChain;
-use crate::sharechain::{BlockValidationParams, MAX_BLOCKS_COUNT};
+use crate::{
+    cli::args::{Cli, StartArgs},
+    server as main_server,
+    server::{p2p::Tribe, Server},
+    sharechain::{in_memory::InMemoryShareChain, BlockValidationParams, MAX_BLOCKS_COUNT},
+};
 
 pub async fn server(
     cli: Arc<Cli>,

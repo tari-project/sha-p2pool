@@ -1,14 +1,15 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::sharechain::{block::Block, error::Error};
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
-use std::collections::HashMap;
 use tari_common_types::types::FixedHash;
-use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::randomx_factory::RandomXFactory;
+use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
+
+use crate::sharechain::{block::Block, error::Error};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.

@@ -1,8 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use clap::builder::styling::AnsiColor;
-use clap::builder::Styles;
+use clap::builder::{styling::AnsiColor, Styles};
 
 pub fn cli_styles() -> Styles {
     Styles::styled()

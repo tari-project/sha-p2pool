@@ -1,19 +1,20 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use tari_shutdown::{Shutdown, ShutdownSignal};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
-use tokio::{select, time};
+use tokio::{select, sync::oneshot, task::JoinHandle, time};
 
-use crate::cli::args::{Cli, ListTribeArgs, StartArgs};
-use crate::cli::commands::util;
-use crate::server::p2p::peer_store::PeerStore;
+use crate::{
+    cli::{
+        args::{Cli, ListTribeArgs, StartArgs},
+        commands::util,
+    },
+    server::p2p::peer_store::PeerStore,
+};
 
 pub async fn handle_list_tribes(
     cli: Arc<Cli>,

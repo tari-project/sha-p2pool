@@ -1,19 +1,19 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use itertools::Itertools;
-use libp2p::PeerId;
-use log::{debug, warn};
-use moka::future::{Cache, CacheBuilder};
 use std::{
     sync::RwLock,
     time::{Duration, Instant},
 };
+
+use itertools::Itertools;
+use libp2p::PeerId;
+use log::{debug, warn};
+use moka::future::{Cache, CacheBuilder};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::p2p::messages::PeerInfo;
-use crate::server::p2p::Tribe;
+use crate::server::p2p::{messages::PeerInfo, Tribe};
 
 const LOG_TARGET: &str = "p2pool::server::p2p::peer_store";
 const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);

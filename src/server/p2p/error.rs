@@ -4,7 +4,12 @@
 use std::string::FromUtf8Error;
 
 use libp2p::{
-    gossipsub::PublishError, identity::DecodingError, kad::NoKnownPeers, multiaddr, noise, swarm::DialError,
+    gossipsub::PublishError,
+    identity::DecodingError,
+    kad::NoKnownPeers,
+    multiaddr,
+    noise,
+    swarm::DialError,
     TransportError,
 };
 use thiserror::Error;

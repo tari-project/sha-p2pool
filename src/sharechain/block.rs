@@ -1,21 +1,19 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::impl_conversions;
-use crate::sharechain::CHAIN_ID;
 use blake2::Blake2b;
 use digest::consts::U32;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
-use tari_core::blocks::genesis_block::get_genesis_block;
 use tari_core::{
-    blocks::{BlockHeader, BlocksHashDomain},
+    blocks::{genesis_block::get_genesis_block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
 };
-use tari_utilities::epoch_time::EpochTime;
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
+
+use crate::{impl_conversions, sharechain::CHAIN_ID};
 
 lazy_static! {
     pub static ref CURRENT_CHAIN_ID: String = {

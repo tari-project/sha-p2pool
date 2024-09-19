@@ -5,8 +5,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tari_core::transactions::tari_amount::MicroMinotari;
-use tari_utilities::epoch_time::EpochTime;
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::sharechain::block::Block;
 
