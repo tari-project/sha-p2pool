@@ -1,6 +1,6 @@
 [package]
 name = "sha_p2pool"
-version = "0.1.5-pre.8"
+version = "0.1.5-pre.10"
 edition = "2021"
 
 [dependencies]
@@ -28,7 +28,10 @@ libp2p = { version = "0.53.2", features = [
     "request-response",
     "json",
     "cbor",
-    "kad"
+    "kad",
+    "relay",
+    "dcutr",
+    "autonat"
 ] }
 tokio = { version = "1.38.0", features = ["full"] }
 thiserror = "1.0"

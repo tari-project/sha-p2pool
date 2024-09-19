@@ -110,8 +110,18 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_relay_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.relay_server_enabled = config;
+        self
+    }
+
     pub fn with_http_server_enabled(&mut self, config: bool) -> &mut Self {
         self.config.http_server.enabled = config;
+        self
+    }
+
+    pub fn with_external_address(&mut self, config: String) -> &mut Self {
+        self.config.p2p_service.external_addr = Some(config);
         self
     }
 
