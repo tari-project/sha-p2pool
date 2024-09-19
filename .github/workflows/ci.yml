@@ -33,7 +33,7 @@ jobs:
       - name: toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: ${{ env.toolchain }}
           components: clippy, rustfmt
       - name: ubuntu dependencies
         run: |
@@ -63,11 +63,11 @@ jobs:
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
       - name: cargo format
-        run: cargo +nightly fmt --all -- --check
+        run: cargo +${{ env.toolchain }} fmt --all -- --check
       - name: Install cargo-lints
         run: cargo install cargo-lints
       - name: Clippy check (with lints)
-        run: cargo +nightly lints clippy --all-targets --all-features
+        run: cargo +${{ env.toolchain }} lints clippy --all-targets --all-features
 
   machete:
     # Checks for unused dependencies.
