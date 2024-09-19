@@ -1,15 +1,15 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use tari_shutdown::ShutdownSignal;
 
-use crate::cli::commands;
-use crate::cli::util::cli_styles;
-use crate::cli::util::validate_tribe;
+use crate::cli::{
+    commands,
+    util::{cli_styles, validate_tribe},
+};
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser, Debug)]

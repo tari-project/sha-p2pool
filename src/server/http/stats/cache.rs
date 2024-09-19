@@ -1,12 +1,12 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::server::http::stats::models::Stats;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
 use tari_core::proof_of_work::PowAlgorithm;
-use tokio::sync::RwLock;
-use tokio::time::Instant;
+use tokio::{sync::RwLock, time::Instant};
+
+use crate::server::http::stats::models::Stats;
 
 #[derive(Clone)]
 pub struct CachedStats {

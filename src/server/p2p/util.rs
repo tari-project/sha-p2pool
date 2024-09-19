@@ -1,8 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use libp2p::identity::Keypair;
-use libp2p::PeerId;
+use libp2p::{identity::Keypair, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_utilities::hex::Hex;
 

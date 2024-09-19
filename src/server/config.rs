@@ -5,8 +5,11 @@ use std::{path::PathBuf, time::Duration};
 
 use libp2p::identity::Keypair;
 
-use crate::server::p2p::Tribe;
-use crate::server::{http, p2p, p2p::peer_store::PeerStoreConfig};
+use crate::server::{
+    http,
+    p2p,
+    p2p::{peer_store::PeerStoreConfig, Tribe},
+};
 
 /// Config is the server configuration struct.
 #[derive(Clone)]

@@ -1,11 +1,24 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    hash::{DefaultHasher, Hash, Hasher},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
 use convert_case::{Case, Casing};
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::{
+    config::{ResolverConfig, ResolverOpts},
+    TokioAsyncResolver,
+};
 use itertools::Itertools;
-use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
     dcutr,
     futures::StreamExt,
@@ -18,23 +31,26 @@ use libp2p::{
     mdns,
     mdns::tokio::Tokio,
     multiaddr::Protocol,
-    noise, relay, request_response,
+    noise,
+    relay,
+    request_response,
     request_response::{cbor, ResponseChannel},
-    swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
+    swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
+    tcp,
+    yamux,
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
+    Swarm,
 };
-use log::kv::{ToValue, Value};
-use log::{debug, error, info, warn};
+use log::{
+    debug,
+    error,
+    info,
+    kv::{ToValue, Value},
+    warn,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
 use tari_common::configuration::Network;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
@@ -48,19 +64,22 @@ use tokio::{
     time,
 };
 
-use crate::server::p2p::messages::LocalShareChainSyncRequest;
-use crate::sharechain::block::CURRENT_CHAIN_ID;
 use crate::{
     server::{
         config,
         p2p::{
             messages,
-            messages::{PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
+            messages::{LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
-            Error, LibP2PError, ServiceClient,
+            Error,
+            LibP2PError,
+            ServiceClient,
         },
     },
-    sharechain::{block::Block, ShareChain},
+    sharechain::{
+        block::{Block, CURRENT_CHAIN_ID},
+        ShareChain,
+    },
 };
 
 const PEER_INFO_TOPIC: &str = "peer_info";
@@ -144,8 +163,7 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -166,8 +184,7 @@ where
 }
 
 impl<S> Service<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
@@ -494,7 +511,8 @@ where
                 }
             },
             // TODO: send a signature that proves that the actual block was coming from this peer
-            // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like 20%))
+            // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like
+            // 20%))
             topic if topic == Self::tribe_topic(&self.config.tribe, NEW_BLOCK_TOPIC) => {
                 if self.sync_in_progress.load(Ordering::SeqCst) {
                     return;

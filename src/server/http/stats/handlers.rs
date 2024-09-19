@@ -1,31 +1,33 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::Json;
+use axum::{extract::State, http::StatusCode, Json};
 use itertools::Itertools;
 use log::error;
 use serde::Serialize;
 use tari_common::configuration::Network;
 use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::BlockHash;
-use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::PowAlgorithm;
-use tari_core::transactions::tari_amount::MicroMinotari;
+use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::http::server::AppState;
-use crate::server::http::stats::models::{BlockStats, EstimatedEarnings, Stats, TribeDetails};
-use crate::server::http::stats::{
-    algo_stat_key, MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT,
-    P2POOL_STAT_ACCEPTED_BLOCKS_COUNT, P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+use crate::{
+    server::{
+        http::{
+            server::AppState,
+            stats::{
+                algo_stat_key,
+                models::{BlockStats, EstimatedEarnings, Stats, TribeDetails},
+                MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+                P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+            },
+        },
+        stats_store::StatsStore,
+    },
+    sharechain::SHARE_COUNT,
 };
-use crate::server::stats_store::StatsStore;
-use crate::sharechain::SHARE_COUNT;
 
 const LOG_TARGET: &str = "p2pool::server::stats::get";
 

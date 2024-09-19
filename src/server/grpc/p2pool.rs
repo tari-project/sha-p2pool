@@ -1,38 +1,40 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::{collections::HashMap, sync::Arc};
+
 use log::{debug, error, info, warn};
-use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_app_grpc::tari_rpc::{
-    base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
-    GetNewBlockTemplateWithCoinbasesRequest, NewBlockTemplateRequest, SubmitBlockRequest, SubmitBlockResponse,
+    base_node_client::BaseNodeClient, pow_algo::PowAlgos, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest,
+    GetNewBlockResponse, GetNewBlockTemplateWithCoinbasesRequest, NewBlockTemplateRequest, SubmitBlockRequest,
+    SubmitBlockResponse,
 };
 use num_format::{Locale, ToFormattedString};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_core::consensus;
-use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::randomx_factory::RandomXFactory;
-use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
+use tari_core::{
+    consensus,
+    consensus::ConsensusManager,
+    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, PowAlgorithm},
+};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use crate::server::http::stats::{
-    algo_stat_key, MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT,
-    P2POOL_STAT_ACCEPTED_BLOCKS_COUNT, P2POOL_STAT_REJECTED_BLOCKS_COUNT,
-};
-use crate::server::stats_store::StatsStore;
-use crate::sharechain::BlockValidationParams;
 use crate::{
     server::{
         grpc::{error::Error, util},
+        http::stats::{
+            algo_stat_key, MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT,
+            P2POOL_STAT_ACCEPTED_BLOCKS_COUNT, P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+        },
         p2p,
+        stats_store::StatsStore,
     },
-    sharechain::{block::Block, ShareChain, SHARE_COUNT},
+    sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
 };
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
