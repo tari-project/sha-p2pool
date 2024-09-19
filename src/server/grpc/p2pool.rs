@@ -10,8 +10,6 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockResponse,
 };
 use num_format::{Locale, ToFormattedString};
-use std::collections::HashMap;
-use std::sync::Arc;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::{

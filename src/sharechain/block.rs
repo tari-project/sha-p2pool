@@ -10,7 +10,7 @@ use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::blocks::genesis_block::get_genesis_block;
 use tari_core::proof_of_work::Difficulty;
 use tari_core::{
-    blocks::{genesis_block::get_genesis_block, BlockHeader, BlocksHashDomain},
+    blocks::{BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
