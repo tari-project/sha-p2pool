@@ -33,7 +33,7 @@ jobs:
       - name: toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.toolchain }}
+          toolchain: nightly
           components: clippy, rustfmt
       - name: ubuntu dependencies
         run: |
