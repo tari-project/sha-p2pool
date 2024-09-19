@@ -31,22 +31,13 @@ use libp2p::{
     mdns,
     mdns::tokio::Tokio,
     multiaddr::Protocol,
-    noise,
-    relay,
-    request_response,
+    noise, relay, request_response,
     request_response::{cbor, ResponseChannel},
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
-    tcp,
-    yamux,
-    Multiaddr,
-    PeerId,
-    StreamProtocol,
-    Swarm,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
 };
 use log::{
-    debug,
-    error,
-    info,
+    debug, error, info,
     kv::{ToValue, Value},
     warn,
 };
@@ -71,9 +62,7 @@ use crate::{
             messages,
             messages::{LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
-            Error,
-            LibP2PError,
-            ServiceClient,
+            Error, LibP2PError, ServiceClient,
         },
     },
     sharechain::{
@@ -137,7 +126,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(5),
+            peer_info_publish_interval: Duration::from_secs(30),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -163,7 +152,8 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-where S: ShareChain
+where
+    S: ShareChain,
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -184,7 +174,8 @@ where S: ShareChain
 }
 
 impl<S> Service<S>
-where S: ShareChain
+where
+    S: ShareChain,
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
@@ -871,7 +862,7 @@ where S: ShareChain
                     }
 
                     // broadcast peer info
-                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Peer count: {:?}", self.tribe_peer_store.peer_count().await);
+                    info!(target: LOG_TARGET, tribe = &self.config.tribe; "Peer count: {:?}", self.tribe_peer_store.peer_count().await);
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {

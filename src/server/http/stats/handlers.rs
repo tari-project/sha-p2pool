@@ -11,6 +11,7 @@ use tari_common::configuration::Network;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::hex::Hex;
 
 use crate::{
     server::{
@@ -19,9 +20,7 @@ use crate::{
             stats::{
                 algo_stat_key,
                 models::{BlockStats, EstimatedEarnings, Stats, TribeDetails},
-                MINER_STAT_ACCEPTED_BLOCKS_COUNT,
-                MINER_STAT_REJECTED_BLOCKS_COUNT,
-                P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
                 P2POOL_STAT_REJECTED_BLOCKS_COUNT,
             },
         },
@@ -35,13 +34,17 @@ const LOG_TARGET: &str = "p2pool::server::stats::get";
 #[derive(Serialize)]
 pub(crate) struct BlockResult {
     chain_id: String,
-    hash: BlockHash,
+    hash: String,
     timestamp: EpochTime,
-    prev_hash: BlockHash,
+    prev_hash: String,
     height: u64,
     // original_block_header: BlockHeader,
-    miner_wallet_address: Option<TariAddress>,
+    miner_wallet_address: Option<String>,
     sent_to_main_chain: bool,
+    achieved_difficulty: u64,
+    candidate_block_height: u64,
+    candidate_block_prev_hash: String,
+    algo: String,
 }
 
 pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
@@ -54,13 +57,17 @@ pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<Bloc
         .iter()
         .map(|block| BlockResult {
             chain_id: block.chain_id.clone(),
-            hash: block.hash.clone(),
+            hash: block.hash.to_hex(),
             timestamp: block.timestamp,
-            prev_hash: block.prev_hash.clone(),
+            prev_hash: block.prev_hash.to_hex(),
             height: block.height,
             // original_block_header: block.original_block_header().clone(),
-            miner_wallet_address: block.miner_wallet_address.clone(),
+            miner_wallet_address: block.miner_wallet_address.as_ref().map(|a| a.to_base58()),
             sent_to_main_chain: block.sent_to_main_chain,
+            achieved_difficulty: block.achieved_difficulty.as_u64(),
+            candidate_block_prev_hash: block.original_block_header.prev_hash.to_hex(),
+            candidate_block_height: block.original_block_header.height,
+            algo: block.original_block_header.pow.pow_algo.to_string(),
         })
         .collect();
 
