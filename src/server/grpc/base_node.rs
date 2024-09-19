@@ -22,7 +22,7 @@ use minotari_app_grpc::{
     },
 };
 use tari_shutdown::ShutdownSignal;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
 use crate::server::grpc::{error::Error, util};
@@ -36,7 +36,7 @@ const GET_DIFFICULTY_PAGE_SIZE: usize = 1_000;
 #[macro_export]
 macro_rules! proxy_simple_result {
     ($self:ident, $call:ident, $request:ident) => {
-        match $self.client.lock().await.$call($request.into_inner()).await {
+        match $self.client.write().await.$call($request.into_inner()).await {
             Ok(resp) => Ok(resp),
             Err(error) => {
                 error!("Error while calling {:?} on base node: {:?}", stringify!($call), error);
@@ -50,7 +50,7 @@ macro_rules! proxy_stream_result {
     ($self:ident, $call:ident, $request:ident, $page_size:ident) => {
         streaming_response(
             String::from(stringify!($call)),
-            $self.client.lock().await.$call($request.into_inner()).await,
+            $self.client.write().await.$call($request.into_inner()).await,
             $page_size,
         )
         .await
@@ -59,7 +59,7 @@ macro_rules! proxy_stream_result {
     ($self:ident, $call:ident, $request:ident, $page_size:expr) => {
         streaming_response(
             String::from(stringify!($call)),
-            $self.client.lock().await.$call($request.into_inner()).await,
+            $self.client.write().await.$call($request.into_inner()).await,
             $page_size,
         )
         .await
@@ -97,13 +97,13 @@ where
 /// Base node gRPC service that proxies all the requests to base node when miner calls them.
 /// This makes sure that any extra call towards base node is served.
 pub struct TariBaseNodeGrpc {
-    client: Arc<Mutex<BaseNodeClient<Channel>>>,
+    client: Arc<RwLock<BaseNodeClient<Channel>>>,
 }
 
 impl TariBaseNodeGrpc {
     pub async fn new(base_node_address: String, shutdown_signal: ShutdownSignal) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(
+            client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
         })

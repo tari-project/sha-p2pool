@@ -18,7 +18,7 @@ use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::server::http::stats::{
@@ -62,7 +62,7 @@ where
     S: ShareChain,
 {
     /// Base node client
-    client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
+    client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
     /// P2P service client
     p2p_client: p2p::ServiceClient,
     /// SHA-3 share chain
@@ -73,8 +73,8 @@ where
     stats_store: Arc<StatsStore>,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
-    block_height_difficulty_cache: Arc<Mutex<HashMap<u64, u64>>>,
-    stats_max_difficulty_since_last_success: Arc<Mutex<u64>>,
+    block_height_difficulty_cache: Arc<RwLock<HashMap<u64, u64>>>,
+    stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -93,7 +93,7 @@ where
         genesis_block_hash: FixedHash,
     ) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(
+            client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
             p2p_client,
@@ -105,8 +105,8 @@ where
                 consensus_manager,
                 genesis_block_hash,
             ),
-            block_height_difficulty_cache: Arc::new(Mutex::new(HashMap::new())),
-            stats_max_difficulty_since_last_success: Arc::new(Mutex::new(0)),
+            block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
+            stats_max_difficulty_since_last_success: Arc::new(RwLock::new(0)),
         })
     }
 
@@ -167,7 +167,13 @@ where
             algo: Some(grpc_block_header_pow.clone()),
             max_weight: 0,
         };
-        let template_response = self.client.lock().await.get_new_block_template(req).await?.into_inner();
+        let template_response = self
+            .client
+            .write()
+            .await
+            .get_new_block_template(req)
+            .await?
+            .into_inner();
         let miner_data = template_response
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
@@ -182,7 +188,7 @@ where
 
         let mut response = self
             .client
-            .lock()
+            .write()
             .await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
                 algo: Some(grpc_block_header_pow),
@@ -201,7 +207,7 @@ where
         if let Some(header) = &response.block {
             let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
             self.block_height_difficulty_cache
-                .lock()
+                .write()
                 .await
                 .insert(height, miner_data.target_difficulty);
         }
@@ -305,20 +311,25 @@ where
         // }
         let network_difficulty = *self
             .block_height_difficulty_cache
-            .lock()
+            .read()
             .await
             .get(&(origin_block_header.height))
             .unwrap_or(&0);
         let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty;
-        let mut max_difficulty = self.stats_max_difficulty_since_last_success.lock().await;
+        let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
         info!(
-            "Max difficulty: {}. Network difficulty {}",
+            "Max difficulty: {}. Network difficulty {}. Accepted {}",
             max_difficulty.to_formatted_string(&Locale::en),
-            network_difficulty.to_formatted_string(&Locale::en)
+            network_difficulty.to_formatted_string(&Locale::en),
+            self.stats_store
+                .get(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT))
+                .await
+                .to_formatted_string(&Locale::en)
         );
+        block.achieved_difficulty = request_block_difficulty;
 
         if !network_difficulty_matches {
             block.sent_to_main_chain = false;
@@ -342,8 +353,9 @@ where
         info!("🔗 Submitting block  {} to base node...", origin_block_header.hash());
 
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-        match self.client.lock().await.submit_block(grpc_request).await {
+        match self.client.write().await.submit_block(grpc_request).await {
             Ok(resp) => {
+                *max_difficulty = 0;
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;

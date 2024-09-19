@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::blocks::genesis_block::get_genesis_block;
+use tari_core::proof_of_work::Difficulty;
 use tari_core::{
     blocks::{BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
@@ -36,6 +37,7 @@ pub(crate) struct Block {
     pub original_block_header: BlockHeader,
     pub miner_wallet_address: Option<TariAddress>,
     pub sent_to_main_chain: bool,
+    pub achieved_difficulty: Difficulty,
 }
 impl_conversions!(Block);
 
@@ -57,7 +59,7 @@ impl Block {
     }
 }
 
-pub struct BlockBuilder {
+pub(crate) struct BlockBuilder {
     block: Block,
 }
 
@@ -73,6 +75,7 @@ impl BlockBuilder {
                 original_block_header: BlockHeader::new(0),
                 miner_wallet_address: Default::default(),
                 sent_to_main_chain: false,
+                achieved_difficulty: Difficulty::min(),
             },
         }
     }
