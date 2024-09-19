@@ -30,6 +30,10 @@ pub struct StartArgs {
     #[arg(long, value_name = "stats-server-port")]
     pub stats_server_port: Option<u16>,
 
+    /// (Optional) External address to listen on.
+    #[arg(long, value_name = "external-address")]
+    pub external_address: Option<String>,
+
     /// (Optional) Address of the Tari base node.
     #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18142")]
     pub base_node_address: String,
@@ -90,6 +94,13 @@ pub struct StartArgs {
     /// If set, mDNS local peer discovery is disabled.
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     pub mdns_disabled: bool,
+
+    /// Relay Server Enabled
+    ///
+    /// If set, this peer acts as a relay server too for other peers to exchange
+    /// messages between each other.
+    #[arg(long, value_name = "relay-server-enabled", default_value_t = false)]
+    pub relay_server_enabled: bool,
 
     /// HTTP server disabled
     ///

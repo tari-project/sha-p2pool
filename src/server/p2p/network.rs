@@ -1,21 +1,13 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt::Display;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
-
 use convert_case::{Case, Casing};
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
+    dcutr,
     futures::StreamExt,
     gossipsub,
     gossipsub::{IdentTopic, Message, PublishError},
@@ -26,14 +18,23 @@ use libp2p::{
     mdns,
     mdns::tokio::Tokio,
     multiaddr::Protocol,
-    noise, request_response,
+    noise, relay, request_response,
     request_response::{cbor, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, StreamProtocol, Swarm,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
 };
 use log::kv::{ToValue, Value};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tari_common::configuration::Network;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
@@ -101,24 +102,28 @@ impl Display for Tribe {
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub external_addr: Option<String>,
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
     pub stable_peer: bool,
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,
     pub mdns_enabled: bool,
+    pub relay_server_enabled: bool,
     pub tribe: Tribe,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            external_addr: None,
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(5),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
+            relay_server_enabled: false,
             tribe: Tribe::from("default".to_string()),
         }
     }
@@ -131,6 +136,9 @@ pub struct ServerNetworkBehaviour {
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
     pub kademlia: kad::Behaviour<MemoryStore>,
     pub identify: identify::Behaviour,
+    pub relay_server: Toggle<relay::Behaviour>,
+    pub relay_client: relay::client::Behaviour,
+    pub dcutr: dcutr::Behaviour,
 }
 
 /// Service is the implementation that holds every peer-to-peer related logic
@@ -243,8 +251,10 @@ where
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
             .with_tokio()
             .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
-            .map_err(|e| Error::LibP2P(LibP2PError::Noise(e)))?
-            .with_behaviour(move |key_pair| {
+            .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
+            .with_relay_client(noise::Config::new, yamux::Config::default)
+            .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
+            .with_behaviour(move |key_pair, relay_client| {
                 // gossipsub
                 let message_id_fn = |message: &gossipsub::Message| {
                     let mut s = DefaultHasher::new();
@@ -265,6 +275,7 @@ where
                     gossipsub_config,
                 )?;
 
+                // mdns
                 let mut mdns_service = Toggle::from(None);
                 if config.p2p_service.mdns_enabled {
                     mdns_service = Toggle::from(Some(
@@ -272,6 +283,16 @@ where
                             .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
                     ));
                 }
+
+                // relay server
+                let relay_server = if config.p2p_service.relay_server_enabled {
+                    Toggle::from(Some(relay::Behaviour::new(
+                        key_pair.public().to_peer_id(),
+                        Default::default(),
+                    )))
+                } else {
+                    Toggle::from(None)
+                };
 
                 Ok(ServerNetworkBehaviour {
                     gossipsub,
@@ -288,9 +309,12 @@ where
                         MemoryStore::new(key_pair.public().to_peer_id()),
                     ),
                     identify: identify::Behaviour::new(identify::Config::new(
-                        "/ipfs/id/1.0.0".to_string(),
+                        "/p2pool/1.0.0".to_string(),
                         key_pair.public(),
                     )),
+                    relay_server,
+                    relay_client,
+                    dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -675,6 +699,7 @@ where
     }
 
     /// Main method to handle libp2p events.
+    #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -758,9 +783,24 @@ where
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
                     identify::Event::Received { peer_id, info } => {
-                        self.swarm.add_external_address(info.observed_addr);
+                        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
+
+                        // adding peer to kademlia and gossipsub
+                        self.swarm.add_external_address(info.observed_addr.clone());
                         for addr in info.listen_addrs {
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+
+                            if is_relay {
+                                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+                                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+                                if let Err(error) = self
+                                    .swarm
+                                    .listen_on(listen_addr.clone())
+                                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
+                                {
+                                    warn!(target: LOG_TARGET, "Failed to listen on address ({:?}): {:?}", listen_addr, error);
+                                }
+                            }
                         }
                         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                     },
@@ -770,6 +810,15 @@ where
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                     },
                     _ => {},
+                },
+                ServerNetworkBehaviourEvent::RelayServer(event) => {
+                    info!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
+                },
+                ServerNetworkBehaviourEvent::RelayClient(event) => {
+                    info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                },
+                ServerNetworkBehaviourEvent::Dcutr(event) => {
+                    info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
             },
             _ => {},
@@ -837,11 +886,13 @@ where
         }
     }
 
-    /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
-    async fn join_seed_peers(&mut self) -> Result<(), Error> {
+    async fn parse_seed_peers(&mut self) -> Result<HashMap<PeerId, Multiaddr>, Error> {
+        let mut seed_peers_result = HashMap::new();
+
         if self.config.seed_peers.is_empty() {
-            return Ok(());
+            return Ok(seed_peers_result);
         }
+
         let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
         for seed_peer in &self.config.seed_peers {
             let addr = seed_peer
@@ -878,7 +929,7 @@ where
                                                 _ => None,
                                             };
                                             if let Some(peer_id) = peer_id {
-                                                self.swarm.behaviour_mut().kademlia.add_address(&peer_id, parsed_addr);
+                                                seed_peers_result.insert(peer_id, parsed_addr);
                                             }
                                         },
                                         Err(error) => {
@@ -894,12 +945,22 @@ where
                     }
                 }
             } else {
-                // add simple address
-                self.swarm.behaviour_mut().kademlia.add_address(&peer_id.unwrap(), addr);
+                seed_peers_result.insert(peer_id.unwrap(), addr);
             }
         }
 
-        self.bootstrap_kademlia()?;
+        Ok(seed_peers_result)
+    }
+
+    /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
+    async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
+        seed_peers.iter().for_each(|(peer_id, addr)| {
+            self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
+        });
+
+        if !seed_peers.is_empty() {
+            self.bootstrap_kademlia()?;
+        }
 
         Ok(())
     }
@@ -928,6 +989,7 @@ where
     /// Starts p2p service.
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
+        // listen on local address
         self.swarm
             .listen_on(
                 format!("/ip4/0.0.0.0/tcp/{}", self.port)
@@ -936,7 +998,17 @@ where
             )
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
-        self.join_seed_peers().await?;
+        // external address
+        if let Some(external_addr) = &self.config.external_addr {
+            self.swarm.add_external_address(
+                format!("/ip4/{}/tcp/{}", external_addr, self.port)
+                    .parse()
+                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
+            );
+        }
+
+        let seed_peers = self.parse_seed_peers().await?;
+        self.join_seed_peers(seed_peers).await?;
         self.subscribe_to_topics().await;
 
         // start initial share chain sync
