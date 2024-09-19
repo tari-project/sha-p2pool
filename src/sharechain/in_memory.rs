@@ -68,6 +68,7 @@ impl BlockLevel {
     }
 }
 
+// should not have a gen block, we should be able to start at 0
 fn genesis_block() -> Block {
     Block::builder()
         .with_height(0)
@@ -121,6 +122,7 @@ impl InMemoryShareChain {
 
     /// Calculates block difficulty based on it's pow algo.
     fn block_difficulty(&self, block: &Block) -> Result<u64, Error> {
+        // we should use target difficulty
         match block.original_block_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
                 if let Some(params) = &self.block_validation_params {
@@ -169,6 +171,7 @@ impl InMemoryShareChain {
     /// Generating number of shares for all the miners.
     fn miners_with_shares(&self, chain: Vec<&Block>) -> HashMap<String, u64> {
         let mut result: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
+                                                               // this is not needed?, its written to and never read?
         let mut extra_shares: HashMap<String, u64> = HashMap::new(); // target wallet address -> number of shares
 
         // add shares applying the max shares rule
@@ -227,6 +230,7 @@ impl InMemoryShareChain {
         Ok(ValidateBlockResult::new(true, false))
     }
 
+    // we should do way more than validate they are in some order and that they reach the target
     /// Validating a new block.
     async fn validate_block(
         &self,
@@ -240,6 +244,7 @@ impl InMemoryShareChain {
             return Ok(ValidateBlockResult::new(false, false));
         }
 
+        // this is wrong w should check the blocks and chain
         if sync && last_block.is_none() {
             return Ok(ValidateBlockResult::new(true, false));
         }
@@ -248,6 +253,7 @@ impl InMemoryShareChain {
             // check if we have outdated tip of chain
             let block_height_diff = i64::try_from(block.height).map_err(Error::FromIntConversion)? -
                 i64::try_from(last_block.height).map_err(Error::FromIntConversion)?;
+            // NOOOO if they dont follow up they should reject
             if block_height_diff > 10 {
                 // TODO: use const
                 warn!(target: LOG_TARGET,
@@ -393,11 +399,13 @@ impl ShareChain for InMemoryShareChain {
         if sync {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
+                // this check will always be true, as genesis_block creates a new one each time its called
                 if last_block.hash != genesis_block().hash &&
                     !blocks.is_empty() &&
                     last_block.height < blocks[0].height &&
                     (blocks[0].height - last_block.height) > 1
                 {
+                    // we should only clear when we know the other chain is valid
                     block_levels_write_lock.clear();
                 }
             }

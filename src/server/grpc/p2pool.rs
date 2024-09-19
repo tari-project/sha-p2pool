@@ -56,6 +56,7 @@ pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
         Network::Igor => consensus::ConsensusConstants::igor(),
         Network::Esmeralda => consensus::ConsensusConstants::esmeralda(),
     };
+    // this is wrong, this should be done per block height
     let consensus_constants = consensus_constants.first().ok_or(Error::NoConsensusConstants)?;
     let min_difficulty = match pow {
         PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow).as_u64() / 2000,
@@ -81,6 +82,7 @@ where S: ShareChain
     stats_store: Arc<StatsStore>,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
+    // these both should not be u64, but of type Difficulty, we wrap it for a reason
     block_height_difficulty_cache: Arc<RwLock<HashMap<u64, u64>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
 }
@@ -168,6 +170,7 @@ where S: ShareChain
             PowAlgos::Sha3x => PowAlgorithm::Sha3x,
         };
 
+        // This is not needed. You just need shares, not actual values
         // request original block template to get reward
         let req = NewBlockTemplateRequest {
             algo: Some(grpc_block_header_pow.clone()),
@@ -219,6 +222,7 @@ where S: ShareChain
         }
         let min_difficulty =
             min_difficulty(pow_algo).map_err(|_| Status::internal("failed to get minimum difficulty"))?;
+        // should use own LWMA difficulty calculation
         let mut target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
         if target_difficulty < min_difficulty {
             target_difficulty = min_difficulty;

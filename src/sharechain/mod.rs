@@ -13,6 +13,7 @@ use crate::sharechain::{block::Block, error::Error};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
+// we can base this of the network id, as p2pool should follow base layer tari
 pub const CHAIN_ID: usize = 1;
 
 /// How many blocks to keep overall.

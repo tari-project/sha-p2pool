@@ -32,7 +32,9 @@ pub(crate) struct Block {
     pub timestamp: EpochTime,
     pub prev_hash: BlockHash,
     pub height: u64,
+    // we should not just have the header here, but the entire block
     pub original_block_header: BlockHeader,
+    // do we want to make this optional...
     pub miner_wallet_address: Option<TariAddress>,
     pub sent_to_main_chain: bool,
     pub achieved_difficulty: Difficulty,
@@ -57,6 +59,7 @@ impl Block {
     }
 }
 
+// we should not do any of this
 pub(crate) struct BlockBuilder {
     block: Block,
 }
