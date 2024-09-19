@@ -26,8 +26,16 @@ use crate::{
     server::grpc::p2pool::min_difficulty,
     sharechain::{
         error::{BlockConvertError, Error},
-        Block, BlockValidationParams, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult,
-        BLOCKS_WINDOW, MAX_BLOCKS_COUNT, MAX_SHARES_PER_MINER, SHARE_COUNT,
+        Block,
+        BlockValidationParams,
+        ShareChain,
+        ShareChainResult,
+        SubmitBlockResult,
+        ValidateBlockResult,
+        BLOCKS_WINDOW,
+        MAX_BLOCKS_COUNT,
+        MAX_SHARES_PER_MINER,
+        SHARE_COUNT,
     },
 };
 
@@ -238,8 +246,8 @@ impl InMemoryShareChain {
 
         if let Some(last_block) = last_block {
             // check if we have outdated tip of chain
-            let block_height_diff = i64::try_from(block.height).map_err(Error::FromIntConversion)?
-                - i64::try_from(last_block.height).map_err(Error::FromIntConversion)?;
+            let block_height_diff = i64::try_from(block.height).map_err(Error::FromIntConversion)? -
+                i64::try_from(last_block.height).map_err(Error::FromIntConversion)?;
             if block_height_diff > 10 {
                 // TODO: use const
                 warn!(target: LOG_TARGET,
@@ -341,8 +349,8 @@ impl InMemoryShareChain {
                 .blocks
                 .iter()
                 .filter(|curr_block| curr_block.generate_hash() == block.generate_hash())
-                .count()
-                > 0;
+                .count() >
+                0;
             if !found {
                 found_level.add_block(block.clone())?;
                 debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
@@ -385,10 +393,10 @@ impl ShareChain for InMemoryShareChain {
         if sync {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
-                if last_block.hash != genesis_block().hash
-                    && !blocks.is_empty()
-                    && last_block.height < blocks[0].height
-                    && (blocks[0].height - last_block.height) > 1
+                if last_block.hash != genesis_block().hash &&
+                    !blocks.is_empty() &&
+                    last_block.height < blocks[0].height &&
+                    (blocks[0].height - last_block.height) > 1
                 {
                     block_levels_write_lock.clear();
                 }

@@ -8,8 +8,7 @@ use itertools::Itertools;
 use log::error;
 use serde::Serialize;
 use tari_common::configuration::Network;
-use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::BlockHash;
+use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -20,7 +19,9 @@ use crate::{
             stats::{
                 algo_stat_key,
                 models::{BlockStats, EstimatedEarnings, Stats, TribeDetails},
-                MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_REJECTED_BLOCKS_COUNT,
+                P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
                 P2POOL_STAT_REJECTED_BLOCKS_COUNT,
             },
         },

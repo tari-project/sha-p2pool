@@ -11,6 +11,7 @@ use tari_core::{
     proof_of_work::{randomx_factory::RandomXFactory, PowAlgorithm},
 };
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::hex::Hex;
 
 use crate::{
     cli::args::{Cli, StartArgs},
@@ -18,7 +19,6 @@ use crate::{
     server::{p2p::Tribe, Server},
     sharechain::{in_memory::InMemoryShareChain, BlockValidationParams, MAX_BLOCKS_COUNT},
 };
-use tari_utilities::hex::Hex;
 
 pub async fn server(
     cli: Arc<Cli>,

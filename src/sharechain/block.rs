@@ -7,11 +7,10 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
-use tari_core::blocks::genesis_block::get_genesis_block;
-use tari_core::proof_of_work::Difficulty;
 use tari_core::{
-    blocks::{BlockHeader, BlocksHashDomain},
+    blocks::{genesis_block::get_genesis_block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
+    proof_of_work::Difficulty,
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
