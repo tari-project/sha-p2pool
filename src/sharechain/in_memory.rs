@@ -1,28 +1,43 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::{Add, Div};
-use std::slice::Iter;
-use std::str::FromStr;
-use std::{collections::HashMap, sync::Arc};
-
-use crate::server::grpc::p2pool::min_difficulty;
-use crate::sharechain::{
-    error::{BlockConvertError, Error},
-    Block, BlockValidationParams, ShareChain, ShareChainResult, SubmitBlockResult, ValidateBlockResult, BLOCKS_WINDOW,
-    MAX_BLOCKS_COUNT, MAX_SHARES_PER_MINER, SHARE_COUNT,
+use std::{
+    collections::HashMap,
+    ops::{Add, Div},
+    slice::Iter,
+    str::FromStr,
+    sync::Arc,
 };
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, FromPrimitive, Integer, Zero};
-use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::BlockHash;
-use tari_core::blocks;
-use tari_core::proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, PowAlgorithm};
+use tari_common_types::{tari_address::TariAddress, types::BlockHash};
+use tari_core::{
+    blocks,
+    proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, PowAlgorithm},
+};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
+
+use crate::{
+    server::grpc::p2pool::min_difficulty,
+    sharechain::{
+        error::{BlockConvertError, Error},
+        Block,
+        BlockValidationParams,
+        ShareChain,
+        ShareChainResult,
+        SubmitBlockResult,
+        ValidateBlockResult,
+        BLOCKS_WINDOW,
+        MAX_BLOCKS_COUNT,
+        MAX_SHARES_PER_MINER,
+        SHARE_COUNT,
+    },
+};
 
 const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
 
@@ -230,8 +245,8 @@ impl InMemoryShareChain {
 
         if let Some(last_block) = last_block {
             // check if we have outdated tip of chain
-            let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)?
-                - i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
+            let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)? -
+                i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
             if block_height_diff > 10 {
                 // TODO: use const
                 warn!(target: LOG_TARGET,
@@ -333,8 +348,8 @@ impl InMemoryShareChain {
                 .blocks
                 .iter()
                 .filter(|curr_block| curr_block.generate_hash() == block.generate_hash())
-                .count()
-                > 0;
+                .count() >
+                0;
             if !found {
                 found_level.add_block(block.clone())?;
                 info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height(), block.hash().to_hex());
@@ -377,10 +392,10 @@ impl ShareChain for InMemoryShareChain {
         if sync {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
-                if last_block.hash() != genesis_block().hash()
-                    && !blocks.is_empty()
-                    && last_block.height() < blocks[0].height()
-                    && (blocks[0].height() - last_block.height()) > 1
+                if last_block.hash() != genesis_block().hash() &&
+                    !blocks.is_empty() &&
+                    last_block.height() < blocks[0].height() &&
+                    (blocks[0].height() - last_block.height()) > 1
                 {
                     block_levels_write_lock.clear();
                 }
@@ -532,11 +547,11 @@ impl ShareChain for InMemoryShareChain {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
-    use tari_crypto::keys::PublicKey;
-    use tari_crypto::ristretto::RistrettoPublicKey;
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+
+    use super::*;
 
     fn new_random_address() -> TariAddress {
         let mut rng = rand::thread_rng();

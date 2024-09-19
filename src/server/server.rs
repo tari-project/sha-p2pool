@@ -1,29 +1,28 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use log::{error, info};
-use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
-use std::sync::atomic::AtomicBool;
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
 };
+
+use log::{error, info};
+use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
-use tari_core::consensus::ConsensusManager;
-use tari_core::proof_of_work::randomx_factory::RandomXFactory;
+use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 
-use crate::server::http::server::HttpServer;
-use crate::server::http::stats::cache::StatsCache;
-use crate::server::p2p::peer_store::PeerStore;
-use crate::server::stats_store::StatsStore;
 use crate::{
     server::{
-        config, grpc,
+        config,
+        grpc,
         grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
+        http::{server::HttpServer, stats::cache::StatsCache},
         p2p,
+        p2p::peer_store::PeerStore,
+        stats_store::StatsStore,
     },
     sharechain::ShareChain,
 };
@@ -44,8 +43,7 @@ pub enum Error {
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub struct Server<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     config: config::Config,
     p2p_service: p2p::Service<S>,
@@ -56,8 +54,7 @@ where
 }
 
 impl<S> Server<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     pub async fn new(
         config: config::Config,

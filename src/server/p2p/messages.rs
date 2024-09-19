@@ -3,11 +3,14 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::server::p2p::Tribe;
-use crate::{server::p2p::Error, sharechain::block::Block};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
+
+use crate::{
+    server::p2p::{Error, Tribe},
+    sharechain::block::Block,
+};
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -30,16 +33,12 @@ macro_rules! impl_conversions {
     };
 }
 pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
-where
-    T: Deserialize<'a>,
-{
+where T: Deserialize<'a> {
     serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
 }
 
 pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
-where
-    T: Serialize,
-{
+where T: Serialize {
     serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
 }
 

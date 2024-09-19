@@ -1,20 +1,26 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::server::http::stats::cache::StatsCache;
-use crate::server::http::stats::handlers;
-use crate::server::http::{health, version};
-use crate::server::p2p::peer_store::PeerStore;
-use crate::server::p2p::Tribe;
-use crate::server::stats_store::StatsStore;
-use crate::sharechain::ShareChain;
-use axum::routing::get;
-use axum::Router;
-use log::info;
 use std::sync::Arc;
+
+use axum::{routing::get, Router};
+use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 use tokio::io;
+
+use crate::{
+    server::{
+        http::{
+            health,
+            stats::{cache::StatsCache, handlers},
+            version,
+        },
+        p2p::{peer_store::PeerStore, Tribe},
+        stats_store::StatsStore,
+    },
+    sharechain::ShareChain,
+};
 
 const LOG_TARGET: &str = "p2pool::server::stats";
 
@@ -40,8 +46,7 @@ pub enum Error {
 }
 
 pub struct HttpServer<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     share_chain_sha3x: Arc<S>,
     share_chain_random_x: Arc<S>,
@@ -64,8 +69,7 @@ pub struct AppState {
 }
 
 impl<S> HttpServer<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     pub fn new(
         share_chain_sha3x: Arc<S>,

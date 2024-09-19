@@ -3,11 +3,11 @@
 
 use std::num::TryFromIntError;
 
-use tari_common_types::tari_address::TariAddressError;
-use tari_common_types::types::FixedHashSizeError;
-use tari_core::consensus::ConsensusBuilderError;
-use tari_core::proof_of_work::monero_rx::MergeMineError;
-use tari_core::proof_of_work::DifficultyError;
+use tari_common_types::{tari_address::TariAddressError, types::FixedHashSizeError};
+use tari_core::{
+    consensus::ConsensusBuilderError,
+    proof_of_work::{monero_rx::MergeMineError, DifficultyError},
+};
 use thiserror::Error;
 
 use crate::sharechain::block::Block;
