@@ -69,6 +69,10 @@ pub async fn server(
         config_builder.with_private_key(Some(private_key));
     }
 
+    if let Ok(external_ip) = env::var("SHA_P2POOL_ADDRESS") {
+        config_builder.with_external_address(external_ip);
+    }
+
     config_builder.with_mining_enabled(!args.mining_disabled);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
     config_builder.with_relay_enabled(args.relay_server_enabled);

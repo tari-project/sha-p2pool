@@ -120,6 +120,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_external_address(&mut self, config: String) -> &mut Self {
+        self.config.p2p_service.external_addr = Some(config);
+        self
+    }
+
     pub fn with_stats_server_port(&mut self, config: u16) -> &mut Self {
         self.config.http_server.port = config;
         self

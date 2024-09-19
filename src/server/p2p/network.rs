@@ -6,7 +6,23 @@ use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 use itertools::Itertools;
 use libp2p::swarm::behaviour::toggle::Toggle;
-use libp2p::{dcutr, futures::StreamExt, gossipsub, gossipsub::{IdentTopic, Message, PublishError}, identify, identity::Keypair, kad, kad::{store::MemoryStore, Event, Mode}, mdns, mdns::tokio::Tokio, multiaddr::Protocol, noise, relay, request_response, request_response::{cbor, ResponseChannel}, swarm::{NetworkBehaviour, SwarmEvent}, tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm};
+use libp2p::{
+    dcutr,
+    futures::StreamExt,
+    gossipsub,
+    gossipsub::{IdentTopic, Message, PublishError},
+    identify,
+    identity::Keypair,
+    kad,
+    kad::{store::MemoryStore, Event, Mode},
+    mdns,
+    mdns::tokio::Tokio,
+    multiaddr::Protocol,
+    noise, relay, request_response,
+    request_response::{cbor, ResponseChannel},
+    swarm::{NetworkBehaviour, SwarmEvent},
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
+};
 use log::kv::{ToValue, Value};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -19,7 +35,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use libp2p::futures::executor::block_on;
 use tari_common::configuration::Network;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
@@ -87,6 +102,7 @@ impl Display for Tribe {
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub external_addr: Option<String>,
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
     pub stable_peer: bool,
@@ -100,6 +116,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            external_addr: None,
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(5),
             stable_peer: false,
@@ -236,7 +253,7 @@ where
             .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
             .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
             .with_relay_client(noise::Config::new, yamux::Config::default)
-            .map_err(|error| { Error::LibP2P(LibP2PError::Noise(error)) })?
+            .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
             .with_behaviour(move |key_pair, relay_client| {
                 // gossipsub
                 let message_id_fn = |message: &gossipsub::Message| {
@@ -268,10 +285,14 @@ where
                 }
 
                 // relay server
-                let relay_server = Toggle::from(Some(relay::Behaviour::new(
-                    key_pair.public().to_peer_id(),
-                    Default::default(),
-                )));
+                let relay_server = if config.p2p_service.relay_server_enabled {
+                    Toggle::from(Some(relay::Behaviour::new(
+                        key_pair.public().to_peer_id(),
+                        Default::default(),
+                    )))
+                } else {
+                    Toggle::from(None)
+                };
 
                 Ok(ServerNetworkBehaviour {
                     gossipsub,
@@ -368,20 +389,20 @@ where
                             )
                             .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
-                            Ok(_) => {}
+                            Ok(_) => {},
                             Err(error) => {
                                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to broadcast new block: {error:?}")
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to convert block to bytes: {error:?}")
-                    }
+                    },
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to receive new block: {error:?}")
-            }
+            },
         }
     }
 
@@ -438,10 +459,10 @@ where
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
                     self.network_peer_store.add(peer, payload).await;
-                }
+                },
                 Err(error) => {
                     error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize peer info payload: {:?}", error);
-                }
+                },
             },
             topic if topic == Self::tribe_topic(&self.config.tribe, PEER_INFO_TOPIC) => {
                 match messages::PeerInfo::try_from(message) {
@@ -466,12 +487,12 @@ where
                                 }
                             }
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize peer info payload: {:?}", error);
-                    }
+                    },
                 }
-            }
+            },
             // TODO: send a signature that proves that the actual block was coming from this peer
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like 20%))
             topic if topic == Self::tribe_topic(&self.config.tribe, NEW_BLOCK_TOPIC) => {
@@ -492,20 +513,20 @@ where
                                     self.sync_share_chain(payload.original_block_header().pow.pow_algo)
                                         .await;
                                 }
-                            }
+                            },
                             Err(error) => {
                                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Could not add new block to local share chain: {error:?}");
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize broadcast block payload: {:?}", error);
-                    }
+                    },
                 }
-            }
+            },
             _ => {
                 warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Unknown topic {topic:?}!");
-            }
+            },
         }
     }
 
@@ -531,10 +552,10 @@ where
                 {
                     error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to send block sync response");
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to get blocks from height: {error:?}")
-            }
+            },
         }
     }
 
@@ -554,10 +575,10 @@ where
                 if result.need_sync {
                     self.sync_share_chain(response.algo).await;
                 }
-            }
+            },
             Err(error) => {
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to add synced blocks to share chain: {error:?}");
-            }
+            },
         }
     }
 
@@ -581,11 +602,11 @@ where
                     .behaviour_mut()
                     .share_chain_sync
                     .send_request(&result.peer_id, ShareChainSyncRequest::new(algo, 0));
-            }
+            },
             None => {
                 self.sync_in_progress.store(false, Ordering::SeqCst);
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "[{:?}] Failed to get peer with highest share chain height!", algo)
-            }
+            },
         }
     }
 
@@ -662,27 +683,28 @@ where
                             } else {
                                 in_progress.store(false, Ordering::SeqCst);
                             }
-                        }
+                        },
                         Err(error) => {
                             in_progress.store(false, Ordering::SeqCst);
                             error!(target: LOG_TARGET, tribe = &tribe; "Failed to get latest height of share chain: {error:?}")
-                        }
+                        },
                     }
-                }
+                },
                 None => {
                     in_progress.store(false, Ordering::SeqCst);
                     error!(target: LOG_TARGET, tribe = &tribe; "Failed to get peer with highest share chain height!")
-                }
+                },
             }
         }
     }
 
     /// Main method to handle libp2p events.
+    #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, tribe = &self.config.tribe; "Listening on {address:?}");
-            }
+            },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
@@ -690,12 +712,12 @@ where
                             self.swarm.add_peer_address(peer, addr);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         }
-                    }
+                    },
                     mdns::Event::Expired(peers) => {
                         for (peer, _addr) in peers {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
                         }
-                    }
+                    },
                 },
                 ServerNetworkBehaviourEvent::Gossipsub(event) => match event {
                     gossipsub::Event::Message {
@@ -704,10 +726,10 @@ where
                         propagation_source: _propagation_source,
                     } => {
                         self.handle_new_gossipsub_message(message).await;
-                    }
-                    gossipsub::Event::Subscribed { .. } => {}
-                    gossipsub::Event::Unsubscribed { .. } => {}
-                    gossipsub::Event::GossipsubNotSupported { .. } => {}
+                    },
+                    gossipsub::Event::Subscribed { .. } => {},
+                    gossipsub::Event::Unsubscribed { .. } => {},
+                    gossipsub::Event::GossipsubNotSupported { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::ShareChainSync(event) => match event {
                     request_response::Event::Message { peer: _peer, message } => match message {
@@ -717,13 +739,13 @@ where
                             channel,
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
-                        }
+                        },
                         request_response::Message::Response {
                             request_id: _request_id,
                             response,
                         } => {
                             self.handle_share_chain_sync_response(response).await;
-                        }
+                        },
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
@@ -733,14 +755,14 @@ where
                         // Remove peer from peer store to try to sync from another peer,
                         // if the peer goes online/accessible again, the peer store will have it again.
                         self.tribe_peer_store.remove(&peer).await;
-                    }
+                    },
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         if self.sync_in_progress.load(Ordering::SeqCst) {
                             self.sync_in_progress.store(false, Ordering::SeqCst);
                         }
                         error!(target: LOG_TARGET, tribe = &self.config.tribe; "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    }
-                    request_response::Event::ResponseSent { .. } => {}
+                    },
+                    request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated {
@@ -756,29 +778,50 @@ where
                         if let Some(old_peer) = old_peer {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
                         }
-                    }
+                    },
                     _ => debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[KADEMLIA] {event:?}"),
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
                     identify::Event::Received { peer_id, info } => {
+                        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
+
+                        // adding peer to kademlia and gossipsub
                         self.swarm.add_external_address(info.observed_addr.clone());
                         for addr in info.listen_addrs {
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+
+                            if is_relay {
+                                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+                                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+                                if let Err(error) = self
+                                    .swarm
+                                    .listen_on(listen_addr.clone())
+                                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
+                                {
+                                    warn!(target: LOG_TARGET, "Failed to listen on address ({:?}): {:?}", listen_addr, error);
+                                }
+                            }
                         }
                         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                    }
+                    },
                     identify::Event::Error { peer_id, error } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 },
-                ServerNetworkBehaviourEvent::RelayServer(event) => { info!("RELAY SERVER: {event:?}"); }
-                ServerNetworkBehaviourEvent::RelayClient(event) => { info!("RELAY CLIENT: {event:?}"); }
-                ServerNetworkBehaviourEvent::Dcutr(event) => { info!("DCUTR: {event:?}"); }
+                ServerNetworkBehaviourEvent::RelayServer(event) => {
+                    info!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
+                },
+                ServerNetworkBehaviourEvent::RelayClient(event) => {
+                    info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                },
+                ServerNetworkBehaviourEvent::Dcutr(event) => {
+                    info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
+                },
             },
-            _ => {}
+            _ => {},
         };
     }
 
@@ -888,17 +931,17 @@ where
                                             if let Some(peer_id) = peer_id {
                                                 seed_peers_result.insert(peer_id, parsed_addr);
                                             }
-                                        }
+                                        },
                                         Err(error) => {
                                             warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Skipping invalid DNS entry: {:?}: {error:?}", chars);
-                                        }
+                                        },
                                     }
                                 }
                             }
-                        }
+                        },
                         Err(error) => {
                             error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to lookup domain records: {error:?}");
-                        }
+                        },
                     }
                 }
             } else {
@@ -912,40 +955,12 @@ where
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
-            // TODO: do this if we are behind a NAT (use AutoNAT) and we are not providing a relay
-            if !self.config.relay_server_enabled {
-                self.swarm.dial(addr.clone()).unwrap();
-                
-                // TODO: add timeout if relay node errors OR check if it is possible to check if we got an error
-                // wait for relay node
-                block_on(async {
-                    let mut learned_observed_addr = false;
-                    let mut told_relay_observed_addr = false;
-                    loop {
-                        match self.swarm.next().await.unwrap() {
-                            SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Identify(identify::Event::Sent { .. })) => {
-                                told_relay_observed_addr = true;
-                            }
-                            SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Identify(identify::Event::Received { .. })) => {
-                                learned_observed_addr = true;
-                            }
-                            _ => {}
-                        }
-                        if learned_observed_addr && told_relay_observed_addr {
-                            break;
-                        }
-                    }
-                });
-                
-                // listen on relay node
-                self.swarm.listen_on(addr.clone().with(Protocol::P2pCircuit))
-                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e))).unwrap();
-            }
-
             self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
         });
 
-        self.bootstrap_kademlia()?;
+        if !seed_peers.is_empty() {
+            self.bootstrap_kademlia()?;
+        }
 
         Ok(())
     }
@@ -979,12 +994,21 @@ where
             .listen_on(
                 format!("/ip4/0.0.0.0/tcp/{}", self.port)
                     .parse()
-                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?
+                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
             )
             .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
+        // external address
+        if let Some(external_addr) = &self.config.external_addr {
+            self.swarm.add_external_address(
+                format!("/ip4/{}/tcp/{}", external_addr, self.port)
+                    .parse()
+                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
+            );
+        }
+
         let seed_peers = self.parse_seed_peers().await?;
-        self.join_seed_peers(seed_peers.clone()).await?;
+        self.join_seed_peers(seed_peers).await?;
         self.subscribe_to_topics().await;
 
         // start initial share chain sync
@@ -1006,7 +1030,7 @@ where
                 tribe,
                 shutdown_signal,
             )
-                .await;
+            .await;
         });
 
         self.main_loop().await?;

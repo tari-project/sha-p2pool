@@ -30,6 +30,10 @@ pub struct StartArgs {
     #[arg(long, value_name = "stats-server-port")]
     pub stats_server_port: Option<u16>,
 
+    /// (Optional) External address to listen on.
+    #[arg(long, value_name = "external-address")]
+    pub external_address: Option<String>,
+
     /// (Optional) Address of the Tari base node.
     #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18142")]
     pub base_node_address: String,
