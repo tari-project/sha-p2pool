@@ -47,8 +47,12 @@ pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
         Network::Esmeralda => consensus::ConsensusConstants::esmeralda(),
     };
     let consensus_constants = consensus_constants.first().ok_or(Error::NoConsensusConstants)?;
+    let min_difficulty = match pow {
+        PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow).as_u64() / 2000,
+        PowAlgorithm::Sha3x => consensus_constants.min_pow_difficulty(pow).as_u64(),
+    };
 
-    Ok(consensus_constants.min_pow_difficulty(pow).as_u64())
+    Ok(min_difficulty)
 }
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
@@ -205,6 +209,7 @@ where
         if target_difficulty < min_difficulty {
             target_difficulty = min_difficulty;
         }
+
         if let Some(mut miner_data) = response.miner_data {
             miner_data.target_difficulty = target_difficulty;
             response.miner_data = Some(miner_data);
