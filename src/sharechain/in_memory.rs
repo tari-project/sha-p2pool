@@ -118,7 +118,8 @@ impl InMemoryShareChain {
                     .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
-                    Ok(0)
+                    panic!("No params provided for RandomX difficulty calculation!");
+                    // Ok(0)
                 }
             },
             PowAlgorithm::Sha3x => {
@@ -337,16 +338,16 @@ impl InMemoryShareChain {
                 > 0;
             if !found {
                 found_level.add_block(block.clone())?;
-                info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
+                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
             }
         } else if let Some(last_block) = last_block {
             if last_block.height < block.height {
                 block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
-                info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
+                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
             }
         } else {
             block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
-            info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
+            debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
         }
 
         Ok(SubmitBlockResult::new(validate_result.need_sync))

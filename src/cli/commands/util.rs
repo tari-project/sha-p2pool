@@ -5,6 +5,7 @@ use std::env;
 use std::sync::Arc;
 
 use libp2p::identity::Keypair;
+use log::info;
 use tari_common::configuration::Network;
 use tari_common::initialize_logging;
 use tari_core::consensus::ConsensusManager;
@@ -18,6 +19,7 @@ use crate::server::p2p::Tribe;
 use crate::server::Server;
 use crate::sharechain::in_memory::InMemoryShareChain;
 use crate::sharechain::{BlockValidationParams, MAX_BLOCKS_COUNT};
+use tari_utilities::hex::Hex;
 
 pub async fn server(
     cli: Arc<Cli>,
@@ -90,6 +92,9 @@ pub async fn server(
     let randomx_factory = RandomXFactory::new(1);
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
     let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
+
+    info!(target: "p2pool::server", "Consensus manager initialized with network: {}, and genesis hash {}", Network::get_current_or_user_setting_or_default(), 
+genesis_block_hash.to_hex());
     let block_validation_params = Arc::new(BlockValidationParams::new(
         randomx_factory,
         consensus_manager,
