@@ -31,13 +31,22 @@ use libp2p::{
     mdns,
     mdns::tokio::Tokio,
     multiaddr::Protocol,
-    noise, relay, request_response,
+    noise,
+    relay,
+    request_response,
     request_response::{cbor, ResponseChannel},
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
+    tcp,
+    yamux,
+    Multiaddr,
+    PeerId,
+    StreamProtocol,
+    Swarm,
 };
 use log::{
-    debug, error, info,
+    debug,
+    error,
+    info,
     kv::{ToValue, Value},
     warn,
 };
@@ -62,7 +71,9 @@ use crate::{
             messages,
             messages::{LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
-            Error, LibP2PError, ServiceClient,
+            Error,
+            LibP2PError,
+            ServiceClient,
         },
     },
     sharechain::{
@@ -152,8 +163,7 @@ pub struct ServerNetworkBehaviour {
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     swarm: Swarm<ServerNetworkBehaviour>,
     port: u16,
@@ -174,8 +184,7 @@ where
 }
 
 impl<S> Service<S>
-where
-    S: ShareChain,
+where S: ShareChain
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.

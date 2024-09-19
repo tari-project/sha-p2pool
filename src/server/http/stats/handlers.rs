@@ -8,10 +8,8 @@ use itertools::Itertools;
 use log::error;
 use serde::Serialize;
 use tari_common::configuration::Network;
-use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
-use tari_utilities::epoch_time::EpochTime;
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::{
     server::{
@@ -20,7 +18,9 @@ use crate::{
             stats::{
                 algo_stat_key,
                 models::{BlockStats, EstimatedEarnings, Stats, TribeDetails},
-                MINER_STAT_ACCEPTED_BLOCKS_COUNT, MINER_STAT_REJECTED_BLOCKS_COUNT, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_REJECTED_BLOCKS_COUNT,
+                P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
                 P2POOL_STAT_REJECTED_BLOCKS_COUNT,
             },
         },
@@ -47,7 +47,7 @@ pub(crate) struct BlockResult {
     algo: String,
 }
 
-pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
     let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -74,7 +74,7 @@ pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<Bloc
     Ok(Json(result))
 }
 
-pub async fn handle_miners_with_shares(
+pub(crate) async fn handle_miners_with_shares(
     State(state): State<AppState>,
 ) -> Result<Json<HashMap<String, HashMap<String, u64>>>, StatusCode> {
     let mut result = HashMap::with_capacity(2);
@@ -96,7 +96,9 @@ pub async fn handle_miners_with_shares(
     Ok(Json(result))
 }
 
-pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
+pub(crate) async fn handle_get_stats(
+    State(state): State<AppState>,
+) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
     let mut result = HashMap::with_capacity(2);
     result.insert(
         PowAlgorithm::Sha3x.to_string().to_lowercase(),
