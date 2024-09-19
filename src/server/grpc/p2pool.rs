@@ -7,6 +7,7 @@ use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest, NewBlockTemplateRequest, SubmitBlockRequest, SubmitBlockResponse,
 };
+use num_format::{Locale, ToFormattedString};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tari_common::configuration::Network;
@@ -279,6 +280,7 @@ where
             )
             .map_err(|error| Status::internal(error.to_string()))?,
         };
+        info!("Submitted block difficulty: {}", request_block_difficulty);
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
         // let mut network_difficulty_stream = self
@@ -301,22 +303,23 @@ where
         //         network_difficulty_matches = true;
         //     }
         // }
-        let network_difficulty_matches = match self
+        let network_difficulty = *self
             .block_height_difficulty_cache
             .lock()
             .await
             .get(&(origin_block_header.height))
-        {
-            Some(difficulty) => request_block_difficulty.as_u64() >= *difficulty,
-            None => false,
-        };
+            .unwrap_or(&0);
+        let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty;
         let mut max_difficulty = self.stats_max_difficulty_since_last_success.lock().await;
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
-        info!("Max difficulty: {}", max_difficulty);
+        info!(
+            "Max difficulty: {}. Network difficulty {}",
+            max_difficulty.to_formatted_string(&Locale::en),
+            network_difficulty.to_formatted_string(&Locale::en)
+        );
 
-        dbg!("HERE");
         if !network_difficulty_matches {
             block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
