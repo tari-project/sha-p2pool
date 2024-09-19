@@ -69,6 +69,10 @@ pub async fn server(
         config_builder.with_private_key(Some(private_key));
     }
 
+    // external address
+    if let Some(external_addr) = &args.external_address {
+        config_builder.with_external_address(external_addr.clone());
+    }
     if let Ok(external_ip) = env::var("SHA_P2POOL_ADDRESS") {
         config_builder.with_external_address(external_ip);
     }
