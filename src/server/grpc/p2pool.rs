@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::pow_algo::PowAlgos;
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient, sha_p2_pool_server::ShaP2Pool, GetNewBlockRequest, GetNewBlockResponse,
@@ -47,8 +47,12 @@ pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
         Network::Esmeralda => consensus::ConsensusConstants::esmeralda(),
     };
     let consensus_constants = consensus_constants.first().ok_or(Error::NoConsensusConstants)?;
+    let min_difficulty = match pow {
+        PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow).as_u64() / 2000,
+        PowAlgorithm::Sha3x => consensus_constants.min_pow_difficulty(pow).as_u64(),
+    };
 
-    Ok(consensus_constants.min_pow_difficulty(pow).as_u64())
+    Ok(min_difficulty)
 }
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
@@ -192,6 +196,7 @@ where
             .clone()
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
+        debug!("Inserting height cached difficulty: {}", miner_data.target_difficulty);
         if let Some(header) = &response.block {
             let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
             self.block_height_difficulty_cache
@@ -205,6 +210,7 @@ where
         if target_difficulty < min_difficulty {
             target_difficulty = min_difficulty;
         }
+
         if let Some(mut miner_data) = response.miner_data {
             miner_data.target_difficulty = target_difficulty;
             response.miner_data = Some(miner_data);
@@ -307,6 +313,7 @@ where
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
+        info!("Max difficulty: {}", max_difficulty);
 
         dbg!("HERE");
         if !network_difficulty_matches {
@@ -314,7 +321,8 @@ where
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
                 Ok(_) => {
-                    info!("🔗 Block submitted to share chain!");
+                    let pow_type = origin_block_header.pow.pow_algo.to_string();
+                    info!("🔗 Block submitted to {} share chain!", pow_type);
                 },
                 Err(error) => {
                     warn!("Failed to submit block to share chain: {error:?}");
@@ -327,20 +335,27 @@ where
 
         // submit block to base node
         let (metadata, extensions, _inner) = request.into_parts();
-        info!("🔗 Submitting block to base node...");
+        info!("🔗 Submitting block  {} to base node...", origin_block_header.hash());
+
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
         match self.client.lock().await.submit_block(grpc_request).await {
             Ok(resp) => {
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
-                info!("💰 New matching block found and sent to network!");
+                info!(
+                    "💰 New matching block found and sent to network! Block hash: {}",
+                    origin_block_header.hash()
+                );
                 block.sent_to_main_chain = true;
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             },
             Err(error) => {
-                warn!("Failed to submit block to Tari network: {error:?}");
+                warn!(
+                    "Failed to submit block  {} to Tari network: {error:?}",
+                    origin_block_header.hash()
+                );
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
                     .await;

@@ -98,6 +98,16 @@ pub struct StartArgs {
     pub http_server_disabled: bool,
 }
 
+#[derive(Clone, Parser, Debug)]
+pub struct ListTribeArgs {
+    /// List tribe command timeout in seconds.
+    ///
+    /// The list-tribes commands tries to look for all the currently available tribes
+    /// for this amount of time maximum.
+    #[arg(long, value_name = "timeout", default_value_t = 15)]
+    pub timeout: u64,
+}
+
 #[derive(Subcommand, Clone, Debug)]
 pub enum Commands {
     /// Starts sha-p2pool node.
@@ -113,6 +123,9 @@ pub enum Commands {
     ListTribes {
         #[clap(flatten)]
         args: StartArgs,
+
+        #[clap(flatten)]
+        list_tribe_args: ListTribeArgs,
     },
 }
 
@@ -133,7 +146,10 @@ impl Cli {
                 .clone()
                 .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
             Commands::GenerateIdentity => dirs::home_dir().unwrap().join(".tari/p2pool"),
-            Commands::ListTribes { args } => args
+            Commands::ListTribes {
+                args,
+                list_tribe_args: _list_tribe_args,
+            } => args
                 .base_dir
                 .clone()
                 .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
@@ -153,8 +169,8 @@ impl Cli {
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
             },
-            Commands::ListTribes { args } => {
-                commands::handle_list_tribes(cli_ref.clone(), args, cli_shutdown.clone()).await?;
+            Commands::ListTribes { args, list_tribe_args } => {
+                commands::handle_list_tribes(cli_ref.clone(), args, list_tribe_args, cli_shutdown.clone()).await?;
             },
         }
 

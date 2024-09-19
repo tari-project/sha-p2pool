@@ -757,6 +757,7 @@ where
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
                     identify::Event::Received { peer_id, info } => {
+                        self.swarm.add_external_address(info.observed_addr);
                         for addr in info.listen_addrs {
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         }
