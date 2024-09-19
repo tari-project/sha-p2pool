@@ -4,12 +4,14 @@
 use std::{env, sync::Arc};
 
 use libp2p::identity::Keypair;
+use log::info;
 use tari_common::{configuration::Network, initialize_logging};
 use tari_core::{
     consensus::ConsensusManager,
     proof_of_work::{randomx_factory::RandomXFactory, PowAlgorithm},
 };
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::hex::Hex;
 
 use crate::{
     cli::args::{Cli, StartArgs},
@@ -89,6 +91,9 @@ pub async fn server(
     let randomx_factory = RandomXFactory::new(1);
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
     let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
+
+    info!(target: "p2pool::server", "Consensus manager initialized with network: {}, and genesis hash {}", Network::get_current_or_user_setting_or_default(), 
+genesis_block_hash.to_hex());
     let block_validation_params = Arc::new(BlockValidationParams::new(
         randomx_factory,
         consensus_manager,

@@ -520,16 +520,15 @@ where S: ShareChain
 
                 match Block::try_from(message) {
                     Ok(payload) => {
-                        info!(target: LOG_TARGET, tribe = &self.config.tribe; "🆕 New block from broadcast: {:?}", &payload.hash().to_hex());
-                        let share_chain = match payload.original_block_header().pow.pow_algo {
+                        info!(target: LOG_TARGET, tribe = &self.config.tribe; "🆕 New block from broadcast: {:?}", &payload.hash.to_hex());
+                        let share_chain = match payload.original_block_header.pow.pow_algo {
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         match share_chain.submit_block(&payload).await {
                             Ok(result) => {
                                 if result.need_sync {
-                                    self.sync_share_chain(payload.original_block_header().pow.pow_algo)
-                                        .await;
+                                    self.sync_share_chain(payload.original_block_header.pow.pow_algo).await;
                                 }
                             },
                             Err(error) => {
@@ -721,7 +720,7 @@ where S: ShareChain
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
-                info!(target: LOG_TARGET, tribe = &self.config.tribe; "Listening on {address:?}");
+                debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Listening on {address:?}");
             },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
@@ -808,9 +807,10 @@ where S: ShareChain
                         for addr in info.listen_addrs {
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
 
+                            // TODO: I don't think this is needed.
                             if is_relay {
                                 let listen_addr = addr.clone().with(Protocol::P2pCircuit);
-                                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+                                debug!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
                                 if let Err(error) = self
                                     .swarm
                                     .listen_on(listen_addr.clone())
@@ -830,13 +830,13 @@ where S: ShareChain
                     _ => {},
                 },
                 ServerNetworkBehaviourEvent::RelayServer(event) => {
-                    info!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
+                    debug!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::RelayClient(event) => {
-                    info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                    debug!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::Dcutr(event) => {
-                    info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
+                    debug!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
             },
             _ => {},
@@ -1019,7 +1019,8 @@ where S: ShareChain
         // external address
         if let Some(external_addr) = &self.config.external_addr {
             self.swarm.add_external_address(
-                format!("/ip4/{}/tcp/{}", external_addr, self.port)
+                // format!("/ip4/{}/tcp/{}", external_addr, self.port)
+                external_addr
                     .parse()
                     .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
             );

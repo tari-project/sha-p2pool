@@ -6,7 +6,9 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{extract::State, http::StatusCode, Json};
 use itertools::Itertools;
 use log::error;
+use serde::Serialize;
 use tari_common::configuration::Network;
+use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -29,6 +31,41 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "p2pool::server::stats::get";
+
+#[derive(Serialize)]
+pub(crate) struct BlockResult {
+    chain_id: String,
+    hash: BlockHash,
+    timestamp: EpochTime,
+    prev_hash: BlockHash,
+    height: u64,
+    // original_block_header: BlockHeader,
+    miner_wallet_address: Option<TariAddress>,
+    sent_to_main_chain: bool,
+}
+
+pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+    let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let result = chain
+        .iter()
+        .map(|block| BlockResult {
+            chain_id: block.chain_id.clone(),
+            hash: block.hash.clone(),
+            timestamp: block.timestamp,
+            prev_hash: block.prev_hash.clone(),
+            height: block.height,
+            // original_block_header: block.original_block_header().clone(),
+            miner_wallet_address: block.miner_wallet_address.clone(),
+            sent_to_main_chain: block.sent_to_main_chain,
+        })
+        .collect();
+
+    Ok(Json(result))
+}
 
 pub async fn handle_miners_with_shares(
     State(state): State<AppState>,
@@ -88,7 +125,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     // collect number of miners
     let num_of_miners = chain
         .iter()
-        .map(|block| block.miner_wallet_address())
+        .map(|block| block.miner_wallet_address.clone())
         .filter(|addr_opt| addr_opt.is_some())
         .map(|addr| addr.as_ref().unwrap().to_base58())
         .unique()
@@ -97,7 +134,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     // last won block
     let last_block_won = chain
         .iter()
-        .filter(|block| block.sent_to_main_chain())
+        .filter(|block| block.sent_to_main_chain)
         .last()
         .cloned()
         .map(|block| block.into());
@@ -130,10 +167,10 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     })?;
     let pool_total_rewards: u64 = blocks
         .iter()
-        .filter(|block| block.sent_to_main_chain())
+        .filter(|block| block.sent_to_main_chain)
         .map(|block| {
             consensus_manager
-                .get_block_reward_at(block.original_block_header().height)
+                .get_block_reward_at(block.original_block_header.height)
                 .as_u64()
         })
         .sum();
@@ -142,9 +179,9 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     let mut miners_with_shares = HashMap::<String, u64>::new();
     let mut miners_with_rewards = HashMap::<String, u64>::new();
     blocks.iter().for_each(|block| {
-        if let Some(miner_wallet_address) = block.miner_wallet_address() {
+        if let Some(miner_wallet_address) = &block.miner_wallet_address {
             let miner = miner_wallet_address.to_base58();
-            let reward = consensus_manager.get_block_reward_at(block.original_block_header().height);
+            let reward = consensus_manager.get_block_reward_at(block.original_block_header.height);
 
             // collect share count for miners
             if let Some(shares) = miners_with_shares.get(&miner) {
@@ -154,7 +191,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
             }
 
             // calculate rewards for miners
-            if block.sent_to_main_chain() {
+            if block.sent_to_main_chain {
                 miners_with_shares.iter().for_each(|(addr, share_count)| {
                     let miner_reward = (reward.as_u64() / SHARE_COUNT) * share_count;
                     if let Some(earned_rewards) = miners_with_rewards.get(addr) {
@@ -171,7 +208,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     let mut pool_total_estimated_earnings_1m = 0u64;
     if !blocks.is_empty() {
         // calculate "earning / minute" for all miners
-        let first_block_time = blocks.first().unwrap().timestamp();
+        let first_block_time = blocks.first().unwrap().timestamp;
         let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
         miners_with_rewards.iter().for_each(|(addr, total_earn)| {
             pool_total_estimated_earnings_1m += total_earn;

@@ -60,7 +60,7 @@ impl BlockLevel {
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<(), Error> {
-        if self.height != block.height() {
+        if self.height != block.height {
             return Err(Error::InvalidBlock(block));
         }
         self.blocks.push(block);
@@ -115,17 +115,17 @@ impl InMemoryShareChain {
         last_level
             .blocks
             .iter()
-            .max_by(|block1, block2| block1.height().cmp(&block2.height()))
+            .max_by(|block1, block2| block1.height.cmp(&block2.height))
             .cloned()
     }
 
     /// Calculates block difficulty based on it's pow algo.
     fn block_difficulty(&self, block: &Block) -> Result<u64, Error> {
-        match block.original_block_header().pow.pow_algo {
+        match block.original_block_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
                 if let Some(params) = &self.block_validation_params {
                     let difficulty = randomx_difficulty(
-                        block.original_block_header(),
+                        &block.original_block_header,
                         params.random_x_factory(),
                         params.genesis_block_hash(),
                         params.consensus_manager(),
@@ -133,11 +133,12 @@ impl InMemoryShareChain {
                     .map_err(Error::RandomXDifficulty)?;
                     Ok(difficulty.as_u64())
                 } else {
-                    Ok(0)
+                    panic!("No params provided for RandomX difficulty calculation!");
+                    // Ok(0)
                 }
             },
             PowAlgorithm::Sha3x => {
-                let difficulty = sha3x_difficulty(block.original_block_header()).map_err(Error::Difficulty)?;
+                let difficulty = sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty)?;
                 Ok(difficulty.as_u64())
             },
         }
@@ -173,7 +174,7 @@ impl InMemoryShareChain {
         // add shares applying the max shares rule
         let mut added_share_count: u64 = 0;
         chain.iter().rev().for_each(|block| {
-            if let Some(miner_wallet_address) = block.miner_wallet_address() {
+            if let Some(miner_wallet_address) = &block.miner_wallet_address {
                 if added_share_count < SHARE_COUNT {
                     let addr = miner_wallet_address.to_base58();
                     match result.get(&addr) {
@@ -234,7 +235,7 @@ impl InMemoryShareChain {
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
     ) -> ShareChainResult<ValidateBlockResult> {
-        if block.original_block_header().pow.pow_algo != self.pow_algo {
+        if block.original_block_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
             return Ok(ValidateBlockResult::new(false, false));
         }
@@ -245,26 +246,26 @@ impl InMemoryShareChain {
 
         if let Some(last_block) = last_block {
             // check if we have outdated tip of chain
-            let block_height_diff = i64::try_from(block.height()).map_err(Error::FromIntConversion)? -
-                i64::try_from(last_block.height()).map_err(Error::FromIntConversion)?;
+            let block_height_diff = i64::try_from(block.height).map_err(Error::FromIntConversion)? -
+                i64::try_from(last_block.height).map_err(Error::FromIntConversion)?;
             if block_height_diff > 10 {
                 // TODO: use const
                 warn!(target: LOG_TARGET,
                     "[{:?}] Out-of-sync chain, do a sync now... Height Diff: {:?}, Last: {:?}, New: {:?}",
                     self.pow_algo,
                     block_height_diff,
-                    last_block.height(),
-                    block.height(),
+                    last_block.height,
+                    block.height,
                 );
                 return Ok(ValidateBlockResult::new(false, true));
             }
 
             // validate PoW
-            match block.original_block_header().pow.pow_algo {
+            match block.original_block_header.pow.pow_algo {
                 PowAlgorithm::RandomX => match params {
                     Some(params) => {
                         match randomx_difficulty(
-                            block.original_block_header(),
+                            &block.original_block_header,
                             params.random_x_factory(),
                             params.genesis_block_hash(),
                             params.consensus_manager(),
@@ -287,7 +288,7 @@ impl InMemoryShareChain {
                         return Ok(ValidateBlockResult::new(false, false));
                     },
                 },
-                PowAlgorithm::Sha3x => match sha3x_difficulty(block.original_block_header()) {
+                PowAlgorithm::Sha3x => match sha3x_difficulty(&block.original_block_header) {
                     Ok(curr_difficulty) => {
                         let result = self.validate_min_difficulty(PowAlgorithm::Sha3x, curr_difficulty)?;
                         if !result.valid {
@@ -341,7 +342,7 @@ impl InMemoryShareChain {
         // look for the matching block level to append the new block to
         if let Some(found_level) = block_levels
             .iter_mut()
-            .filter(|level| level.height == block.height())
+            .filter(|level| level.height == block.height)
             .last()
         {
             let found = found_level
@@ -352,16 +353,16 @@ impl InMemoryShareChain {
                 0;
             if !found {
                 found_level.add_block(block.clone())?;
-                info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height(), block.hash().to_hex());
+                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
             }
         } else if let Some(last_block) = last_block {
-            if last_block.height() < block.height() {
-                block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-                info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height(), block.hash().to_hex());
+            if last_block.height < block.height {
+                block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
+                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
             }
         } else {
-            block_levels.push(BlockLevel::new(vec![block.clone()], block.height()));
-            info!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height(), block.hash().to_hex());
+            block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
+            debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
         }
 
         Ok(SubmitBlockResult::new(validate_result.need_sync))
@@ -382,7 +383,7 @@ impl ShareChain for InMemoryShareChain {
             .await;
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height());
+        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
         result
     }
 
@@ -392,10 +393,10 @@ impl ShareChain for InMemoryShareChain {
         if sync {
             let chain = self.chain(block_levels_write_lock.iter());
             if let Some(last_block) = chain.last() {
-                if last_block.hash() != genesis_block().hash() &&
+                if last_block.hash != genesis_block().hash &&
                     !blocks.is_empty() &&
-                    last_block.height() < blocks[0].height() &&
-                    (blocks[0].height() - last_block.height()) > 1
+                    last_block.height < blocks[0].height &&
+                    (blocks[0].height - last_block.height) > 1
                 {
                     block_levels_write_lock.clear();
                 }
@@ -418,7 +419,7 @@ impl ShareChain for InMemoryShareChain {
 
         let chain = self.chain(block_levels_write_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height());
+        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
 
         Ok(SubmitBlockResult::new(false))
     }
@@ -427,7 +428,7 @@ impl ShareChain for InMemoryShareChain {
         let block_levels_read_lock = self.block_levels.read().await;
         let chain = self.chain(block_levels_read_lock.iter());
         let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        Ok(last_block.height())
+        Ok(last_block.height)
     }
 
     async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
@@ -470,7 +471,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
             .with_prev_hash(last_block.generate_hash())
-            .with_height(last_block.height() + 1)
+            .with_height(last_block.height + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
                 TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
@@ -483,7 +484,7 @@ impl ShareChain for InMemoryShareChain {
         let chain = self.chain(block_levels_read_lock.iter());
         Ok(chain
             .iter()
-            .filter(|block| block.height() > from_height)
+            .filter(|block| block.height > from_height)
             .cloned()
             .collect())
     }
@@ -497,7 +498,7 @@ impl ShareChain for InMemoryShareChain {
         let blocks = block_levels
             .iter()
             .flat_map(|level| level.blocks.clone())
-            .sorted_by(|block1, block2| block1.timestamp().cmp(&block2.timestamp()))
+            .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
             .tail(BLOCKS_WINDOW);
 
         // calculate average block time
@@ -509,7 +510,7 @@ impl ShareChain for InMemoryShareChain {
             let next_block = blocks.get(i + 1);
             if let Some(current_block) = current_block {
                 if let Some(next_block) = next_block {
-                    block_times_sum += next_block.timestamp().as_u64() - current_block.timestamp().as_u64();
+                    block_times_sum += next_block.timestamp.as_u64() - current_block.timestamp.as_u64();
                     block_times_count += 1;
                 }
             }

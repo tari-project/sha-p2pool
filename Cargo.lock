@@ -4428,6 +4428,7 @@ dependencies = [
  "minotari_node_grpc_client",
  "moka",
  "num",
+ "num-format",
  "rand",
  "serde",
  "serde_cbor",

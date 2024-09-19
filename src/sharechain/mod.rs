@@ -16,7 +16,7 @@ use crate::sharechain::{block::Block, error::Error};
 pub const CHAIN_ID: usize = 1;
 
 /// How many blocks to keep overall.
-pub const MAX_BLOCKS_COUNT: usize = 600;
+pub const MAX_BLOCKS_COUNT: usize = usize::MAX;
 
 /// How many blocks are used to calculate current shares to be paid out.
 pub const BLOCKS_WINDOW: usize = 400;

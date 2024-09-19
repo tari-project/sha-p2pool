@@ -15,6 +15,7 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
+use num_format::{Locale, ToFormattedString};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::{
@@ -24,7 +25,7 @@ use tari_core::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::{
@@ -65,11 +66,11 @@ pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
 }
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
-pub struct ShaP2PoolGrpc<S>
+pub(crate) struct ShaP2PoolGrpc<S>
 where S: ShareChain
 {
     /// Base node client
-    client: Arc<Mutex<BaseNodeClient<tonic::transport::Channel>>>,
+    client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
     /// P2P service client
     p2p_client: p2p::ServiceClient,
     /// SHA-3 share chain
@@ -80,8 +81,8 @@ where S: ShareChain
     stats_store: Arc<StatsStore>,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
-    block_height_difficulty_cache: Arc<Mutex<HashMap<u64, u64>>>,
-    stats_max_difficulty_since_last_success: Arc<Mutex<u64>>,
+    block_height_difficulty_cache: Arc<RwLock<HashMap<u64, u64>>>,
+    stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -99,7 +100,7 @@ where S: ShareChain
         genesis_block_hash: FixedHash,
     ) -> Result<Self, Error> {
         Ok(Self {
-            client: Arc::new(Mutex::new(
+            client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
             p2p_client,
@@ -111,14 +112,14 @@ where S: ShareChain
                 consensus_manager,
                 genesis_block_hash,
             ),
-            block_height_difficulty_cache: Arc::new(Mutex::new(HashMap::new())),
-            stats_max_difficulty_since_last_success: Arc::new(Mutex::new(0)),
+            block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
+            stats_max_difficulty_since_last_success: Arc::new(RwLock::new(0)),
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        let pow_algo = block.original_block_header().pow.pow_algo;
+        let pow_algo = block.original_block_header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -128,7 +129,7 @@ where S: ShareChain
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
-                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash().to_hex());
+                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
                 self.p2p_client
                     .broadcast_block(block)
                     .await
@@ -172,7 +173,13 @@ where S: ShareChain
             algo: Some(grpc_block_header_pow.clone()),
             max_weight: 0,
         };
-        let template_response = self.client.lock().await.get_new_block_template(req).await?.into_inner();
+        let template_response = self
+            .client
+            .write()
+            .await
+            .get_new_block_template(req)
+            .await?
+            .into_inner();
         let miner_data = template_response
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
@@ -187,7 +194,7 @@ where S: ShareChain
 
         let mut response = self
             .client
-            .lock()
+            .write()
             .await
             .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
                 algo: Some(grpc_block_header_pow),
@@ -206,7 +213,7 @@ where S: ShareChain
         if let Some(header) = &response.block {
             let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
             self.block_height_difficulty_cache
-                .lock()
+                .write()
                 .await
                 .insert(height, miner_data.target_difficulty);
         }
@@ -269,7 +276,7 @@ where S: ShareChain
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
-        let origin_block_header = &block.original_block_header().clone();
+        let origin_block_header = &&block.original_block_header.clone();
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
@@ -285,6 +292,7 @@ where S: ShareChain
             )
             .map_err(|error| Status::internal(error.to_string()))?,
         };
+        info!("Submitted block difficulty: {}", request_block_difficulty);
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
         // let mut network_difficulty_stream = self
@@ -307,23 +315,30 @@ where S: ShareChain
         //         network_difficulty_matches = true;
         //     }
         // }
-        let network_difficulty_matches = match self
+        let network_difficulty = *self
             .block_height_difficulty_cache
-            .lock()
+            .read()
             .await
             .get(&(origin_block_header.height))
-        {
-            Some(difficulty) => request_block_difficulty.as_u64() >= *difficulty,
-            None => false,
-        };
-        let mut max_difficulty = self.stats_max_difficulty_since_last_success.lock().await;
+            .unwrap_or(&0);
+        let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty;
+        let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
-        info!("Max difficulty: {}", max_difficulty);
+        info!(
+            "Max difficulty: {}. Network difficulty {}. Accepted {}",
+            max_difficulty.to_formatted_string(&Locale::en),
+            network_difficulty.to_formatted_string(&Locale::en),
+            self.stats_store
+                .get(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT))
+                .await
+                .to_formatted_string(&Locale::en)
+        );
+        block.achieved_difficulty = request_block_difficulty;
 
         if !network_difficulty_matches {
-            block.set_sent_to_main_chain(false);
+            block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
                 Ok(_) => {
@@ -335,7 +350,7 @@ where S: ShareChain
                 },
             };
             return Ok(Response::new(SubmitBlockResponse {
-                block_hash: block.hash().to_vec(),
+                block_hash: block.hash.to_vec(),
             }));
         }
 
@@ -344,8 +359,9 @@ where S: ShareChain
         info!("🔗 Submitting block  {} to base node...", origin_block_header.hash());
 
         let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-        match self.client.lock().await.submit_block(grpc_request).await {
+        match self.client.write().await.submit_block(grpc_request).await {
             Ok(resp) => {
+                *max_difficulty = 0;
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
@@ -353,7 +369,7 @@ where S: ShareChain
                     "💰 New matching block found and sent to network! Block hash: {}",
                     origin_block_header.hash()
                 );
-                block.set_sent_to_main_chain(true);
+                block.sent_to_main_chain = true;
                 self.submit_share_chain_block(&block).await?;
                 Ok(resp)
             },
@@ -365,10 +381,10 @@ where S: ShareChain
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
                     .await;
-                block.set_sent_to_main_chain(false);
+                block.sent_to_main_chain = false;
                 self.submit_share_chain_block(&block).await?;
                 Ok(Response::new(SubmitBlockResponse {
-                    block_hash: block.hash().to_vec(),
+                    block_hash: block.hash.to_vec(),
                 }))
             },
         }

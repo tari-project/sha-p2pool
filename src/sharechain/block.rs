@@ -10,6 +10,7 @@ use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks::{genesis_block::get_genesis_block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
+    proof_of_work::Difficulty,
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
@@ -25,19 +26,19 @@ lazy_static! {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Block {
-    chain_id: String,
-    hash: BlockHash,
-    timestamp: EpochTime,
-    prev_hash: BlockHash,
-    height: u64,
-    original_block_header: BlockHeader,
-    miner_wallet_address: Option<TariAddress>,
-    sent_to_main_chain: bool,
+pub(crate) struct Block {
+    pub chain_id: String,
+    pub hash: BlockHash,
+    pub timestamp: EpochTime,
+    pub prev_hash: BlockHash,
+    pub height: u64,
+    pub original_block_header: BlockHeader,
+    pub miner_wallet_address: Option<TariAddress>,
+    pub sent_to_main_chain: bool,
+    pub achieved_difficulty: Difficulty,
 }
 impl_conversions!(Block);
 
-#[allow(dead_code)]
 impl Block {
     pub fn builder() -> BlockBuilder {
         BlockBuilder::new()
@@ -54,49 +55,9 @@ impl Block {
 
         hasher.chain(&self.original_block_header).finalize().into()
     }
-
-    pub fn timestamp(&self) -> EpochTime {
-        self.timestamp
-    }
-
-    pub fn prev_hash(&self) -> BlockHash {
-        self.prev_hash
-    }
-
-    pub fn height(&self) -> u64 {
-        self.height
-    }
-
-    pub fn original_block_header(&self) -> &BlockHeader {
-        &self.original_block_header
-    }
-
-    pub fn hash(&self) -> BlockHash {
-        self.hash
-    }
-
-    pub fn set_sent_to_main_chain(&mut self, sent_to_main_chain: bool) {
-        self.sent_to_main_chain = sent_to_main_chain;
-    }
-
-    pub fn sent_to_main_chain(&self) -> bool {
-        self.sent_to_main_chain
-    }
-
-    pub fn set_height(&mut self, height: u64) {
-        self.height = height;
-    }
-
-    pub fn miner_wallet_address(&self) -> &Option<TariAddress> {
-        &self.miner_wallet_address
-    }
-
-    pub fn set_hash(&mut self, hash: BlockHash) {
-        self.hash = hash;
-    }
 }
 
-pub struct BlockBuilder {
+pub(crate) struct BlockBuilder {
     block: Block,
 }
 
@@ -112,6 +73,7 @@ impl BlockBuilder {
                 original_block_header: BlockHeader::new(0),
                 miner_wallet_address: Default::default(),
                 sent_to_main_chain: false,
+                achieved_difficulty: Difficulty::min(),
             },
         }
     }
