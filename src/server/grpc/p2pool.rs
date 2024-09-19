@@ -225,6 +225,7 @@ where
     /// Validates the submitted block with the p2pool network, checks for difficulty matching
     /// with network (using base node), submits mined block to base node and submits new p2pool block
     /// to p2pool network.
+    #[allow(clippy::too_many_lines)]
     async fn submit_block(
         &self,
         request: Request<SubmitBlockRequest>,
@@ -262,7 +263,7 @@ where
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
-        let origin_block_header = block.original_block_header();
+        let origin_block_header = &block.original_block_header().clone();
 
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
