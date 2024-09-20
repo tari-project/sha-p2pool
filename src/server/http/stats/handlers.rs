@@ -8,9 +8,8 @@ use itertools::Itertools;
 use log::error;
 use serde::Serialize;
 use tari_common::configuration::Network;
-use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
-use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::{
     server::{
@@ -35,16 +34,20 @@ const LOG_TARGET: &str = "p2pool::server::stats::get";
 #[derive(Serialize)]
 pub(crate) struct BlockResult {
     chain_id: String,
-    hash: BlockHash,
+    hash: String,
     timestamp: EpochTime,
-    prev_hash: BlockHash,
+    prev_hash: String,
     height: u64,
     // original_block_header: BlockHeader,
-    miner_wallet_address: Option<TariAddress>,
+    miner_wallet_address: Option<String>,
     sent_to_main_chain: bool,
+    achieved_difficulty: u64,
+    candidate_block_height: u64,
+    candidate_block_prev_hash: String,
+    algo: String,
 }
 
-pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
     let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -54,20 +57,24 @@ pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<Bloc
         .iter()
         .map(|block| BlockResult {
             chain_id: block.chain_id.clone(),
-            hash: block.hash,
+            hash: block.hash.to_hex(),
             timestamp: block.timestamp,
-            prev_hash: block.prev_hash,
+            prev_hash: block.prev_hash.to_hex(),
             height: block.height,
             // original_block_header: block.original_block_header().clone(),
-            miner_wallet_address: block.miner_wallet_address.clone(),
+            miner_wallet_address: block.miner_wallet_address.as_ref().map(|a| a.to_base58()),
             sent_to_main_chain: block.sent_to_main_chain,
+            achieved_difficulty: block.achieved_difficulty.as_u64(),
+            candidate_block_prev_hash: block.original_block_header.prev_hash.to_hex(),
+            candidate_block_height: block.original_block_header.height,
+            algo: block.original_block_header.pow.pow_algo.to_string(),
         })
         .collect();
 
     Ok(Json(result))
 }
 
-pub async fn handle_miners_with_shares(
+pub(crate) async fn handle_miners_with_shares(
     State(state): State<AppState>,
 ) -> Result<Json<HashMap<String, HashMap<String, u64>>>, StatusCode> {
     let mut result = HashMap::with_capacity(2);
@@ -89,7 +96,9 @@ pub async fn handle_miners_with_shares(
     Ok(Json(result))
 }
 
-pub async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
+pub(crate) async fn handle_get_stats(
+    State(state): State<AppState>,
+) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
     let mut result = HashMap::with_capacity(2);
     result.insert(
         PowAlgorithm::Sha3x.to_string().to_lowercase(),
