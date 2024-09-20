@@ -524,6 +524,7 @@ mod test {
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 
     use super::*;
+    use crate::sharechain::MAX_BLOCKS_COUNT;
 
     fn new_random_address() -> TariAddress {
         let mut rng = rand::thread_rng();
@@ -559,7 +560,11 @@ mod test {
 
         // execute
         let blocks = blocks.iter().collect_vec();
-        let share_chain = InMemoryShareChain::default();
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
+            .build()
+            .unwrap();
+        let share_chain =
+            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -584,7 +589,11 @@ mod test {
 
         // execute
         let blocks = blocks.iter().collect_vec();
-        let share_chain = InMemoryShareChain::default();
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
+            .build()
+            .unwrap();
+        let share_chain =
+            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -609,7 +618,11 @@ mod test {
 
         // execute
         let blocks = blocks.iter().collect_vec();
-        let share_chain = InMemoryShareChain::default();
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
+            .build()
+            .unwrap();
+        let share_chain =
+            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -636,7 +649,11 @@ mod test {
 
         // execute
         let blocks = blocks.iter().collect_vec();
-        let share_chain = InMemoryShareChain::default();
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
+            .build()
+            .unwrap();
+        let share_chain =
+            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
