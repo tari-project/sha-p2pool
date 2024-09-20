@@ -7,8 +7,6 @@ use thiserror::Error;
 pub enum Error {
     #[error("Tonic error: {0}")]
     Tonic(#[from] TonicError),
-    #[error("No consensus constants found")]
-    NoConsensusConstants,
     #[error("Shutdown")]
     Shutdown,
 }

@@ -11,12 +11,13 @@ use std::{
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, FromPrimitive, Integer, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
+    consensus::ConsensusManager,
     proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, PowAlgorithm},
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
@@ -33,7 +34,6 @@ use crate::{
         SubmitBlockResult,
         ValidateBlockResult,
         BLOCKS_WINDOW,
-        MAX_BLOCKS_COUNT,
         MAX_SHARES_PER_MINER,
         SHARE_COUNT,
     },
@@ -46,6 +46,7 @@ pub struct InMemoryShareChain {
     block_levels: Arc<RwLock<Vec<BlockLevel>>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
+    consensus_manager: ConsensusManager,
 }
 
 /// A collection of blocks with the same height.
@@ -75,23 +76,13 @@ fn genesis_block() -> Block {
         .build()
 }
 
-impl Default for InMemoryShareChain {
-    fn default() -> Self {
-        Self {
-            max_blocks_count: MAX_BLOCKS_COUNT,
-            block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
-            pow_algo: PowAlgorithm::Sha3x,
-            block_validation_params: None,
-        }
-    }
-}
-
 #[allow(dead_code)]
 impl InMemoryShareChain {
     pub fn new(
         max_blocks_count: usize,
         pow_algo: PowAlgorithm,
         block_validation_params: Option<Arc<BlockValidationParams>>,
+        consensus_manager: ConsensusManager,
     ) -> Result<Self, Error> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(Error::MissingBlockValidationParams);
@@ -101,6 +92,7 @@ impl InMemoryShareChain {
             block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
             pow_algo,
             block_validation_params,
+            consensus_manager,
         })
     }
 
@@ -209,19 +201,11 @@ impl InMemoryShareChain {
         &self,
         pow: PowAlgorithm,
         curr_difficulty: Difficulty,
+        height: u64,
     ) -> ShareChainResult<ValidateBlockResult> {
-        match min_difficulty(pow) {
-            Ok(min_difficulty) => {
-                if curr_difficulty.as_u64() < min_difficulty {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
-                    return Ok(ValidateBlockResult::new(false, false));
-                }
-            },
-            Err(error) => {
-                warn!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty!", self.pow_algo);
-                debug!(target: LOG_TARGET, "[{:?}] ❌ Can't get min difficulty: {error:?}", self.pow_algo);
-                return Ok(ValidateBlockResult::new(false, false));
-            },
+        if curr_difficulty < min_difficulty(&self.consensus_manager, pow, height) {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
+            return Ok(ValidateBlockResult::new(false, false));
         }
 
         Ok(ValidateBlockResult::new(true, false))
@@ -261,45 +245,32 @@ impl InMemoryShareChain {
             }
 
             // validate PoW
-            match block.original_block_header.pow.pow_algo {
-                PowAlgorithm::RandomX => match params {
-                    Some(params) => {
-                        match randomx_difficulty(
-                            &block.original_block_header,
-                            params.random_x_factory(),
-                            params.genesis_block_hash(),
-                            params.consensus_manager(),
-                        ) {
-                            Ok(curr_difficulty) => {
-                                let result = self.validate_min_difficulty(PowAlgorithm::RandomX, curr_difficulty)?;
-                                if !result.valid {
-                                    return Ok(result);
-                                }
-                            },
-                            Err(error) => {
-                                warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
-                                debug!(target: LOG_TARGET, "[{:?}] Failed to calculate RandomX difficulty: {error:?}", self.pow_algo);
-                                return Ok(ValidateBlockResult::new(false, false));
-                            },
-                        }
-                    },
-                    None => {
-                        error!(target: LOG_TARGET, "[{:?}] ❌ Cannot calculate PoW! Missing validation parameters!", self.pow_algo);
-                        return Ok(ValidateBlockResult::new(false, false));
-                    },
+            let pow_algo = block.original_block_header.pow.pow_algo;
+            let curr_difficulty = match pow_algo {
+                PowAlgorithm::RandomX => {
+                    let random_x_params = params.ok_or(Error::MissingBlockValidationParams)?;
+                    randomx_difficulty(
+                        &block.original_block_header,
+                        random_x_params.random_x_factory(),
+                        random_x_params.genesis_block_hash(),
+                        random_x_params.consensus_manager(),
+                    )
+                    .map_err(Error::RandomXDifficulty)
                 },
-                PowAlgorithm::Sha3x => match sha3x_difficulty(&block.original_block_header) {
-                    Ok(curr_difficulty) => {
-                        let result = self.validate_min_difficulty(PowAlgorithm::Sha3x, curr_difficulty)?;
-                        if !result.valid {
-                            return Ok(result);
-                        }
-                    },
-                    Err(error) => {
-                        warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", self.pow_algo);
-                        debug!(target: LOG_TARGET, "[{:?}] Failed to calculate SHA3x difficulty: {error:?}", self.pow_algo);
-                        return Ok(ValidateBlockResult::new(false, false));
-                    },
+                PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
+            };
+            match curr_difficulty {
+                Ok(curr_difficulty) => {
+                    let result =
+                        self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block_header.height)?;
+                    if !result.valid {
+                        return Ok(result);
+                    }
+                },
+                Err(error) => {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", pow_algo);
+                    debug!(target: LOG_TARGET, "[{:?}] Failed to calculate {} difficulty: {error:?}", pow_algo,pow_algo);
+                    return Ok(ValidateBlockResult::new(false, false));
                 },
             }
 
