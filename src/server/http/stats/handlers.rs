@@ -54,9 +54,9 @@ pub async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<Bloc
         .iter()
         .map(|block| BlockResult {
             chain_id: block.chain_id.clone(),
-            hash: block.hash.clone(),
+            hash: block.hash,
             timestamp: block.timestamp,
-            prev_hash: block.prev_hash.clone(),
+            prev_hash: block.prev_hash,
             height: block.height,
             // original_block_header: block.original_block_header().clone(),
             miner_wallet_address: block.miner_wallet_address.clone(),

@@ -4407,7 +4407,7 @@ dependencies = [
 
 [[package]]
 name = "sha_p2pool"
-version = "0.1.5-pre.10"
+version = "0.1.5-pre.11"
 dependencies = [
  "anyhow",
  "async-trait",
