@@ -19,9 +19,8 @@ use num_format::{Locale, ToFormattedString};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::{
-    consensus,
-    consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, PowAlgorithm},
+    consensus::{self, ConsensusManager},
+    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
@@ -81,7 +80,7 @@ where S: ShareChain
     stats_store: Arc<StatsStore>,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
-    block_height_difficulty_cache: Arc<RwLock<HashMap<u64, u64>>>,
+    block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
 }
 
@@ -212,10 +211,11 @@ where S: ShareChain
         debug!("Inserting height cached difficulty: {}", miner_data.target_difficulty);
         if let Some(header) = &response.block {
             let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
-            self.block_height_difficulty_cache
-                .write()
-                .await
-                .insert(height, miner_data.target_difficulty);
+            self.block_height_difficulty_cache.write().await.insert(
+                height,
+                Difficulty::from_u64(miner_data.target_difficulty)
+                    .map_err(|_e| Status::internal("Invalid target difficulty"))?,
+            );
         }
         let min_difficulty =
             min_difficulty(pow_algo).map_err(|_| Status::internal("failed to get minimum difficulty"))?;
@@ -315,29 +315,55 @@ where S: ShareChain
         //         network_difficulty_matches = true;
         //     }
         // }
-        let network_difficulty = *self
+        let network_difficulty = self
             .block_height_difficulty_cache
             .read()
             .await
             .get(&(origin_block_header.height))
-            .unwrap_or(&0);
-        let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty;
+            .copied()
+            .unwrap_or_else(Difficulty::min);
+        let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty.as_u64();
         let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
         if *max_difficulty < request_block_difficulty.as_u64() {
             *max_difficulty = request_block_difficulty.as_u64();
         }
-        info!(
-            "Max difficulty: {}. Network difficulty {}. Accepted {}",
-            max_difficulty.to_formatted_string(&Locale::en),
-            network_difficulty.to_formatted_string(&Locale::en),
-            self.stats_store
-                .get(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT))
-                .await
-                .to_formatted_string(&Locale::en)
-        );
+
         block.achieved_difficulty = request_block_difficulty;
 
-        if !network_difficulty_matches {
+        if network_difficulty_matches {
+            // submit block to base node
+            let (metadata, extensions, _inner) = request.into_parts();
+            info!("🔗 Submitting block  {} to base node...", origin_block_header.hash());
+
+            let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
+            match self.client.write().await.submit_block(grpc_request).await {
+                Ok(_resp) => {
+                    *max_difficulty = 0;
+                    self.stats_store
+                        .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
+                        .await;
+                    info!(
+                        "💰 New matching block found and sent to network! Block hash: {}",
+                        origin_block_header.hash()
+                    );
+                    block.sent_to_main_chain = true;
+                    self.submit_share_chain_block(&block).await?;
+                },
+                Err(error) => {
+                    warn!(
+                        "Failed to submit block  {} to Tari network: {error:?}",
+                        origin_block_header.hash()
+                    );
+                    self.stats_store
+                        .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
+                        .await;
+                    block.sent_to_main_chain = false;
+                    self.submit_share_chain_block(&block).await?;
+
+                    return Err(Status::internal(error.to_string()));
+                },
+            }
+        } else {
             block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
@@ -349,44 +375,29 @@ where S: ShareChain
                     warn!("Failed to submit block to share chain: {error:?}");
                 },
             };
-            return Ok(Response::new(SubmitBlockResponse {
-                block_hash: block.hash.to_vec(),
-            }));
         }
 
-        // submit block to base node
-        let (metadata, extensions, _inner) = request.into_parts();
-        info!("🔗 Submitting block  {} to base node...", origin_block_header.hash());
+        let stats = self
+            .stats_store
+            .get_many(&[
+                algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT),
+                algo_stat_key(pow_algo, MINER_STAT_REJECTED_BLOCKS_COUNT),
+                algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT),
+                algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT),
+            ])
+            .await;
+        info!(
+            "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
+            max_difficulty.to_formatted_string(&Locale::en),
+            network_difficulty.as_u64().to_formatted_string(&Locale::en),
+            stats[0],
+            stats[1],
+            stats[2],
+            stats[3]
+        );
 
-        let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-        match self.client.write().await.submit_block(grpc_request).await {
-            Ok(resp) => {
-                *max_difficulty = 0;
-                self.stats_store
-                    .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
-                    .await;
-                info!(
-                    "💰 New matching block found and sent to network! Block hash: {}",
-                    origin_block_header.hash()
-                );
-                block.sent_to_main_chain = true;
-                self.submit_share_chain_block(&block).await?;
-                Ok(resp)
-            },
-            Err(error) => {
-                warn!(
-                    "Failed to submit block  {} to Tari network: {error:?}",
-                    origin_block_header.hash()
-                );
-                self.stats_store
-                    .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
-                    .await;
-                block.sent_to_main_chain = false;
-                self.submit_share_chain_block(&block).await?;
-                Ok(Response::new(SubmitBlockResponse {
-                    block_hash: block.hash.to_vec(),
-                }))
-            },
-        }
+        Ok(Response::new(SubmitBlockResponse {
+            block_hash: block.hash.to_vec(),
+        }))
     }
 }

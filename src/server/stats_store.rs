@@ -22,6 +22,15 @@ impl StatsStore {
         read_lock.get(key).copied().unwrap_or(0)
     }
 
+    pub async fn get_many(&self, key: &[String]) -> Vec<u64> {
+        let read_lock = self.stats.read().await;
+        let mut res = Vec::with_capacity(key.len());
+        for k in key {
+            res.push(read_lock.get(k).copied().unwrap_or(0));
+        }
+        res
+    }
+
     /// Increments stat with given key.
     /// If the value is not found by key, simply create new value.
     pub async fn inc(&self, key: &String, by: u64) {

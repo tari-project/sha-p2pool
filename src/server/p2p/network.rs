@@ -137,7 +137,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(5),
+            peer_info_publish_interval: Duration::from_secs(30),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -871,7 +871,7 @@ where S: ShareChain
                     }
 
                     // broadcast peer info
-                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Peer count: {:?}", self.tribe_peer_store.peer_count().await);
+                    info!(target: LOG_TARGET, tribe = &self.config.tribe; "Peer count: {:?}", self.tribe_peer_store.peer_count().await);
                     if let Err(error) = self.broadcast_peer_info().await {
                         match error {
                             Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
