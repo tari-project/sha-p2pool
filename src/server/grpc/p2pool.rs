@@ -219,7 +219,7 @@ where S: ShareChain
         self.block_height_difficulty_cache.write().await.insert(
             height,
             Difficulty::from_u64(miner_data.target_difficulty)
-                .map_err(|e| Status::internal("Invalid target difficulty"))?,
+                .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?,
         );
         let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
         let mut target_difficulty = Difficulty::from_u64(

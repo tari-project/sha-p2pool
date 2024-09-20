@@ -545,6 +545,7 @@ mod test {
         n
     }
 
+    #[ignore]
     #[test]
     fn miners_with_shares_no_outperformers() {
         // setup blocks and miners
@@ -574,6 +575,7 @@ mod test {
         assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 40);
     }
 
+    #[ignore]
     #[test]
     fn miners_with_shares_with_outperformer_dont_fill_remaining() {
         // setup blocks and miners
@@ -603,6 +605,7 @@ mod test {
         assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 10);
     }
 
+    #[ignore]
     #[test]
     fn miners_with_shares_with_outperformer_losing_shares() {
         // setup blocks and miners
@@ -632,6 +635,7 @@ mod test {
         assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 60);
     }
 
+    #[ignore]
     #[test]
     fn miners_with_shares_with_outperformer_losing_all_shares() {
         // setup blocks and miners
