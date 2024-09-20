@@ -96,14 +96,16 @@ pub async fn server(
 genesis_block_hash.to_hex());
     let block_validation_params = Arc::new(BlockValidationParams::new(
         randomx_factory,
-        consensus_manager,
+        consensus_manager.clone(),
         genesis_block_hash,
     ));
-    let share_chain_sha3x = InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None)?;
+    let share_chain_sha3x =
+        InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager.clone())?;
     let share_chain_random_x = InMemoryShareChain::new(
         MAX_BLOCKS_COUNT,
         PowAlgorithm::RandomX,
         Some(block_validation_params.clone()),
+        consensus_manager,
     )?;
 
     Ok(Server::new(config, share_chain_sha3x, share_chain_random_x, shutdown_signal).await?)

@@ -16,16 +16,16 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockResponse,
 };
 use num_format::{Locale, ToFormattedString};
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::{
-    consensus::{self, ConsensusManager},
+    consensus::ConsensusManager,
     proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
+const MIN_DIFFICULTY_REDUCTION_RATE: u64 = 2000;
 
 use crate::{
     server::{
@@ -45,23 +45,18 @@ use crate::{
 
 const LOG_TARGET: &str = "p2pool::server::grpc::p2pool";
 
-pub fn min_difficulty(pow: PowAlgorithm) -> Result<u64, Error> {
-    let network = Network::get_current_or_user_setting_or_default();
-    let consensus_constants = match network {
-        Network::MainNet => consensus::ConsensusConstants::mainnet(),
-        Network::StageNet => consensus::ConsensusConstants::stagenet(),
-        Network::NextNet => consensus::ConsensusConstants::nextnet(),
-        Network::LocalNet => consensus::ConsensusConstants::localnet(),
-        Network::Igor => consensus::ConsensusConstants::igor(),
-        Network::Esmeralda => consensus::ConsensusConstants::esmeralda(),
-    };
-    let consensus_constants = consensus_constants.first().ok_or(Error::NoConsensusConstants)?;
-    let min_difficulty = match pow {
-        PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow).as_u64() / 2000,
-        PowAlgorithm::Sha3x => consensus_constants.min_pow_difficulty(pow).as_u64(),
-    };
-
-    Ok(min_difficulty)
+pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
+    let consensus_constants = consensus_manager.consensus_constants(height);
+    match pow {
+        PowAlgorithm::RandomX => consensus_constants
+            .min_pow_difficulty(pow)
+            .checked_div_u64(MIN_DIFFICULTY_REDUCTION_RATE)
+            .expect("checked_div_u64 should only fail on div by 0"),
+        PowAlgorithm::Sha3x => consensus_constants
+            .min_pow_difficulty(pow)
+            .checked_div_u64(MIN_DIFFICULTY_REDUCTION_RATE)
+            .expect("checked_div_u64 should only fail on div by 0"),
+    }
 }
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
@@ -82,6 +77,7 @@ where S: ShareChain
     block_validation_params: BlockValidationParams,
     block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
+    consensus_manager: ConsensusManager,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -108,11 +104,12 @@ where S: ShareChain
             stats_store,
             block_validation_params: BlockValidationParams::new(
                 random_x_factory,
-                consensus_manager,
+                consensus_manager.clone(),
                 genesis_block_hash,
             ),
             block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(0)),
+            consensus_manager,
         })
     }
 
@@ -205,33 +202,47 @@ where S: ShareChain
 
         // set target difficulty
         let miner_data = response
-            .clone()
             .miner_data
+            .clone()
             .ok_or_else(|| Status::internal("missing miner data"))?;
         debug!("Inserting height cached difficulty: {}", miner_data.target_difficulty);
-        if let Some(header) = &response.block {
-            let height = header.header.as_ref().map(|h| h.height).unwrap_or(0);
-            self.block_height_difficulty_cache.write().await.insert(
-                height,
-                Difficulty::from_u64(miner_data.target_difficulty)
-                    .map_err(|_e| Status::internal("Invalid target difficulty"))?,
-            );
-        }
-        let min_difficulty =
-            min_difficulty(pow_algo).map_err(|_| Status::internal("failed to get minimum difficulty"))?;
-        let mut target_difficulty = miner_data.target_difficulty / SHARE_COUNT;
+
+        let grpc_block = response
+            .block
+            .as_ref()
+            .ok_or_else(|| Status::internal("missing missing block"))?;
+        let height = grpc_block
+            .header
+            .as_ref()
+            .map(|h| h.height)
+            .ok_or_else(|| Status::internal("missing missing header"))?;
+        self.block_height_difficulty_cache.write().await.insert(
+            height,
+            Difficulty::from_u64(miner_data.target_difficulty)
+                .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?,
+        );
+        let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
+        let mut target_difficulty = Difficulty::from_u64(
+            miner_data
+                .target_difficulty
+                .checked_div(SHARE_COUNT)
+                .expect("Should only fail on div by 0"),
+        )
+        .map_err(|error| {
+            error!("Failed to get target difficulty: {error:?}");
+            Status::internal(format!("Failed to get target difficulty:  {}", error))
+        })?;
         if target_difficulty < min_difficulty {
             target_difficulty = min_difficulty;
         }
 
-        if let Some(mut miner_data) = response.miner_data {
-            miner_data.target_difficulty = target_difficulty;
-            response.miner_data = Some(miner_data);
+        if let Some(miner_data) = response.miner_data.as_mut() {
+            miner_data.target_difficulty = target_difficulty.as_u64();
         }
 
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
-            target_difficulty,
+            target_difficulty: target_difficulty.as_u64(),
         }))
     }
 
