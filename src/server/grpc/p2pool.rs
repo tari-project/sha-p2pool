@@ -75,8 +75,9 @@ where S: ShareChain
     stats_store: Arc<StatsStore>,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
-    block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
-    stats_max_difficulty_since_last_success: Arc<RwLock<u64>>,
+    sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
+    randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
+    stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
     consensus_manager: ConsensusManager,
 }
 
@@ -107,8 +108,9 @@ where S: ShareChain
                 consensus_manager.clone(),
                 genesis_block_hash,
             ),
-            block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
-            stats_max_difficulty_since_last_success: Arc::new(RwLock::new(0)),
+            sha3_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
+            randomx_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
+            stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
             consensus_manager,
         })
     }
@@ -216,11 +218,20 @@ where S: ShareChain
             .as_ref()
             .map(|h| h.height)
             .ok_or_else(|| Status::internal("missing missing header"))?;
-        self.block_height_difficulty_cache.write().await.insert(
-            height,
-            Difficulty::from_u64(miner_data.target_difficulty)
-                .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?,
-        );
+        let actual_diff = Difficulty::from_u64(miner_data.target_difficulty)
+            .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
+        match pow_algo {
+            PowAlgorithm::RandomX => self
+                .randomx_block_height_difficulty_cache
+                .write()
+                .await
+                .insert(height, actual_diff),
+            PowAlgorithm::Sha3x => self
+                .sha3_block_height_difficulty_cache
+                .write()
+                .await
+                .insert(height, actual_diff),
+        };
         let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
         let mut target_difficulty = Difficulty::from_u64(
             miner_data
@@ -303,7 +314,10 @@ where S: ShareChain
             )
             .map_err(|error| Status::internal(error.to_string()))?,
         };
-        info!("Submitted block difficulty: {}", request_block_difficulty);
+        info!(
+            "Submitted {} block difficulty: {}",
+            origin_block_header.pow.pow_algo, request_block_difficulty
+        );
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
         // let mut network_difficulty_stream = self
@@ -326,17 +340,26 @@ where S: ShareChain
         //         network_difficulty_matches = true;
         //     }
         // }
-        let network_difficulty = self
-            .block_height_difficulty_cache
-            .read()
-            .await
-            .get(&(origin_block_header.height))
-            .copied()
-            .unwrap_or_else(Difficulty::min);
-        let network_difficulty_matches = request_block_difficulty.as_u64() >= network_difficulty.as_u64();
+        let network_difficulty = match origin_block_header.pow.pow_algo {
+            PowAlgorithm::Sha3x => self
+                .sha3_block_height_difficulty_cache
+                .read()
+                .await
+                .get(&(origin_block_header.height))
+                .copied()
+                .unwrap_or_else(Difficulty::min),
+            PowAlgorithm::RandomX => self
+                .randomx_block_height_difficulty_cache
+                .read()
+                .await
+                .get(&(origin_block_header.height))
+                .copied()
+                .unwrap_or_else(Difficulty::min),
+        };
+        let network_difficulty_matches = request_block_difficulty >= network_difficulty;
         let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
-        if *max_difficulty < request_block_difficulty.as_u64() {
-            *max_difficulty = request_block_difficulty.as_u64();
+        if *max_difficulty < request_block_difficulty {
+            *max_difficulty = request_block_difficulty;
         }
 
         block.achieved_difficulty = request_block_difficulty;
@@ -349,7 +372,7 @@ where S: ShareChain
             let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
             match self.client.write().await.submit_block(grpc_request).await {
                 Ok(_resp) => {
-                    *max_difficulty = 0;
+                    *max_difficulty = Difficulty::min();
                     self.stats_store
                         .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                         .await;
@@ -399,7 +422,7 @@ where S: ShareChain
             .await;
         info!(
             "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
-            max_difficulty.to_formatted_string(&Locale::en),
+            max_difficulty.as_u64().to_formatted_string(&Locale::en),
             network_difficulty.as_u64().to_formatted_string(&Locale::en),
             stats[0],
             stats[1],
