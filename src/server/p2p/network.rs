@@ -20,11 +20,14 @@ use hickory_resolver::{
 };
 use itertools::Itertools;
 use libp2p::{
+    autonat,
+    autonat::NatStatus,
     dcutr,
     futures::StreamExt,
     gossipsub,
     gossipsub::{IdentTopic, Message, PublishError},
     identify,
+    identify::Info,
     identity::Keypair,
     kad,
     kad::{store::MemoryStore, Event, Mode},
@@ -35,7 +38,12 @@ use libp2p::{
     relay,
     request_response,
     request_response::{cbor, ResponseChannel},
-    swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
+    swarm::{
+        behaviour::toggle::Toggle,
+        dial_opts::{DialOpts, PeerCondition},
+        NetworkBehaviour,
+        SwarmEvent,
+    },
     tcp,
     yamux,
     Multiaddr,
@@ -60,7 +68,7 @@ use tokio::{
     io,
     io::{AsyncReadExt, AsyncWriteExt},
     select,
-    sync::{broadcast, broadcast::error::RecvError},
+    sync::{broadcast, broadcast::error::RecvError, RwLock},
     time,
 };
 
@@ -68,9 +76,11 @@ use crate::{
     server::{
         config,
         p2p::{
+            global_ip::GlobalIp,
             messages,
             messages::{LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
+            relay_store::RelayStore,
             Error,
             LibP2PError,
             ServiceClient,
@@ -158,6 +168,7 @@ pub struct ServerNetworkBehaviour {
     pub relay_server: Toggle<relay::Behaviour>,
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
+    pub autonat: autonat::Behaviour,
 }
 
 /// Service is the implementation that holds every peer-to-peer related logic
@@ -181,6 +192,8 @@ where S: ShareChain
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
     client_broadcast_block_tx: broadcast::Sender<Block>,
     client_broadcast_block_rx: broadcast::Receiver<Block>,
+
+    relay_store: Arc<RwLock<RelayStore>>,
 }
 
 impl<S> Service<S>
@@ -217,6 +230,7 @@ where S: ShareChain
             sync_in_progress,
             share_chain_sync_tx,
             share_chain_sync_rx,
+            relay_store: Arc::new(RwLock::new(RelayStore::default())),
         })
     }
 
@@ -332,6 +346,7 @@ where S: ShareChain
                     relay_server,
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
+                    autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -799,29 +814,7 @@ where S: ShareChain
                     _ => debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[KADEMLIA] {event:?}"),
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
-                    identify::Event::Received { peer_id, info } => {
-                        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
-
-                        // adding peer to kademlia and gossipsub
-                        self.swarm.add_external_address(info.observed_addr.clone());
-                        for addr in info.listen_addrs {
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
-
-                            // TODO: I don't think this is needed.
-                            if is_relay {
-                                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
-                                debug!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                                if let Err(error) = self
-                                    .swarm
-                                    .listen_on(listen_addr.clone())
-                                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
-                                {
-                                    warn!(target: LOG_TARGET, "Failed to listen on address ({:?}): {:?}", listen_addr, error);
-                                }
-                            }
-                        }
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                    },
+                    identify::Event::Received { peer_id, info } => self.handle_peer_identified(peer_id, info).await,
                     identify::Event::Error { peer_id, error } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
@@ -838,9 +831,91 @@ where S: ShareChain
                 ServerNetworkBehaviourEvent::Dcutr(event) => {
                     debug!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
+                ServerNetworkBehaviourEvent::Autonat(event) => self.handle_autonat_event(event).await,
             },
             _ => {},
         };
+    }
+
+    async fn handle_peer_identified(&mut self, peer_id: PeerId, info: Info) {
+        if *self.swarm.local_peer_id() == peer_id {
+            warn!(target: LOG_TARGET, "Dialled ourselves");
+            return;
+        }
+
+        self.swarm.add_external_address(info.observed_addr.clone());
+
+        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
+
+        // adding peer to kademlia and gossipsub
+        for addr in info.listen_addrs {
+            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+            if Self::is_p2p_address(&addr) && addr.is_global_ip() && is_relay {
+                let mut lock = self.relay_store.write().await;
+                lock.add_possible_relay(peer_id, addr);
+            }
+        }
+        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+    }
+
+    fn is_p2p_address(address: &Multiaddr) -> bool {
+        address.iter().any(|p| matches!(p, Protocol::P2p(_)))
+    }
+
+    async fn handle_autonat_event(&mut self, event: autonat::Event) {
+        match event {
+            autonat::Event::StatusChanged { old: _old, new } => match self.swarm.behaviour().autonat.public_address() {
+                Some(public_address) => {
+                    info!(target: LOG_TARGET, "[AUTONAT]: Our public address is {public_address}");
+                },
+                None => {
+                    warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
+                    let lock = self.relay_store.read().await;
+                    if new == NatStatus::Private && !lock.has_active_relay() {
+                        drop(lock);
+                        self.attempt_relay_reservation().await;
+                    }
+                },
+            },
+            _ => {
+                debug!(target: LOG_TARGET, "[AUTONAT] {event:?}");
+            },
+        }
+    }
+
+    async fn attempt_relay_reservation(&mut self) {
+        let mut lock = self.relay_store.write().await;
+        lock.select_random_relay();
+        if let Some(relay) = lock.selected_relay_mut() {
+            let addresses = relay.addresses.clone();
+
+            if let Err(err) = self.swarm.dial(
+                DialOpts::peer_id(relay.peer_id)
+                    .addresses(relay.addresses.clone())
+                    .condition(PeerCondition::NotDialing)
+                    .build(),
+            ) {
+                warn!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
+            }
+
+            addresses.iter().for_each(|addr| {
+                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+                match self
+                    .swarm
+                    .listen_on(listen_addr.clone())
+                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
+                {
+                    Ok(_) => {
+                        info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
+                        relay.is_circuit_established = true;
+                    },
+                    Err(error) => {
+                        warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
+                    },
+                }
+            });
+        }
     }
 
     /// Main loop of the service that drives the events and libp2p swarm forward.
