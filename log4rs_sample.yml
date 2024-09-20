@@ -24,7 +24,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/p2pool.{}.log"
     encoder:
-      pattern: "[{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}{n}]"
+      pattern: "[{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
 # Set the default logging level to "warn" and attach the "stdout" appender to the root
 root:
@@ -34,21 +34,11 @@ root:
     - p2pool
 
 loggers:
+  sha_p2pool:
+    level: debug
   sharechain:
-    level: info
-    appenders:
-      - p2pool
-      - stdout
-    additive: false
+    level: debug
   p2p:
     level: info
-    appenders:
-      - p2pool
-      - stdout
-    additive: false
   server:
     level: info
-    appenders:
-      - p2pool
-      - stdout
-    additive: false

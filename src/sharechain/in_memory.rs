@@ -461,52 +461,54 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn hash_rate(&self) -> ShareChainResult<BigUint> {
-        let block_levels = self.block_levels.read().await;
-        if block_levels.is_empty() {
-            return Ok(BigUint::zero());
-        }
+        Ok(BigUint::zero())
+        // TODO: This calc is wrong
+        // let block_levels = self.block_levels.read().await;
+        // if block_levels.is_empty() {
+        //     return Ok(BigUint::zero());
+        // }
 
-        let blocks = block_levels
-            .iter()
-            .flat_map(|level| level.blocks.clone())
-            .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-            .tail(BLOCKS_WINDOW);
+        // let blocks = block_levels
+        //     .iter()
+        //     .flat_map(|level| level.blocks.clone())
+        //     .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
+        //     .tail(BLOCKS_WINDOW);
 
-        // calculate average block time
-        let blocks = blocks.collect_vec();
-        let mut block_times_sum = 0;
-        let mut block_times_count: u64 = 0;
-        for i in 0..blocks.len() {
-            let current_block = blocks.get(i);
-            let next_block = blocks.get(i + 1);
-            if let Some(current_block) = current_block {
-                if let Some(next_block) = next_block {
-                    block_times_sum += next_block.timestamp.as_u64() - current_block.timestamp.as_u64();
-                    block_times_count += 1;
-                }
-            }
-        }
+        // // calculate average block time
+        // let blocks = blocks.collect_vec();
+        // let mut block_times_sum = 0;
+        // let mut block_times_count: u64 = 0;
+        // for i in 0..blocks.len() {
+        //     let current_block = blocks.get(i);
+        //     let next_block = blocks.get(i + 1);
+        //     if let Some(current_block) = current_block {
+        //         if let Some(next_block) = next_block {
+        //             block_times_sum += next_block.timestamp.as_u64() - current_block.timestamp.as_u64();
+        //             block_times_count += 1;
+        //         }
+        //     }
+        // }
 
-        // return to avoid division by zero
-        if block_times_sum == 0 || block_times_count == 0 {
-            return Ok(BigUint::zero());
-        }
+        // // return to avoid division by zero
+        // if block_times_sum == 0 || block_times_count == 0 {
+        //     return Ok(BigUint::zero());
+        // }
 
-        let avg_block_time: f64 = (block_times_sum / block_times_count) as f64;
+        // let avg_block_time: f64 = (block_times_sum / block_times_count) as f64;
 
-        // collect all hash rates
-        let mut hash_rates_sum = BigUint::zero();
-        let mut hash_rates_count = BigUint::zero();
-        for block in blocks {
-            let difficulty = self.block_difficulty(&block)?;
-            let current_hash_rate_f64 = difficulty as f64 / avg_block_time;
-            let current_hash_rate =
-                u64::from_f64(current_hash_rate_f64).ok_or(Error::FromF64ToU64Conversion(current_hash_rate_f64))?;
-            hash_rates_sum = hash_rates_sum.add(current_hash_rate);
-            hash_rates_count.inc();
-        }
+        // // collect all hash rates
+        // let mut hash_rates_sum = BigUint::zero();
+        // let mut hash_rates_count = BigUint::zero();
+        // for block in blocks {
+        //     let difficulty = self.block_difficulty(&block)?;
+        //     let current_hash_rate_f64 = difficulty as f64 / avg_block_time;
+        //     let current_hash_rate =
+        //         u64::from_f64(current_hash_rate_f64).ok_or(Error::FromF64ToU64Conversion(current_hash_rate_f64))?;
+        //     hash_rates_sum = hash_rates_sum.add(current_hash_rate);
+        //     hash_rates_count.inc();
+        // }
 
-        Ok(hash_rates_sum.div(hash_rates_count))
+        // Ok(hash_rates_sum.div(hash_rates_count))
     }
 
     async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>> {
