@@ -280,6 +280,7 @@ where S: ShareChain
         let _permit = self.submit_block_semaphore.acquire().await;
         debug!("submit_block permit acquired: {}", timer.elapsed().as_millis());
 
+        debug!("Trace - getting grpc fields");
         // get all grpc request related data
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block
@@ -299,6 +300,7 @@ where S: ShareChain
         })?)
         .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
 
+        debug!("Trace - getting share chain");
         // get new share chain block
         let pow_algo = match grpc_pow_algo {
             PowAlgos::Randomx => PowAlgorithm::RandomX,
@@ -315,6 +317,7 @@ where S: ShareChain
 
         let origin_block_header = &&block.original_block_header.clone();
 
+        debug!("Trace - getting block difficulty");
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
         let request_block_difficulty = match origin_block_header.pow.pow_algo {
@@ -355,6 +358,7 @@ where S: ShareChain
         //         network_difficulty_matches = true;
         //     }
         // }
+        debug!("Trace - getting network difficulty");
         let network_difficulty = match origin_block_header.pow.pow_algo {
             PowAlgorithm::Sha3x => self
                 .sha3_block_height_difficulty_cache
@@ -372,6 +376,7 @@ where S: ShareChain
                 .unwrap_or_else(Difficulty::min),
         };
         let network_difficulty_matches = request_block_difficulty >= network_difficulty;
+        debug!("Trace - saving max difficulty");
         let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
         if *max_difficulty < request_block_difficulty {
             *max_difficulty = request_block_difficulty;
@@ -379,6 +384,7 @@ where S: ShareChain
 
         block.achieved_difficulty = request_block_difficulty;
 
+        debug!("Trace - checking if can submit to main chain");
         if network_difficulty_matches {
             // submit block to base node
             let (metadata, extensions, _inner) = request.into_parts();
@@ -413,6 +419,7 @@ where S: ShareChain
                 },
             }
         } else {
+            debug!("Trace - submitting to share chain");
             block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
@@ -426,6 +433,7 @@ where S: ShareChain
             };
         }
 
+        debug!("Trace - getting stats");
         let stats = self
             .stats_store
             .get_many(&[

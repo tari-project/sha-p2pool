@@ -24,8 +24,6 @@ pub enum Error {
     InvalidBlock(Block),
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
-    #[error("Number conversion error: {0} to u64")]
-    FromF64ToU64Conversion(f64),
     #[error("Difficulty calculation error: {0}")]
     Difficulty(#[from] DifficultyError),
     #[error("RandomX difficulty calculation error: {0}")]

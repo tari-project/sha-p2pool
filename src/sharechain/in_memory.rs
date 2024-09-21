@@ -1,19 +1,13 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::HashMap,
-    ops::{Add, Div},
-    slice::Iter,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashMap, slice::Iter, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use num::{BigUint, FromPrimitive, Integer, Zero};
+use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
@@ -344,18 +338,16 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
-        let result = self
-            .submit_block_with_lock(
-                &mut block_levels_write_lock,
-                block,
-                self.block_validation_params.clone(),
-                false,
-            )
-            .await;
-        let chain = self.chain(block_levels_write_lock.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
-        result
+        self.submit_block_with_lock(
+            &mut block_levels_write_lock,
+            block,
+            self.block_validation_params.clone(),
+            false,
+        )
+        .await
+        // let chain = self.chain(block_levels_write_lock.iter());
+        // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
+        // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
     }
 
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
@@ -388,9 +380,9 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
-        let chain = self.chain(block_levels_write_lock.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
+        // let chain = self.chain(block_levels_write_lock.iter());
+        // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
+        // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
 
         Ok(SubmitBlockResult::new(false))
     }
