@@ -26,19 +26,36 @@ appenders:
     encoder:
       pattern: "[{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
+    # An appender named "other" that writes to a file with a custom pattern encoder
+  other:
+    kind: rolling_file
+    path: "{{log_dir}}/log/other.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 5
+        pattern: "{{log_dir}}/log/other.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m}{n} // {f}:{L} "
+    filters:
+      - kind: threshold
+        level: info
+
 # Set the default logging level to "warn" and attach the "stdout" appender to the root
 root:
   level: info
   appenders:
     - stdout
-    - p2pool
+    - other
 
 loggers:
-  sha_p2pool:
+  tari::p2pool:
     level: debug
-  sharechain:
-    level: debug
-  p2p:
-    level: info
-  server:
-    level: info
+    appenders:
+      - p2pool
+      - stdout

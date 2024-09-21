@@ -27,7 +27,7 @@ use crate::{
     sharechain::ShareChain,
 };
 
-const LOG_TARGET: &str = "p2pool::server::server";
+const LOG_TARGET: &str = "tari::p2pool::server::server";
 
 #[derive(Error, Debug)]
 pub enum Error {

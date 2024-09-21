@@ -21,8 +21,17 @@ pub const MAX_BLOCKS_COUNT: usize = 4000;
 /// How many blocks are used to calculate current shares to be paid out.
 pub const BLOCKS_WINDOW: usize = 4000;
 
-pub const SHARE_COUNT: u64 = 2000;
+pub const SHARE_COUNT: u64 = 2000 * 5; // 2000 blocks * MAIN_CHAIN_SHARE_AMOUNT
 pub const MAX_SHARES_PER_MINER: u64 = u64::MAX;
+
+// The reward that the miner who finds the block recieves
+pub const MINER_REWARD_SHARES: u64 = 200;
+
+// If the share is in the main chain, then it counts 100%
+pub const MAIN_CHAIN_SHARE_AMOUNT: u64 = 5;
+
+// Uncle blocks count 40%
+pub const UNCLE_BLOCK_SHARE_AMOUNT: u64 = 2;
 
 pub mod block;
 pub mod error;
@@ -84,7 +93,7 @@ impl BlockValidationParams {
 }
 
 #[async_trait]
-pub trait ShareChain: Send + Sync + 'static {
+pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
 

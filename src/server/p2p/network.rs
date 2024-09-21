@@ -95,7 +95,7 @@ use crate::{
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
-const LOG_TARGET: &str = "p2pool::server::p2p";
+const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

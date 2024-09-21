@@ -15,7 +15,7 @@ use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::p2p::{messages::PeerInfo, Tribe};
 
-const LOG_TARGET: &str = "p2pool::server::p2p::peer_store";
+const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
 const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
 
 #[derive(Copy, Clone, Debug)]

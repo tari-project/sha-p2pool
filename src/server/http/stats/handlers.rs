@@ -30,7 +30,7 @@ use crate::{
     sharechain::SHARE_COUNT,
 };
 
-const LOG_TARGET: &str = "p2pool::server::stats::get";
+const LOG_TARGET: &str = "tari::p2pool::server::stats::get";
 
 #[derive(Serialize)]
 pub(crate) struct BlockResult {

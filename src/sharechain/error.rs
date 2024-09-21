@@ -34,6 +34,8 @@ pub enum Error {
     MissingBlockValidationParams,
     #[error("Failed to convert to block hash: {0}")]
     BlockHashConversion(#[from] FixedHashSizeError),
+    #[error("Block validation error: {0}")]
+    BlockValidation(String),
 }
 
 #[derive(Error, Debug)]
