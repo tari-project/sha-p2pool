@@ -26,7 +26,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::sync::{RwLock, Semaphore};
 use tonic::{Request, Response, Status};
-const MIN_DIFFICULTY_REDUCTION_RATE: u64 = 2000;
+const MIN_DIFFICULTY_REDUCTION_RATE: u64 = 20;
 
 use crate::{
     server::{

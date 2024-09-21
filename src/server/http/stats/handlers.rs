@@ -137,30 +137,37 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
         PowAlgorithm::Sha3x => state.share_chain_sha3x.clone(),
     };
-    let chain = share_chain.blocks(0).await.map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // let chain = share_chain.blocks(0).await.map_err(|error| {
+    // error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
+    // StatusCode::INTERNAL_SERVER_ERROR
+    // })?;
 
     // connected
     let connected = state.peer_store.peer_count().await > 0;
 
+    let shares = share_chain.miners_with_shares().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     // collect number of miners
-    let num_of_miners = chain
-        .iter()
-        .map(|block| block.miner_wallet_address.clone())
-        .filter(|addr_opt| addr_opt.is_some())
-        .map(|addr| addr.as_ref().unwrap().to_base58())
-        .unique()
-        .count();
+    // let num_of_miners = chain
+    // .iter()
+    // .map(|block| block.miner_wallet_address.clone())
+    // .filter(|addr_opt| addr_opt.is_some())
+    // .map(|addr| addr.as_ref().unwrap().to_base58())
+    // .unique()
+    // .count();
 
     // last won block
-    let last_block_won = chain
-        .iter()
-        .filter(|block| block.sent_to_main_chain)
-        .last()
-        .cloned()
-        .map(|block| block.into());
+    // let last_block_won = chain
+    // .iter()
+    // .filter(|block| block.sent_to_main_chain)
+    // .last()
+    // .cloned()
+    // .map(|block| block.into());
+
+    // TODO: Remove this field
+    let last_block_won = None;
 
     let share_chain_height = share_chain.tip_height().await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get tip height of share chain: {error:?}");
@@ -177,81 +184,81 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     let connected_since = state.peer_store.last_connected();
 
     // consensus manager
-    let network = Network::get_current_or_user_setting_or_default();
-    let consensus_manager = ConsensusManager::builder(network).build().map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to build consensus manager: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // let network = Network::get_current_or_user_setting_or_default();
+    // let consensus_manager = ConsensusManager::builder(network).build().map_err(|error| {
+    // error!(target: LOG_TARGET, "Failed to build consensus manager: {error:?}");
+    // StatusCode::INTERNAL_SERVER_ERROR
+    // })?;
 
     // calculate estimated earnings for all wallet addresses
-    let blocks = share_chain.blocks(0).await.map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let pool_total_rewards: u64 = blocks
-        .iter()
-        .filter(|block| block.sent_to_main_chain)
-        .map(|block| {
-            consensus_manager
-                .get_block_reward_at(block.original_block_header.height)
-                .as_u64()
-        })
-        .sum();
+    // let blocks = share_chain.blocks(0).await.map_err(|error| {
+    // error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
+    // StatusCode::INTERNAL_SERVER_ERROR
+    // })?;
+    // let pool_total_rewards: u64 = blocks
+    // .iter()
+    // .filter(|block| block.sent_to_main_chain)
+    // .map(|block| {
+    // consensus_manager
+    // .get_block_reward_at(block.original_block_header.height)
+    // .as_u64()
+    // })
+    // .sum();
 
     // calculate all possibly earned rewards for all the miners until latest point
-    let mut miners_with_shares = HashMap::<String, u64>::new();
-    let mut miners_with_rewards = HashMap::<String, u64>::new();
-    blocks.iter().for_each(|block| {
-        if let Some(miner_wallet_address) = &block.miner_wallet_address {
-            let miner = miner_wallet_address.to_base58();
-            let reward = consensus_manager.get_block_reward_at(block.original_block_header.height);
+    // let mut miners_with_shares = HashMap::<String, u64>::new();
+    // let mut miners_with_rewards = HashMap::<String, u64>::new();
+    // blocks.iter().for_each(|block| {
+    // if let Some(miner_wallet_address) = &block.miner_wallet_address {
+    // let miner = miner_wallet_address.to_base58();
+    // let reward = consensus_manager.get_block_reward_at(block.original_block_header.height);
 
-            // collect share count for miners
-            if let Some(shares) = miners_with_shares.get(&miner) {
-                miners_with_shares.insert(miner, shares + 1);
-            } else {
-                miners_with_shares.insert(miner, 1);
-            }
+    // collect share count for miners
+    // if let Some(shares) = miners_with_shares.get(&miner) {
+    // miners_with_shares.insert(miner, shares + 1);
+    // } else {
+    // miners_with_shares.insert(miner, 1);
+    // }
 
-            // calculate rewards for miners
-            if block.sent_to_main_chain {
-                miners_with_shares.iter().for_each(|(addr, share_count)| {
-                    let miner_reward = (reward.as_u64() / SHARE_COUNT) * share_count;
-                    if let Some(earned_rewards) = miners_with_rewards.get(addr) {
-                        miners_with_rewards.insert(addr.clone(), earned_rewards + miner_reward);
-                    } else {
-                        miners_with_rewards.insert(addr.clone(), miner_reward);
-                    }
-                });
-            }
-        }
-    });
+    // calculate rewards for miners
+    // if block.sent_to_main_chain {
+    // miners_with_shares.iter().for_each(|(addr, share_count)| {
+    // let miner_reward = (reward.as_u64() / SHARE_COUNT) * share_count;
+    // if let Some(earned_rewards) = miners_with_rewards.get(addr) {
+    // miners_with_rewards.insert(addr.clone(), earned_rewards + miner_reward);
+    // } else {
+    // miners_with_rewards.insert(addr.clone(), miner_reward);
+    // }
+    // });
+    // }
+    // }
+    // });
 
-    let mut estimated_earnings = HashMap::new();
-    let mut pool_total_estimated_earnings_1m = 0u64;
-    if !blocks.is_empty() {
-        // calculate "earning / minute" for all miners
-        let first_block_time = blocks.first().unwrap().timestamp;
-        let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
-        miners_with_rewards.iter().for_each(|(addr, total_earn)| {
-            pool_total_estimated_earnings_1m += total_earn;
-            let reward_per_1m = (total_earn / full_interval) * 60;
-            estimated_earnings.insert(addr.clone(), EstimatedEarnings::new(MicroMinotari::from(reward_per_1m)));
-        });
-        pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
-    }
+    // let mut estimated_earnings = HashMap::new();
+    // let mut pool_total_estimated_earnings_1m = 0u64;
+    // if !blocks.is_empty() {
+    // calculate "earning / minute" for all miners
+    //     // let first_block_time = blocks.first().unwrap().timestamp;
+    //     let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
+    //     miners_with_rewards.iter().for_each(|(addr, total_earn)| {
+    //         pool_total_estimated_earnings_1m += total_earn;
+    //         let reward_per_1m = (total_earn / full_interval) * 60;
+    //         estimated_earnings.insert(addr.clone(), EstimatedEarnings::new(MicroMinotari::from(reward_per_1m)));
+    //     });
+    //     pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
+    // }
 
     let result = Stats {
         connected,
-        num_of_miners,
+        num_of_miners: shares.keys().len(),
         last_block_won,
         share_chain_height,
         pool_hash_rate: pool_hash_rate.to_string(),
         connected_since,
-        pool_total_earnings: MicroMinotari::from(pool_total_rewards),
-        pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(pool_total_estimated_earnings_1m)),
-        total_earnings: miners_with_rewards,
-        estimated_earnings,
+        pool_total_earnings: MicroMinotari::from(0),
+        pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(0)),
+        total_earnings: Default::default(),
+        estimated_earnings: Default::default(),
         miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
         p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
         tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),

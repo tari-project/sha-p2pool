@@ -13,7 +13,7 @@ use digest::crypto_common::rand_core::block;
 use itertools::{enumerate, Itertools};
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use num::{BigUint, Zero};
+use num::{BigUint, Saturating, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
@@ -504,7 +504,7 @@ impl ShareChain for InMemoryShareChain {
             } else {
                 error!(target: LOG_TARGET, "No main block in level: {:?}", level.height);
             }
-            shares_left -= MAIN_CHAIN_SHARE_AMOUNT;
+            shares_left = shares_left.saturating_sub(MAIN_CHAIN_SHARE_AMOUNT);
             if shares_left <= 0 {
                 break;
             }
@@ -527,7 +527,7 @@ impl ShareChain for InMemoryShareChain {
                 let addr = miner_wallet_address.unwrap().to_base58();
                 let share_count = miners_to_shares.entry(addr).or_insert(0);
                 *share_count += UNCLE_BLOCK_SHARE_AMOUNT;
-                shares_left -= UNCLE_BLOCK_SHARE_AMOUNT;
+                shares_left = shares_left.saturating_sub(UNCLE_BLOCK_SHARE_AMOUNT);
             }
             if shares_left <= 0 {
                 break;
