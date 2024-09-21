@@ -16,3 +16,5 @@ pub fn algo_stat_key(algo: PowAlgorithm, stat_key: &str) -> String {
 pub mod cache;
 pub mod handlers;
 pub mod models;
+
+pub(crate) const MAX_ACCEPTABLE_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);

@@ -419,11 +419,15 @@ where S: ShareChain
                                 IdentTopic::new(Self::tribe_topic(&self.config.tribe, NEW_BLOCK_TOPIC)),
                                 block_raw,
                             )
-                            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
+                            // .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
                         {
                             Ok(_) => {},
                             Err(error) => {
-                                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to broadcast new block: {error:?}")
+                                if matches!(error, PublishError::InsufficientPeers)  {
+                                    debug!(target: LOG_TARGET, tribe = &self.config.tribe; "No peers to broadcast new block");
+                                } else {
+                                error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to broadcast new block: {error:?}");
+                                }
                             },
                         }
                     },

@@ -11,6 +11,7 @@ use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
+use super::MAX_ACCEPTABLE_HTTP_TIMEOUT;
 use crate::{
     server::{
         http::{
@@ -48,6 +49,7 @@ pub(crate) struct BlockResult {
 }
 
 pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+    let timer = std::time::Instant::now();
     let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -71,12 +73,16 @@ pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<V
         })
         .collect();
 
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_chain took too long: {}ms", timer.elapsed().as_millis());
+    }
     Ok(Json(result))
 }
 
 pub(crate) async fn handle_miners_with_shares(
     State(state): State<AppState>,
 ) -> Result<Json<HashMap<String, HashMap<String, u64>>>, StatusCode> {
+    let timer = std::time::Instant::now();
     let mut result = HashMap::with_capacity(2);
     result.insert(
         PowAlgorithm::Sha3x.to_string().to_lowercase(),
@@ -93,12 +99,17 @@ pub(crate) async fn handle_miners_with_shares(
         })?,
     );
 
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_miners_with_shares took too long: {}ms", timer.elapsed().as_millis());
+    }
+
     Ok(Json(result))
 }
 
 pub(crate) async fn handle_get_stats(
     State(state): State<AppState>,
 ) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
+    let timer = std::time::Instant::now();
     let mut result = HashMap::with_capacity(2);
     result.insert(
         PowAlgorithm::Sha3x.to_string().to_lowercase(),
@@ -108,6 +119,9 @@ pub(crate) async fn handle_get_stats(
         PowAlgorithm::RandomX.to_string().to_lowercase(),
         get_stats(state.clone(), PowAlgorithm::RandomX).await?,
     );
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_get_stats took too long: {}ms", timer.elapsed().as_millis());
+    }
     Ok(Json(result))
 }
 

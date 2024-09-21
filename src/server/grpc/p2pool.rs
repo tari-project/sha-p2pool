@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
@@ -23,13 +23,13 @@ use tari_core::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tonic::{Request, Response, Status};
 const MIN_DIFFICULTY_REDUCTION_RATE: u64 = 2000;
 
 use crate::{
     server::{
-        grpc::{error::Error, util},
+        grpc::{error::Error, util, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats::{
             algo_stat_key,
             MINER_STAT_ACCEPTED_BLOCKS_COUNT,
@@ -79,6 +79,7 @@ where S: ShareChain
     randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
     consensus_manager: ConsensusManager,
+    submit_block_semaphore: Arc<Semaphore>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -112,6 +113,7 @@ where S: ShareChain
             randomx_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
             consensus_manager,
+            submit_block_semaphore: Arc::new(Semaphore::new(1)),
         })
     }
 
@@ -127,11 +129,15 @@ where S: ShareChain
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
                     .await;
-                info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
-                self.p2p_client
+                let res = self
+                    .p2p_client
                     .broadcast_block(block)
                     .await
-                    .map_err(|error| Status::internal(error.to_string()))
+                    .map_err(|error| Status::internal(error.to_string()));
+                if res.is_ok() {
+                    info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
+                }
+                res
             },
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
@@ -154,6 +160,7 @@ where S: ShareChain
         &self,
         request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
+        let timer = Instant::now();
         // extract pow algo
         let grpc_block_header_pow = request
             .into_inner()
@@ -207,7 +214,6 @@ where S: ShareChain
             .miner_data
             .clone()
             .ok_or_else(|| Status::internal("missing miner data"))?;
-        debug!("Inserting height cached difficulty: {}", miner_data.target_difficulty);
 
         let grpc_block = response
             .block
@@ -251,6 +257,9 @@ where S: ShareChain
             miner_data.target_difficulty = target_difficulty.as_u64();
         }
 
+        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+            warn!("get_new_block took {}ms", timer.elapsed().as_millis());
+        }
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
             target_difficulty: target_difficulty.as_u64(),
@@ -265,6 +274,13 @@ where S: ShareChain
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
+        let timer = Instant::now();
+        debug!("Queuing for submit block");
+        // Only one submit at a time
+        let _permit = self.submit_block_semaphore.acquire().await;
+        debug!("submit_block permit acquired: {}", timer.elapsed().as_millis());
+
+        debug!("Trace - getting grpc fields");
         // get all grpc request related data
         let grpc_block = request.get_ref();
         let grpc_request_payload = grpc_block
@@ -284,6 +300,7 @@ where S: ShareChain
         })?)
         .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
 
+        debug!("Trace - getting share chain");
         // get new share chain block
         let pow_algo = match grpc_pow_algo {
             PowAlgos::Randomx => PowAlgorithm::RandomX,
@@ -300,6 +317,7 @@ where S: ShareChain
 
         let origin_block_header = &&block.original_block_header.clone();
 
+        debug!("Trace - getting block difficulty");
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
         let request_block_difficulty = match origin_block_header.pow.pow_algo {
@@ -340,6 +358,7 @@ where S: ShareChain
         //         network_difficulty_matches = true;
         //     }
         // }
+        debug!("Trace - getting network difficulty");
         let network_difficulty = match origin_block_header.pow.pow_algo {
             PowAlgorithm::Sha3x => self
                 .sha3_block_height_difficulty_cache
@@ -357,6 +376,7 @@ where S: ShareChain
                 .unwrap_or_else(Difficulty::min),
         };
         let network_difficulty_matches = request_block_difficulty >= network_difficulty;
+        debug!("Trace - saving max difficulty");
         let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
         if *max_difficulty < request_block_difficulty {
             *max_difficulty = request_block_difficulty;
@@ -364,6 +384,7 @@ where S: ShareChain
 
         block.achieved_difficulty = request_block_difficulty;
 
+        debug!("Trace - checking if can submit to main chain");
         if network_difficulty_matches {
             // submit block to base node
             let (metadata, extensions, _inner) = request.into_parts();
@@ -398,6 +419,7 @@ where S: ShareChain
                 },
             }
         } else {
+            debug!("Trace - submitting to share chain");
             block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(&block).await {
@@ -411,6 +433,7 @@ where S: ShareChain
             };
         }
 
+        debug!("Trace - getting stats");
         let stats = self
             .stats_store
             .get_many(&[
@@ -429,6 +452,10 @@ where S: ShareChain
             stats[2],
             stats[3]
         );
+
+        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+            warn!("submit_block took {}ms", timer.elapsed().as_millis());
+        }
 
         Ok(Response::new(SubmitBlockResponse {
             block_hash: block.hash.to_vec(),
