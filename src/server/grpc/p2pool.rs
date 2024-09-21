@@ -196,7 +196,7 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let shares = share_chain.generate_shares(reward).await;
+        let shares = share_chain.generate_shares().await;
 
         let mut response = self
             .client

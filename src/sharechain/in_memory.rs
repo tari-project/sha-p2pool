@@ -9,6 +9,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use digest::crypto_common::rand_core::block;
 use itertools::{enumerate, Itertools};
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
@@ -442,20 +443,6 @@ impl ShareChain for InMemoryShareChain {
     async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
-        if sync {
-            // let chain = self.chain(block_levels_write_lock.iter());
-            todo!("Not sure what is happening here");
-            // if let Some(last_block) = block_levels_write_lock.back() {
-            //     if last_block.hash != genesis_block().hash &&
-            //         !blocks.is_empty() &&
-            //         last_block.height < blocks[0].height &&
-            //         (blocks[0].height - last_block.height) > 1
-            //     {
-            //         block_levels_write_lock.clear();
-            //     }
-            // }
-        }
-
         for block in blocks {
             let result = self
                 .submit_block_with_lock(
@@ -469,11 +456,6 @@ impl ShareChain for InMemoryShareChain {
                 return Ok(SubmitBlockResult::new(true));
             }
         }
-
-        // let chain = self.chain(block_levels_write_lock.iter());
-        // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
-
         Ok(SubmitBlockResult::new(false))
     }
 
@@ -483,7 +465,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(tip_level)
     }
 
-    async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
+    async fn generate_shares(&self) -> Vec<NewBlockCoinbase> {
         let bl = self.block_levels.read().await;
         if let Some(ref cached_shares) = bl.cached_shares {
             return cached_shares.clone();
@@ -514,9 +496,11 @@ impl ShareChain for InMemoryShareChain {
 
             // Main blocks
             if let Some(main_block) = level.block_in_main_chain() {
-                let miner_address = main_block.miner_wallet_address.clone().unwrap_or_default();
-                let entry = miners_to_shares.entry(miner_address.to_base58()).or_insert(0);
-                *entry += MAIN_CHAIN_SHARE_AMOUNT;
+                let miner_address = main_block.miner_wallet_address.clone();
+                if !miner_address.is_none() {
+                    let entry = miners_to_shares.entry(miner_address.unwrap().to_base58()).or_insert(0);
+                    *entry += MAIN_CHAIN_SHARE_AMOUNT;
+                }
             } else {
                 error!(target: LOG_TARGET, "No main block in level: {:?}", level.height);
             }
@@ -536,8 +520,11 @@ impl ShareChain for InMemoryShareChain {
                 if i == main_block_index {
                     continue;
                 }
-                let miner_wallet_address = block.miner_wallet_address.clone().unwrap_or_default();
-                let addr = miner_wallet_address.to_base58();
+                let miner_wallet_address = block.miner_wallet_address.clone();
+                if miner_wallet_address.is_none() {
+                    continue;
+                }
+                let addr = miner_wallet_address.unwrap().to_base58();
                 let share_count = miners_to_shares.entry(addr).or_insert(0);
                 *share_count += UNCLE_BLOCK_SHARE_AMOUNT;
                 shares_left -= UNCLE_BLOCK_SHARE_AMOUNT;
@@ -592,14 +579,28 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>> {
-        todo!("not implemented")
-        // let block_levels_read_lock = self.block_levels.read().await;
-        // let chain = self.chain(block_levels_read_lock.iter());
-        // Ok(chain
-        //     .iter()
-        //     .filter(|block| block.height > from_height)
-        //     .cloned()
-        //     .collect())
+        // Should really only be used in syncing
+        let block_levels_read_lock = self.block_levels.read().await;
+        let mut res = vec![];
+        if block_levels_read_lock.levels.is_empty() {
+            return Ok(res);
+        }
+
+        if block_levels_read_lock.levels.front().unwrap().height <= from_height {
+            return Ok(res);
+        }
+
+        for level in block_levels_read_lock.levels.iter() {
+            if level.height <= from_height {
+                break;
+            }
+            if let Some(block) = level.block_in_main_chain() {
+                res.push(block.clone());
+            }
+        }
+
+        res.reverse();
+        Ok(res)
     }
 
     async fn hash_rate(&self) -> ShareChainResult<BigUint> {
@@ -654,11 +655,14 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>> {
-        todo!("miners")
-        // let levels_lock = self.block_levels.read().await;
-        // let chain = self.chain(levels_lock.iter());
-        // let chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
-        // Ok(self.miners_with_shares(chain))
+        let bl = self.block_levels.read().await;
+        if let Some(ref shares) = bl.cached_shares {
+            return Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect());
+        }
+
+        drop(bl);
+        let shares = self.generate_shares().await;
+        Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect())
     }
 }
 

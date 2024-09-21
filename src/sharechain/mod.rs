@@ -105,7 +105,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase>;
+    async fn generate_shares(&self) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
     async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block>;
