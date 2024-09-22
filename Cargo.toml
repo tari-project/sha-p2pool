@@ -58,5 +58,6 @@ convert_case = "0.6.0"
 lazy_static = "1.5.0"
 num-format = "*"
 
+
 [package.metadata.cargo-machete]
 ignored = ["log4rs"]

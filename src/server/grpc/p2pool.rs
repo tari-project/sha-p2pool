@@ -47,9 +47,11 @@ const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
     let consensus_constants = consensus_manager.consensus_constants(height);
     match pow {
-        PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow),
+        PowAlgorithm::RandomX => {
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).expect("Bad difficulty")
+        },
         PowAlgorithm::Sha3x => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() * 10).expect("Bad difficulty")
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).expect("Bad difficulty")
         }, // SHA min difficulty is too low. Will be updated in future
     }
 }

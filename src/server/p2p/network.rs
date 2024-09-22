@@ -65,11 +65,13 @@ use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::{
     fs::File,
-    io,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{self, AsyncReadExt, AsyncWriteExt},
     select,
-    sync::{broadcast, broadcast::error::RecvError, RwLock},
-    time,
+    sync::{
+        broadcast::{self, error::RecvError},
+        RwLock,
+    },
+    time::{self, MissedTickBehavior},
 };
 
 use crate::{
@@ -149,7 +151,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(30),
+            peer_info_publish_interval: Duration::from_secs(60 * 5),
             stable_peer: false,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -497,30 +499,6 @@ where S: ShareChain
             topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
                     debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
-                    let current_randomx_height = payload.current_random_x_height;
-                    let current_sha3x_height = payload.current_sha3x_height;
-                    self.network_peer_store.add(peer, payload).await;
-                    if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
-                        if curr_height < current_sha3x_height {
-                            self.sync_share_chain(
-                                PowAlgorithm::Sha3x,
-                                Some(peer),
-                                Some(curr_height.saturating_sub(100)),
-                            )
-                            .await;
-                        }
-                    }
-
-                    if let Ok(curr_height) = self.share_chain_random_x.tip_height().await {
-                        if curr_height < current_randomx_height {
-                            self.sync_share_chain(
-                                PowAlgorithm::RandomX,
-                                Some(peer),
-                                Some(curr_height.saturating_sub(100)),
-                            )
-                            .await;
-                        }
-                    }
                 },
                 Err(error) => {
                     error!(target: LOG_TARGET, tribe = &self.config.tribe; "Can't deserialize peer info payload: {:?}", error);
@@ -530,33 +508,33 @@ where S: ShareChain
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
                         debug!(target: LOG_TARGET, tribe = &self.config.tribe; "[TRIBE] New peer info: {peer:?} -> {payload:?}");
+                        let current_randomx_height = payload.current_random_x_height;
+                        let current_sha3x_height = payload.current_sha3x_height;
                         self.tribe_peer_store.add(peer, payload).await;
 
-                        // check for SHA-3 tip height
-                        if let Some(tip) = self.tribe_peer_store.tip_of_block_height(PowAlgorithm::Sha3x).await {
-                            if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
-                                if curr_height < tip.height {
-                                    self.sync_share_chain(
-                                        PowAlgorithm::Sha3x,
-                                        None,
-                                        Some(curr_height.saturating_sub(100)),
-                                    )
-                                    .await;
-                                }
+                        if self.sync_in_progress.load(Ordering::SeqCst) {
+                            return;
+                        }
+
+                        if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
+                            if curr_height < current_sha3x_height {
+                                self.sync_share_chain(
+                                    PowAlgorithm::Sha3x,
+                                    Some(peer),
+                                    Some(curr_height.saturating_sub(100)),
+                                )
+                                .await;
                             }
                         }
 
-                        // check for RandomX tip height
-                        if let Some(tip) = self.tribe_peer_store.tip_of_block_height(PowAlgorithm::RandomX).await {
-                            if let Ok(curr_height) = self.share_chain_random_x.tip_height().await {
-                                if curr_height < tip.height {
-                                    self.sync_share_chain(
-                                        PowAlgorithm::RandomX,
-                                        None,
-                                        Some(curr_height.saturating_sub(100)),
-                                    )
-                                    .await;
-                                }
+                        if let Ok(curr_height) = self.share_chain_random_x.tip_height().await {
+                            if curr_height < current_randomx_height {
+                                self.sync_share_chain(
+                                    PowAlgorithm::RandomX,
+                                    Some(peer),
+                                    Some(curr_height.saturating_sub(100)),
+                                )
+                                .await;
                             }
                         }
                     },
@@ -974,7 +952,11 @@ where S: ShareChain
     /// Main loop of the service that drives the events and libp2p swarm forward.
     async fn main_loop(&mut self) -> Result<(), Error> {
         let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
-        let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(30));
+        publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        // TODO: Not sure why this is done on a loop instead of just once....
+        let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
+        kademlia_bootstrap_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let shutdown_signal = self.shutdown_signal.clone();
         tokio::pin!(shutdown_signal);
 

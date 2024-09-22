@@ -44,20 +44,27 @@ where T: Serialize {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
+    #[serde(default)]
+    pub version: u64,
     pub current_sha3x_height: u64,
     pub current_random_x_height: u64,
     pub tribe: Tribe,
     pub timestamp: u128,
+    pub user_agent: Option<String>,
+    pub user_agent_version: Option<String>,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(current_sha3x_height: u64, current_random_x_height: u64, tribe: Tribe) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
+            version: 1,
             current_sha3x_height,
             current_random_x_height,
             tribe,
             timestamp,
+            user_agent: Some("tari-p2pool".to_string()),
+            user_agent_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         }
     }
 }

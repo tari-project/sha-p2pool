@@ -390,7 +390,8 @@ impl InMemoryShareChain {
             return Err(Error::InvalidBlock(block.clone()));
         }
 
-        debug!(target: LOG_TARGET, "Reorging to main chain");
+        let mut num_reorged = 0;
+        // debug!(target: LOG_TARGET, "Reorging to main chain");
         // parent_level.in_chain_index = parent_index;
         let mut current_block_hash = block.prev_hash;
 
@@ -417,11 +418,13 @@ impl InMemoryShareChain {
             if curr_level.in_chain_index == new_index {
                 break;
             }
+            num_reorged += 1;
 
             curr_level.in_chain_index = new_index;
             current_block_hash = new_parent.prev_hash;
         }
 
+        info!(target: LOG_TARGET, "Reorged {} blocks", num_reorged);
         block_levels.cached_shares = None;
         // remove the first couple of block levels if needed
         if block_levels.levels.len() >= self.max_blocks_count {
