@@ -693,6 +693,7 @@ impl ShareChain for InMemoryShareChain {
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
