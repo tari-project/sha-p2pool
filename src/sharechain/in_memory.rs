@@ -33,8 +33,6 @@ use crate::{
         BlockValidationParams,
         ShareChain,
         ShareChainResult,
-        SubmitBlockResult,
-        ValidateBlockResult,
         MAIN_CHAIN_SHARE_AMOUNT,
         MAX_SHARES_PER_MINER,
         MINER_REWARD_SHARES,
@@ -220,13 +218,13 @@ impl InMemoryShareChain {
         pow: PowAlgorithm,
         curr_difficulty: Difficulty,
         height: u64,
-    ) -> ShareChainResult<ValidateBlockResult> {
+    ) -> ShareChainResult<bool> {
         if curr_difficulty < min_difficulty(&self.consensus_manager, pow, height) {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
-            return Ok(ValidateBlockResult::new(false, false));
+            return Ok(false);
         }
 
-        Ok(ValidateBlockResult::new(true, false))
+        Ok(true)
     }
 
     /// Validating a new block.
@@ -236,14 +234,14 @@ impl InMemoryShareChain {
         block: &Block,
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
-    ) -> ShareChainResult<ValidateBlockResult> {
+    ) -> ShareChainResult<bool> {
         if block.original_block_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
-            return Ok(ValidateBlockResult::new(false, false));
+            return Ok(false);
         }
 
         if sync && last_block.is_none() {
-            return Ok(ValidateBlockResult::new(true, false));
+            return Ok(true);
         }
 
         if let Some(last_block) = last_block {
@@ -259,7 +257,7 @@ impl InMemoryShareChain {
                     last_block.height,
                     block.height,
                 );
-                return Ok(ValidateBlockResult::new(false, true));
+                return Ok(false);
             }
 
             // validate PoW
@@ -281,24 +279,24 @@ impl InMemoryShareChain {
                 Ok(curr_difficulty) => {
                     let result =
                         self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block_header.height)?;
-                    if !result.valid {
+                    if !result {
                         return Ok(result);
                     }
                 },
                 Err(error) => {
                     warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", pow_algo);
                     debug!(target: LOG_TARGET, "[{:?}] Failed to calculate {} difficulty: {error:?}", pow_algo,pow_algo);
-                    return Ok(ValidateBlockResult::new(false, false));
+                    return Ok(false);
                 },
             }
 
             // TODO: check here for miners
             // TODO: (send merkle tree root hash and generate here, then compare the two from miners list and shares)
         } else {
-            return Ok(ValidateBlockResult::new(false, true));
+            return Ok(false);
         }
 
-        Ok(ValidateBlockResult::new(true, false))
+        Ok(true)
     }
 
     /// Submits a new block to share chain.
@@ -308,7 +306,7 @@ impl InMemoryShareChain {
         block: &Block,
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
-    ) -> ShareChainResult<SubmitBlockResult> {
+    ) -> ShareChainResult<()> {
         let height = block.height;
 
         if block_levels.levels.is_empty() {
@@ -316,7 +314,7 @@ impl InMemoryShareChain {
             block_levels
                 .levels
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
-            return Ok(SubmitBlockResult::new(false));
+            return Ok(());
         }
         let block_levels_len = block_levels.levels.len();
 
@@ -330,7 +328,7 @@ impl InMemoryShareChain {
             block_levels
                 .levels
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
-            return Ok(SubmitBlockResult::new(true));
+            return Ok(());
         }
 
         // Find the parent.
@@ -364,12 +362,8 @@ impl InMemoryShareChain {
 
         // validate
         let validate_result = self.validate_block(Some(parent), block, params, sync).await?;
-        if !validate_result.valid {
-            return if validate_result.need_sync {
-                Ok(SubmitBlockResult::new(true))
-            } else {
-                Err(Error::InvalidBlock(block.clone()))
-            };
+        if !validate_result {
+            return Err(Error::InvalidBlock(block.clone()));
         }
 
         debug!(target: LOG_TARGET, "Reorging to main chain");
@@ -430,13 +424,13 @@ impl InMemoryShareChain {
                 .add_block(block.clone(), true)?;
         }
 
-        Ok(SubmitBlockResult::new(validate_result.need_sync))
+        Ok(())
     }
 }
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
         self.submit_block_with_lock(
             &mut block_levels_write_lock,
@@ -451,7 +445,7 @@ impl ShareChain for InMemoryShareChain {
         // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
     }
 
-    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<SubmitBlockResult> {
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
@@ -463,11 +457,8 @@ impl ShareChain for InMemoryShareChain {
                     true,
                 )
                 .await?;
-            if result.need_sync {
-                return Ok(SubmitBlockResult::new(true));
-            }
         }
-        Ok(SubmitBlockResult::new(false))
+        Ok(())
     }
 
     async fn tip_height(&self) -> ShareChainResult<u64> {

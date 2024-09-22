@@ -548,9 +548,7 @@ where S: ShareChain
                         };
                         match share_chain.submit_block(&payload).await {
                             Ok(result) => {
-                                if result.need_sync {
-                                    self.sync_share_chain(payload.original_block_header.pow.pow_algo).await;
-                                }
+                                info!(target: LOG_TARGET, tribe = &self.config.tribe; "New block added to local share chain via gossip: {}. Height: {}", &payload.hash.to_hex(), &payload.height);
                             },
                             Err(error) => {
                                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Could not add new block to local share chain: {error:?}");
@@ -609,11 +607,10 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let res = match share_chain.add_synced_blocks(response.blocks).await {
+        match share_chain.add_synced_blocks(response.blocks).await {
             Ok(result) => {
-                if result.need_sync {
-                    self.sync_share_chain(response.algo).await;
-                }
+                info!(target: LOG_TARGET, tribe = &self.config.tribe; "Synced blocks added to share chain: {result:?}");
+                // Ok(())
             },
             Err(error) => {
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to add synced blocks to share chain: {error:?}");
@@ -623,7 +620,6 @@ where S: ShareChain
         if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
             warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Share chain sync response took too long: {:?}", timer.elapsed());
         }
-        res
     }
 
     /// Trigger share chain sync with another peer with the highest known block height.

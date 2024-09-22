@@ -39,27 +39,6 @@ pub mod in_memory;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 
-pub struct SubmitBlockResult {
-    pub need_sync: bool,
-}
-
-impl SubmitBlockResult {
-    pub fn new(need_sync: bool) -> Self {
-        Self { need_sync }
-    }
-}
-
-pub struct ValidateBlockResult {
-    pub valid: bool,
-    pub need_sync: bool,
-}
-
-impl ValidateBlockResult {
-    pub fn new(valid: bool, need_sync: bool) -> Self {
-        Self { valid, need_sync }
-    }
-}
-
 pub struct BlockValidationParams {
     random_x_factory: RandomXFactory,
     consensus_manager: ConsensusManager,
@@ -95,10 +74,10 @@ impl BlockValidationParams {
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<SubmitBlockResult>;
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> ShareChainResult<u64>;
