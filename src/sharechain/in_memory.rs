@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    hash::Hash,
     slice::Iter,
     str::FromStr,
     sync::Arc,
@@ -98,6 +99,7 @@ fn genesis_block() -> Block {
         .with_height(0)
         .with_prev_hash(BlockHash::zero())
         .with_timestamp(EpochTime::from_secs_since_epoch(0))
+        .with_specific_hash(BlockHash::zero())
         .build()
 }
 
@@ -348,11 +350,10 @@ impl InMemoryShareChain {
             ))
         })?;
 
-        let (parent_index, parent) = parent_level
+        let parent = parent_level
             .blocks
             .iter()
-            .enumerate()
-            .find(|(i, b)| block.prev_hash == b.hash)
+            .find(|b| block.prev_hash == b.hash)
             .ok_or_else(|| {
                 Error::BlockValidation(format!(
                     "Block parent is not found in levels. parent height: {}, parent hash: {}",
@@ -579,7 +580,7 @@ impl ShareChain for InMemoryShareChain {
 
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
-            .with_prev_hash(last_block.generate_hash())
+            .with_prev_hash(last_block.hash.clone())
             .with_height(last_block.height + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
@@ -596,12 +597,12 @@ impl ShareChain for InMemoryShareChain {
             return Ok(res);
         }
 
-        if block_levels_read_lock.levels.front().unwrap().height <= from_height {
+        if block_levels_read_lock.levels.front().unwrap().height < from_height {
             return Ok(res);
         }
 
         for level in block_levels_read_lock.levels.iter() {
-            if level.height <= from_height {
+            if level.height < from_height {
                 break;
             }
             if let Some(block) = level.block_in_main_chain() {

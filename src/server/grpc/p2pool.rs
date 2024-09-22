@@ -50,7 +50,7 @@ pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, h
     match pow {
         PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow),
         PowAlgorithm::Sha3x => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() * 400).expect("Bad difficulty")
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() * 10).expect("Bad difficulty")
         }, // SHA min difficulty is too low. Will be updated in future
     }
 }
