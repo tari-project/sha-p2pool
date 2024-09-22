@@ -97,6 +97,7 @@ fn genesis_block() -> Block {
     Block::builder()
         .with_height(0)
         .with_prev_hash(BlockHash::zero())
+        .with_timestamp(EpochTime::from_secs_since_epoch(0))
         .build()
 }
 
@@ -320,6 +321,16 @@ impl InMemoryShareChain {
         let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
         let tip_height = tip_level.height;
 
+        // If we are syncing and we are very far behind, clear out the blocks we have and just add it
+        if (tip_height < block.height - 1) && sync {
+            // TODO: Validate the block
+            block_levels.levels.clear();
+            block_levels
+                .levels
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            return Ok(SubmitBlockResult::new(true));
+        }
+
         // Find the parent.
         let parent_height = height
             .checked_sub(1)
@@ -439,7 +450,7 @@ impl ShareChain for InMemoryShareChain {
         // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
     }
 
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<SubmitBlockResult> {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
@@ -448,7 +459,7 @@ impl ShareChain for InMemoryShareChain {
                     &mut block_levels_write_lock,
                     &block,
                     self.block_validation_params.clone(),
-                    sync,
+                    true,
                 )
                 .await?;
             if result.need_sync {

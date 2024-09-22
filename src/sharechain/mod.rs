@@ -98,8 +98,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
 
     /// Add multiple blocks at once.
-    /// While this operation runs, no other blocks can be added until it's done.
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult>;
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<SubmitBlockResult>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> ShareChainResult<u64>;

@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use convert_case::{Case, Casing};
@@ -97,6 +97,8 @@ const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
+
+const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tribe {
@@ -598,15 +600,16 @@ where S: ShareChain
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
-        if self.sync_in_progress.load(Ordering::SeqCst) {
-            self.sync_in_progress.store(false, Ordering::SeqCst);
+        let timer = Instant::now();
+        if !self.sync_in_progress.load(Ordering::SeqCst) {
+            return;
         }
         debug!(target: LOG_TARGET, tribe = &self.config.tribe; "Share chain sync response: {response:?}");
         let share_chain = match response.algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.submit_blocks(response.blocks, true).await {
+        let res = match share_chain.add_synced_blocks(response.blocks).await {
             Ok(result) => {
                 if result.need_sync {
                     self.sync_share_chain(response.algo).await;
@@ -615,13 +618,18 @@ where S: ShareChain
             Err(error) => {
                 error!(target: LOG_TARGET, tribe = &self.config.tribe; "Failed to add synced blocks to share chain: {error:?}");
             },
+        };
+        self.sync_in_progress.store(false, Ordering::SeqCst);
+        if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
+            warn!(target: LOG_TARGET, tribe = &self.config.tribe; "Share chain sync response took too long: {:?}", timer.elapsed());
         }
+        res
     }
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
     async fn sync_share_chain(&mut self, algo: PowAlgorithm) {
-        if self.sync_in_progress.load(Ordering::Relaxed) {
+        if self.sync_in_progress.load(Ordering::SeqCst) {
             warn!(target: LOG_TARGET, "Sync already in progress...");
             return;
         }
