@@ -308,6 +308,11 @@ impl InMemoryShareChain {
         sync: bool,
     ) -> ShareChainResult<()> {
         let height = block.height;
+        if block.height == 0 {
+            // TODO: Find out where this block 0 is coming from
+            return Ok(());
+            // return Err(Error::BlockValidation("Block height is 0".to_string()));
+        }
 
         if block_levels.levels.is_empty() {
             // TODO: Validate the block

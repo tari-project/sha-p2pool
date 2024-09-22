@@ -546,7 +546,8 @@ where S: ShareChain
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
-                        match share_chain.submit_block(&payload).await {
+                        // TODO: Treating this as a sync for now.
+                        match share_chain.add_synced_blocks(vec![payload.clone()]).await {
                             Ok(result) => {
                                 info!(target: LOG_TARGET, tribe = &self.config.tribe; "New block added to local share chain via gossip: {}. Height: {}", &payload.hash.to_hex(), &payload.height);
                             },
