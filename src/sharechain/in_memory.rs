@@ -48,6 +48,20 @@ pub(crate) struct BlockLevels {
     levels: VecDeque<BlockLevel>,
 }
 
+impl BlockLevels {
+    pub fn get_at_height(&self, height: u64) -> Option<&BlockLevel> {
+        let tip = self.levels.front()?.height;
+        if height > tip {
+            return None;
+        }
+        let index = tip.checked_sub(height);
+        if index.is_none() {
+            return None;
+        }
+        self.levels.get(index.unwrap() as usize)
+    }
+}
+
 pub(crate) struct InMemoryShareChain {
     max_blocks_count: usize,
     block_levels: Arc<RwLock<BlockLevels>>,
@@ -334,6 +348,14 @@ impl InMemoryShareChain {
                 .levels
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
             return Ok(());
+        }
+
+        // Check if already added.
+        if let Some(level) = block_levels.get_at_height(height) {
+            if level.blocks.iter().any(|b| b.hash == block.hash) {
+                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
+                return Ok(());
+            }
         }
 
         // Find the parent.
