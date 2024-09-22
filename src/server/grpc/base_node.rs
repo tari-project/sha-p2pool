@@ -69,36 +69,75 @@ const GET_TOKENS_IN_CIRCULATION_PAGE_SIZE: usize = 1_000;
 
 const GET_DIFFICULTY_PAGE_SIZE: usize = 1_000;
 
+const LOG_TARGET: &str = "tari::p2pool::grpc::proxy";
+
 #[macro_export]
 macro_rules! proxy_simple_result {
     ($self:ident, $call:ident, $request:ident) => {
-        match $self.client.write().await.$call($request.into_inner()).await {
+        {
+            use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+        let timer = std::time::Instant::now();
+        let res = match $self.client.write().await.$call($request.into_inner()).await {
             Ok(resp) => Ok(resp),
             Err(error) => {
                 error!("Error while calling {:?} on base node: {:?}", stringify!($call), error);
                 Err(error)
             },
+        };
+        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+            log::warn!(target: LOG_TARGET,
+                "Base node call {:?} took {}ms",
+                stringify!($call),
+                timer.elapsed().as_millis()
+            );
         }
+        res
+    }
     };
 }
 
 macro_rules! proxy_stream_result {
     ($self:ident, $call:ident, $request:ident, $page_size:ident) => {
-        streaming_response(
+ {
+    use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+         let timer = std::time::Instant::now();
+        let res = streaming_response(
             String::from(stringify!($call)),
             $self.client.write().await.$call($request.into_inner()).await,
             $page_size,
         )
-        .await
+        .await;
+        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+            log::warn!(target: LOG_TARGET,
+                "Base node streaming call {:?} took {}ms",
+                stringify!($call),
+                timer.elapsed().as_millis()
+            );
+        }
+        res
+    }
     };
 
     ($self:ident, $call:ident, $request:ident, $page_size:expr) => {
-        streaming_response(
+ {
+    use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+           let timer = std::time::Instant::now();
+        let res = streaming_response(
             String::from(stringify!($call)),
             $self.client.write().await.$call($request.into_inner()).await,
             $page_size,
         )
-        .await
+        .await;
+
+        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+            log::warn!(target: LOG_TARGET,
+                "Base node streaming call {:?} took {}ms",
+                stringify!($call),
+                timer.elapsed().as_millis()
+            );
+        }
+        res
+    }
     };
 }
 

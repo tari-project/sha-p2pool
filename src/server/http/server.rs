@@ -22,7 +22,7 @@ use crate::{
     sharechain::ShareChain,
 };
 
-const LOG_TARGET: &str = "p2pool::server::stats";
+const LOG_TARGET: &str = "tari::p2pool::server::stats";
 
 #[derive(Clone, Debug)]
 pub struct Config {

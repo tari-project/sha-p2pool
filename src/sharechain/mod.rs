@@ -16,40 +16,28 @@ use crate::sharechain::{block::Block, error::Error};
 pub const CHAIN_ID: usize = 1;
 
 /// How many blocks to keep overall.
-pub const MAX_BLOCKS_COUNT: usize = 4000;
+pub const MAX_BLOCKS_COUNT: usize = 2001;
 
 /// How many blocks are used to calculate current shares to be paid out.
-pub const BLOCKS_WINDOW: usize = 4000;
+// pub const BLOCKS_WINDOW: usize = 400;
 
-pub const SHARE_COUNT: u64 = 2000;
+pub const SHARE_COUNT: u64 = 2000 * 5; // 2000 blocks * MAIN_CHAIN_SHARE_AMOUNT
 pub const MAX_SHARES_PER_MINER: u64 = u64::MAX;
+
+// The reward that the miner who finds the block recieves
+pub const MINER_REWARD_SHARES: u64 = 200;
+
+// If the share is in the main chain, then it counts 100%
+pub const MAIN_CHAIN_SHARE_AMOUNT: u64 = 5;
+
+// Uncle blocks count 40%
+pub const UNCLE_BLOCK_SHARE_AMOUNT: u64 = 2;
 
 pub mod block;
 pub mod error;
 pub mod in_memory;
 
 pub type ShareChainResult<T> = Result<T, Error>;
-
-pub struct SubmitBlockResult {
-    pub need_sync: bool,
-}
-
-impl SubmitBlockResult {
-    pub fn new(need_sync: bool) -> Self {
-        Self { need_sync }
-    }
-}
-
-pub struct ValidateBlockResult {
-    pub valid: bool,
-    pub need_sync: bool,
-}
-
-impl ValidateBlockResult {
-    pub fn new(valid: bool, need_sync: bool) -> Self {
-        Self { valid, need_sync }
-    }
-}
 
 pub struct BlockValidationParams {
     random_x_factory: RandomXFactory,
@@ -84,19 +72,18 @@ impl BlockValidationParams {
 }
 
 #[async_trait]
-pub trait ShareChain: Send + Sync + 'static {
+pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult>;
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()>;
 
     /// Add multiple blocks at once.
-    /// While this operation runs, no other blocks can be added until it's done.
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult>;
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase>;
+    async fn generate_shares(&self) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
     async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block>;

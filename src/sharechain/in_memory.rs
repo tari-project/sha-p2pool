@@ -1,10 +1,14 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, slice::Iter, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    slice::Iter,
+    str::FromStr,
+    sync::Arc,
+};
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
@@ -17,6 +21,7 @@ use tari_core::{
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
+use super::MAX_BLOCKS_COUNT;
 use crate::{
     server::grpc::p2pool::min_difficulty,
     sharechain::{
@@ -25,19 +30,36 @@ use crate::{
         BlockValidationParams,
         ShareChain,
         ShareChainResult,
-        SubmitBlockResult,
-        ValidateBlockResult,
-        BLOCKS_WINDOW,
+        MAIN_CHAIN_SHARE_AMOUNT,
         MAX_SHARES_PER_MINER,
+        MINER_REWARD_SHARES,
         SHARE_COUNT,
+        UNCLE_BLOCK_SHARE_AMOUNT,
     },
 };
 
-const LOG_TARGET: &str = "p2pool::sharechain::in_memory";
+const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 
-pub struct InMemoryShareChain {
+pub(crate) struct BlockLevels {
+    cached_shares: Option<Vec<NewBlockCoinbase>>,
+    levels: VecDeque<BlockLevel>,
+}
+
+impl BlockLevels {
+    pub fn get_at_height(&self, height: u64) -> Option<&BlockLevel> {
+        let tip = self.levels.front()?.height;
+        if height > tip {
+            return None;
+        }
+        let index = tip.checked_sub(height);
+        self.levels
+            .get(usize::try_from(index?).expect("32 bit systems not supported"))
+    }
+}
+
+pub(crate) struct InMemoryShareChain {
     max_blocks_count: usize,
-    block_levels: Arc<RwLock<Vec<BlockLevel>>>,
+    block_levels: Arc<RwLock<BlockLevels>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
@@ -47,19 +69,35 @@ pub struct InMemoryShareChain {
 pub struct BlockLevel {
     blocks: Vec<Block>,
     height: u64,
+    in_chain_index: usize,
 }
 
 impl BlockLevel {
     pub fn new(blocks: Vec<Block>, height: u64) -> Self {
-        Self { blocks, height }
+        Self {
+            blocks,
+            height,
+            in_chain_index: 0,
+        }
     }
 
-    pub fn add_block(&mut self, block: Block) -> Result<(), Error> {
+    pub fn add_block(&mut self, block: Block, replace_tip: bool) -> Result<(), Error> {
         if self.height != block.height {
             return Err(Error::InvalidBlock(block));
         }
+        if replace_tip {
+            self.in_chain_index = self.blocks.len();
+        }
         self.blocks.push(block);
         Ok(())
+    }
+
+    pub fn block_in_main_chain(&self) -> Option<&Block> {
+        if self.in_chain_index < self.blocks.len() {
+            Some(&self.blocks[self.in_chain_index])
+        } else {
+            None
+        }
     }
 }
 
@@ -67,6 +105,8 @@ fn genesis_block() -> Block {
     Block::builder()
         .with_height(0)
         .with_prev_hash(BlockHash::zero())
+        .with_timestamp(EpochTime::from_secs_since_epoch(0))
+        .with_specific_hash(BlockHash::zero())
         .build()
 }
 
@@ -81,28 +121,19 @@ impl InMemoryShareChain {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(Error::MissingBlockValidationParams);
         }
+        let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
+        levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
+        let block_levels = BlockLevels {
+            cached_shares: None,
+            levels,
+        };
         Ok(Self {
             max_blocks_count,
-            block_levels: Arc::new(RwLock::new(vec![BlockLevel::new(vec![genesis_block()], 0)])),
+            block_levels: Arc::new(RwLock::new(block_levels)),
             pow_algo,
             block_validation_params,
             consensus_manager,
         })
-    }
-
-    /// Returns the last block in chain
-    fn last_block(&self, block_level_iter: Iter<'_, BlockLevel>) -> Option<Block> {
-        let levels = block_level_iter.as_slice();
-        if levels.is_empty() {
-            return None;
-        }
-        let last_level = &block_level_iter.as_slice().last().unwrap();
-
-        last_level
-            .blocks
-            .iter()
-            .max_by(|block1, block2| block1.height.cmp(&block2.height))
-            .cloned()
     }
 
     /// Calculates block difficulty based on it's pow algo.
@@ -196,13 +227,13 @@ impl InMemoryShareChain {
         pow: PowAlgorithm,
         curr_difficulty: Difficulty,
         height: u64,
-    ) -> ShareChainResult<ValidateBlockResult> {
+    ) -> ShareChainResult<bool> {
         if curr_difficulty < min_difficulty(&self.consensus_manager, pow, height) {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
-            return Ok(ValidateBlockResult::new(false, false));
+            return Ok(false);
         }
 
-        Ok(ValidateBlockResult::new(true, false))
+        Ok(true)
     }
 
     /// Validating a new block.
@@ -212,14 +243,14 @@ impl InMemoryShareChain {
         block: &Block,
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
-    ) -> ShareChainResult<ValidateBlockResult> {
+    ) -> ShareChainResult<bool> {
         if block.original_block_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
-            return Ok(ValidateBlockResult::new(false, false));
+            return Ok(false);
         }
 
         if sync && last_block.is_none() {
-            return Ok(ValidateBlockResult::new(true, false));
+            return Ok(true);
         }
 
         if let Some(last_block) = last_block {
@@ -235,7 +266,7 @@ impl InMemoryShareChain {
                     last_block.height,
                     block.height,
                 );
-                return Ok(ValidateBlockResult::new(false, true));
+                return Ok(false);
             }
 
             // validate PoW
@@ -257,86 +288,173 @@ impl InMemoryShareChain {
                 Ok(curr_difficulty) => {
                     let result =
                         self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block_header.height)?;
-                    if !result.valid {
+                    if !result {
                         return Ok(result);
                     }
                 },
                 Err(error) => {
                     warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", pow_algo);
                     debug!(target: LOG_TARGET, "[{:?}] Failed to calculate {} difficulty: {error:?}", pow_algo,pow_algo);
-                    return Ok(ValidateBlockResult::new(false, false));
+                    return Ok(false);
                 },
             }
 
             // TODO: check here for miners
             // TODO: (send merkle tree root hash and generate here, then compare the two from miners list and shares)
         } else {
-            return Ok(ValidateBlockResult::new(false, true));
+            return Ok(false);
         }
 
-        Ok(ValidateBlockResult::new(true, false))
+        Ok(true)
     }
 
     /// Submits a new block to share chain.
+    #[allow(clippy::too_many_lines)]
     async fn submit_block_with_lock(
         &self,
-        block_levels: &mut RwLockWriteGuard<'_, Vec<BlockLevel>>,
+        block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
         block: &Block,
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
-    ) -> ShareChainResult<SubmitBlockResult> {
-        let chain = self.chain(block_levels.iter());
-        let last_block = chain.last();
+    ) -> ShareChainResult<()> {
+        let height = block.height;
+        if block.height == 0 {
+            // TODO: Find out where this block 0 is coming from
+            return Ok(());
+            // return Err(Error::BlockValidation("Block height is 0".to_string()));
+        }
+
+        if block_levels.levels.is_empty() {
+            // TODO: Validate the block
+            block_levels
+                .levels
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            return Ok(());
+        }
+        let block_levels_len = block_levels.levels.len();
+
+        let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
+        let tip_height = tip_level.height;
+
+        // If we are syncing and we are very far behind, clear out the blocks we have and just add it
+        if (tip_height < block.height - 1) && sync {
+            // TODO: Validate the block
+            block_levels.levels.clear();
+            block_levels
+                .levels
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            return Ok(());
+        }
+
+        // Check if already added.
+        if let Some(level) = block_levels.get_at_height(height) {
+            if level.blocks.iter().any(|b| b.hash == block.hash) {
+                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
+                return Ok(());
+            }
+        }
+
+        // Find the parent.
+        let parent_height = height
+            .checked_sub(1)
+            .ok_or_else(|| Error::BlockValidation("Block height is 0".to_string()))?;
+        let level_index = usize::try_from(tip_height.checked_sub(parent_height).ok_or_else(|| {
+            Error::BlockValidation(format!(
+                "Block parent height is not stored in levels. parent: {}, tip: {}",
+                parent_height, tip_height
+            ))
+        })?)
+        .expect("32 bit systems are not supported");
+        let parent_level = block_levels.levels.get(level_index).ok_or_else(|| {
+            Error::BlockValidation(format!(
+                "Block parent height is not found in levels. index: {},  parent height:{}",
+                level_index, parent_height
+            ))
+        })?;
+
+        let parent = parent_level
+            .blocks
+            .iter()
+            .find(|b| block.prev_hash == b.hash)
+            .ok_or_else(|| {
+                Error::BlockValidation(format!(
+                    "Block parent is not found in levels. parent height: {}, parent hash: {}",
+                    parent_height,
+                    block.prev_hash.to_hex()
+                ))
+            })?;
 
         // validate
-        let validate_result = self.validate_block(last_block, block, params, sync).await?;
-        if !validate_result.valid {
-            return if validate_result.need_sync {
-                Ok(SubmitBlockResult::new(true))
-            } else {
-                Err(Error::InvalidBlock(block.clone()))
-            };
+        let validate_result = self.validate_block(Some(parent), block, params, sync).await?;
+        if !validate_result {
+            return Err(Error::InvalidBlock(block.clone()));
         }
 
-        // remove the first couple of block levels if needed
-        if block_levels.len() >= self.max_blocks_count {
-            let diff = block_levels.len() - self.max_blocks_count;
-            block_levels.drain(0..diff);
-        }
+        debug!(target: LOG_TARGET, "Reorging to main chain");
+        // parent_level.in_chain_index = parent_index;
+        let mut current_block_hash = block.prev_hash;
 
-        // look for the matching block level to append the new block to
-        if let Some(found_level) = block_levels
-            .iter_mut()
-            .filter(|level| level.height == block.height)
-            .last()
-        {
-            let found = found_level
+        // recalculate levels.
+        for p_i in (level_index)..block_levels.levels.len() {
+            let curr_level = block_levels.levels.get_mut(p_i).ok_or_else(|| {
+                Error::BlockValidation(format!(
+                    "Block parent height is not found in levels. index: {}, levels length: {}. parent height:{}",
+                    level_index, block_levels_len, parent_height
+                ))
+            })?;
+            let (new_index, new_parent) = curr_level
                 .blocks
                 .iter()
-                .filter(|curr_block| curr_block.generate_hash() == block.generate_hash())
-                .count() >
-                0;
-            if !found {
-                found_level.add_block(block.clone())?;
-                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
+                .enumerate()
+                .find(|(_i, b)| b.hash == current_block_hash)
+                .ok_or_else(|| {
+                    Error::BlockValidation(format!(
+                        "Block parent is not found in levels. parent height: {}, parent hash: {}",
+                        parent_height,
+                        block.prev_hash.to_hex()
+                    ))
+                })?;
+            if curr_level.in_chain_index == new_index {
+                break;
             }
-        } else if let Some(last_block) = last_block {
-            if last_block.height < block.height {
-                block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
-                debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
-            }
-        } else {
-            block_levels.push(BlockLevel::new(vec![block.clone()], block.height));
-            debug!(target: LOG_TARGET, "[{:?}] 🆕 New block added at height {:?}: {:?}", self.pow_algo, block.height, block.hash.to_hex());
+
+            curr_level.in_chain_index = new_index;
+            current_block_hash = new_parent.prev_hash;
         }
 
-        Ok(SubmitBlockResult::new(validate_result.need_sync))
+        block_levels.cached_shares = None;
+        // remove the first couple of block levels if needed
+        if block_levels.levels.len() >= self.max_blocks_count {
+            let diff = block_levels.levels.len() - self.max_blocks_count;
+            for _ in 0..diff {
+                if let Some(level) = block_levels.levels.pop_back() {
+                    debug!(target: LOG_TARGET, "[{:?}] 🗑️ Removed block level: {:?}", self.pow_algo, level.height);
+                } else {
+                    error!(target: LOG_TARGET, "[{:?}] Failed to remove block level!", self.pow_algo);
+                }
+            }
+        }
+
+        // Add the block.
+        if level_index == 0 {
+            block_levels
+                .levels
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+        } else {
+            block_levels
+                .levels
+                .get_mut(level_index.checked_sub(1).unwrap())
+                .unwrap()
+                .add_block(block.clone(), true)?;
+        }
+
+        Ok(())
     }
 }
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<SubmitBlockResult> {
+    async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
         self.submit_block_with_lock(
             &mut block_levels_write_lock,
@@ -345,76 +463,115 @@ impl ShareChain for InMemoryShareChain {
             false,
         )
         .await
+
         // let chain = self.chain(block_levels_write_lock.iter());
         // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
         // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
     }
 
-    async fn submit_blocks(&self, blocks: Vec<Block>, sync: bool) -> ShareChainResult<SubmitBlockResult> {
+    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
-        if sync {
-            let chain = self.chain(block_levels_write_lock.iter());
-            if let Some(last_block) = chain.last() {
-                if last_block.hash != genesis_block().hash &&
-                    !blocks.is_empty() &&
-                    last_block.height < blocks[0].height &&
-                    (blocks[0].height - last_block.height) > 1
-                {
-                    block_levels_write_lock.clear();
-                }
-            }
-        }
-
         for block in blocks {
-            let result = self
-                .submit_block_with_lock(
-                    &mut block_levels_write_lock,
-                    &block,
-                    self.block_validation_params.clone(),
-                    sync,
-                )
-                .await?;
-            if result.need_sync {
-                return Ok(SubmitBlockResult::new(true));
-            }
+            self.submit_block_with_lock(
+                &mut block_levels_write_lock,
+                &block,
+                self.block_validation_params.clone(),
+                true,
+            )
+            .await?;
         }
-
-        // let chain = self.chain(block_levels_write_lock.iter());
-        // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
-
-        Ok(SubmitBlockResult::new(false))
+        Ok(())
     }
 
     async fn tip_height(&self) -> ShareChainResult<u64> {
-        let block_levels_read_lock = self.block_levels.read().await;
-        let chain = self.chain(block_levels_read_lock.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
-        Ok(last_block.height)
+        let bl = self.block_levels.read().await;
+        let tip_level = bl.levels.front().map(|b| b.height).unwrap_or_default();
+        Ok(tip_level)
     }
 
-    async fn generate_shares(&self, reward: u64) -> Vec<NewBlockCoinbase> {
-        let chain = self.chain(self.block_levels.read().await.iter());
-        let windowed_chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
-        let miners = self.miners_with_shares(windowed_chain);
+    async fn generate_shares(&self) -> Vec<NewBlockCoinbase> {
+        let bl = self.block_levels.read().await;
+        if let Some(ref cached_shares) = bl.cached_shares {
+            return cached_shares.clone();
+        }
 
-        // calculate full hash rate and shares
-        miners
-            .iter()
-            .filter(|(_, share)| **share > 0)
-            .map(|(addr, share)| {
-                let curr_reward = (reward / SHARE_COUNT) * share;
-                debug!(target: LOG_TARGET, "[{:?}] {addr} -> SHARE: {share:?}, REWARD: {curr_reward:?}", self.pow_algo);
-                NewBlockCoinbase {
-                    address: addr.clone(),
-                    value: curr_reward,
-                    stealth_payment: true,
-                    revealed_value_proof: true,
-                    coinbase_extra: vec![],
+        drop(bl);
+
+        // Lock for writing so that it doesn't change during calculating
+        let mut bl = self.block_levels.write().await;
+
+        // There may be two threads that reach here, so double check if the shares are already calculated
+        if let Some(ref cached_shares) = bl.cached_shares {
+            return cached_shares.clone();
+        }
+
+        // Otherwise, let's calculate the shares
+        let mut shares_left = SHARE_COUNT;
+
+        let mut res = vec![];
+
+        // Subtract shares for miner reward.
+        shares_left -= MINER_REWARD_SHARES;
+
+        let mut miners_to_shares = HashMap::new();
+
+        for level in &bl.levels {
+            let main_block_index = level.in_chain_index;
+
+            // Main blocks
+            if let Some(main_block) = level.block_in_main_chain() {
+                let miner_address = main_block.miner_wallet_address.clone();
+                if miner_address.is_some() {
+                    let entry = miners_to_shares.entry(miner_address.unwrap().to_base58()).or_insert(0);
+                    *entry += MAIN_CHAIN_SHARE_AMOUNT;
                 }
-            })
-            .collect_vec()
+            } else {
+                error!(target: LOG_TARGET, "No main block in level: {:?}", level.height);
+            }
+            shares_left = shares_left.saturating_sub(MAIN_CHAIN_SHARE_AMOUNT);
+            if shares_left == 0 {
+                break;
+            }
+
+            // Only pay out uncles if there are shares left for all of them
+            if shares_left < UNCLE_BLOCK_SHARE_AMOUNT * (level.blocks.len() - 1) as u64 {
+                warn!(target: LOG_TARGET, "Not enough shares left for uncles! Shares left: {:?} level: {}", shares_left, level.height);
+                break;
+            }
+
+            // Uncle blocks
+            for (i, block) in level.blocks.iter().enumerate() {
+                if i == main_block_index {
+                    continue;
+                }
+                let miner_wallet_address = block.miner_wallet_address.clone();
+                if miner_wallet_address.is_none() {
+                    continue;
+                }
+                let addr = miner_wallet_address.unwrap().to_base58();
+                let share_count = miners_to_shares.entry(addr).or_insert(0);
+                *share_count += UNCLE_BLOCK_SHARE_AMOUNT;
+                shares_left = shares_left.saturating_sub(UNCLE_BLOCK_SHARE_AMOUNT);
+            }
+            if shares_left == 0 {
+                break;
+            }
+        }
+
+        for (key, value) in miners_to_shares {
+            res.push(NewBlockCoinbase {
+                address: key,
+                value,
+                stealth_payment: false,
+                revealed_value_proof: true,
+                coinbase_extra: vec![],
+            });
+        }
+
+        bl.cached_shares = Some(res.clone());
+
+        res
     }
 
     async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block> {
@@ -428,12 +585,16 @@ impl ShareChain for InMemoryShareChain {
 
         // get current share chain
         let block_levels_read_lock = self.block_levels.read().await;
-        let chain = self.chain(block_levels_read_lock.iter());
-        let last_block = chain.last().ok_or_else(|| Error::Empty)?;
+        let last_block = block_levels_read_lock
+            .levels
+            .front()
+            .ok_or_else(|| Error::Empty)?
+            .block_in_main_chain()
+            .ok_or_else(|| Error::Empty)?;
 
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
-            .with_prev_hash(last_block.generate_hash())
+            .with_prev_hash(last_block.hash)
             .with_height(last_block.height + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
@@ -443,13 +604,28 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>> {
+        // Should really only be used in syncing
         let block_levels_read_lock = self.block_levels.read().await;
-        let chain = self.chain(block_levels_read_lock.iter());
-        Ok(chain
-            .iter()
-            .filter(|block| block.height > from_height)
-            .cloned()
-            .collect())
+        let mut res = vec![];
+        if block_levels_read_lock.levels.is_empty() {
+            return Ok(res);
+        }
+
+        if block_levels_read_lock.levels.front().unwrap().height < from_height {
+            return Ok(res);
+        }
+
+        for level in &block_levels_read_lock.levels {
+            if level.height < from_height {
+                break;
+            }
+            if let Some(block) = level.block_in_main_chain() {
+                res.push(block.clone());
+            }
+        }
+
+        res.reverse();
+        Ok(res)
     }
 
     async fn hash_rate(&self) -> ShareChainResult<BigUint> {
@@ -504,15 +680,20 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>> {
-        let levels_lock = self.block_levels.read().await;
-        let chain = self.chain(levels_lock.iter());
-        let chain = chain.iter().tail(BLOCKS_WINDOW).collect_vec();
-        Ok(self.miners_with_shares(chain))
+        let bl = self.block_levels.read().await;
+        if let Some(ref shares) = bl.cached_shares {
+            return Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect());
+        }
+
+        drop(bl);
+        let shares = self.generate_shares().await;
+        Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect())
     }
 }
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};

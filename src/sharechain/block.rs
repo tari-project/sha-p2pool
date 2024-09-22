@@ -59,11 +59,13 @@ impl Block {
 
 pub(crate) struct BlockBuilder {
     block: Block,
+    use_specific_hash: bool,
 }
 
 impl BlockBuilder {
     pub fn new() -> Self {
         Self {
+            use_specific_hash: false,
             block: Block {
                 chain_id: CURRENT_CHAIN_ID.clone(),
                 hash: Default::default(),
@@ -103,8 +105,17 @@ impl BlockBuilder {
         self
     }
 
+    pub fn with_specific_hash(&mut self, hash: BlockHash) -> &mut Self {
+        self.block.hash = hash;
+        self.use_specific_hash = true;
+        self
+    }
+
     pub fn build(&mut self) -> Block {
-        self.block.hash = self.block.generate_hash();
+        if !self.use_specific_hash {
+            self.block.hash = self.block.generate_hash();
+        }
+        // self.block.hash = self.block.generate_hash();
         self.block.clone()
     }
 }
