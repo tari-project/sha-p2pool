@@ -34,7 +34,6 @@ use crate::{
         ShareChainResult,
         SubmitBlockResult,
         ValidateBlockResult,
-        BLOCKS_WINDOW,
         MAIN_CHAIN_SHARE_AMOUNT,
         MAX_SHARES_PER_MINER,
         MINER_REWARD_SHARES,

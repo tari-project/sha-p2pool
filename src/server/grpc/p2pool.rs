@@ -26,7 +26,6 @@ use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::sync::{RwLock, Semaphore};
 use tonic::{Request, Response, Status};
-const MIN_DIFFICULTY_REDUCTION_RATE: u64 = 20;
 
 use crate::{
     server::{
@@ -49,14 +48,10 @@ const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
     let consensus_constants = consensus_manager.consensus_constants(height);
     match pow {
-        PowAlgorithm::RandomX => consensus_constants
-            .min_pow_difficulty(pow)
-            .checked_div_u64(MIN_DIFFICULTY_REDUCTION_RATE)
-            .expect("checked_div_u64 should only fail on div by 0"),
-        PowAlgorithm::Sha3x => consensus_constants
-            .min_pow_difficulty(pow)
-            .checked_div_u64(MIN_DIFFICULTY_REDUCTION_RATE)
-            .expect("checked_div_u64 should only fail on div by 0"),
+        PowAlgorithm::RandomX => consensus_constants.min_pow_difficulty(pow),
+        PowAlgorithm::Sha3x => {
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() * 400).expect("Bad difficulty")
+        }, // SHA min difficulty is too low. Will be updated in future
     }
 }
 
