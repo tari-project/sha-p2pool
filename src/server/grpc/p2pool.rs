@@ -18,7 +18,6 @@ use minotari_app_grpc::tari_rpc::{
 use num_format::{Locale, ToFormattedString};
 use tari_common_types::types::FixedHash;
 use tari_core::{
-    blocks,
     consensus::ConsensusManager,
     proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
 };
@@ -40,7 +39,7 @@ use crate::{
         p2p,
         stats_store::StatsStore,
     },
-    sharechain::{block::Block, error::BlockConvertError, BlockValidationParams, ShareChain, SHARE_COUNT},
+    sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
@@ -181,10 +180,10 @@ where S: ShareChain
             .get_new_block_template(req)
             .await?
             .into_inner();
-        let miner_data = template_response
+        let _miner_data = template_response
             .miner_data
             .ok_or_else(|| Status::internal("missing miner data"))?;
-        let reward = miner_data.reward;
+        // let reward = miner_data.reward;
 
         // request new block template with shares as coinbases
         let share_chain = match pow_algo {

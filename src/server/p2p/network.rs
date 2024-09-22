@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{btree_set::SymmetricDifference, HashMap},
+    collections::HashMap,
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
@@ -482,6 +482,7 @@ where S: ShareChain
     }
 
     /// Main method to handle any message comes from gossipsub.
+    #[allow(clippy::too_many_lines)]
     async fn handle_new_gossipsub_message(&mut self, message: Message) {
         let peer = message.source;
         if peer.is_none() {
@@ -501,8 +502,12 @@ where S: ShareChain
                     self.network_peer_store.add(peer, payload).await;
                     if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
                         if curr_height < current_sha3x_height {
-                            self.sync_share_chain(PowAlgorithm::Sha3x, Some(peer), Some(curr_height.saturating_sub(100)))
-                                .await;
+                            self.sync_share_chain(
+                                PowAlgorithm::Sha3x,
+                                Some(peer),
+                                Some(curr_height.saturating_sub(100)),
+                            )
+                            .await;
                         }
                     }
 
@@ -577,7 +582,7 @@ where S: ShareChain
                         };
                         // TODO: Treating this as a sync for now.
                         match share_chain.add_synced_blocks(vec![payload.clone()]).await {
-                            Ok(result) => {
+                            Ok(_result) => {
                                 info!(target: LOG_TARGET, tribe = &self.config.tribe; "New block added to local share chain via gossip: {}. Height: {}", &payload.hash.to_hex(), &payload.height);
                             },
                             Err(error) => {

@@ -75,7 +75,7 @@ const LOG_TARGET: &str = "tari::p2pool::grpc::proxy";
 macro_rules! proxy_simple_result {
     ($self:ident, $call:ident, $request:ident) => {
         {
-            use crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+            use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
         let timer = std::time::Instant::now();
         let res = match $self.client.write().await.$call($request.into_inner()).await {
             Ok(resp) => Ok(resp),
@@ -99,7 +99,7 @@ macro_rules! proxy_simple_result {
 macro_rules! proxy_stream_result {
     ($self:ident, $call:ident, $request:ident, $page_size:ident) => {
  {
-    use crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+    use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
          let timer = std::time::Instant::now();
         let res = streaming_response(
             String::from(stringify!($call)),
@@ -120,7 +120,7 @@ macro_rules! proxy_stream_result {
 
     ($self:ident, $call:ident, $request:ident, $page_size:expr) => {
  {
-    use crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
+    use $crate::server::grpc::MAX_ACCEPTABLE_GRPC_TIMEOUT;
            let timer = std::time::Instant::now();
         let res = streaming_response(
             String::from(stringify!($call)),

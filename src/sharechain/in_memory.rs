@@ -3,18 +3,15 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    hash::Hash,
     slice::Iter,
     str::FromStr,
     sync::Arc,
 };
 
 use async_trait::async_trait;
-use digest::crypto_common::rand_core::block;
-use itertools::{enumerate, Itertools};
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
-use num::{BigUint, Saturating, Zero};
+use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
@@ -55,10 +52,8 @@ impl BlockLevels {
             return None;
         }
         let index = tip.checked_sub(height);
-        if index.is_none() {
-            return None;
-        }
-        self.levels.get(index.unwrap() as usize)
+        self.levels
+            .get(usize::try_from(index?).expect("32 bit systems not supported"))
     }
 }
 
@@ -314,6 +309,7 @@ impl InMemoryShareChain {
     }
 
     /// Submits a new block to share chain.
+    #[allow(clippy::too_many_lines)]
     async fn submit_block_with_lock(
         &self,
         block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
@@ -362,13 +358,14 @@ impl InMemoryShareChain {
         let parent_height = height
             .checked_sub(1)
             .ok_or_else(|| Error::BlockValidation("Block height is 0".to_string()))?;
-        let level_index = tip_height.checked_sub(parent_height).ok_or_else(|| {
+        let level_index = usize::try_from(tip_height.checked_sub(parent_height).ok_or_else(|| {
             Error::BlockValidation(format!(
                 "Block parent height is not stored in levels. parent: {}, tip: {}",
                 parent_height, tip_height
             ))
-        })? as usize;
-        let parent_level = block_levels.levels.get(level_index as usize).ok_or_else(|| {
+        })?)
+        .expect("32 bit systems are not supported");
+        let parent_level = block_levels.levels.get(level_index).ok_or_else(|| {
             Error::BlockValidation(format!(
                 "Block parent height is not found in levels. index: {},  parent height:{}",
                 level_index, parent_height
@@ -395,11 +392,11 @@ impl InMemoryShareChain {
 
         debug!(target: LOG_TARGET, "Reorging to main chain");
         // parent_level.in_chain_index = parent_index;
-        let mut current_block_hash = block.prev_hash.clone();
+        let mut current_block_hash = block.prev_hash;
 
         // recalculate levels.
         for p_i in (level_index)..block_levels.levels.len() {
-            let curr_level = block_levels.levels.get_mut(p_i as usize).ok_or_else(|| {
+            let curr_level = block_levels.levels.get_mut(p_i).ok_or_else(|| {
                 Error::BlockValidation(format!(
                     "Block parent height is not found in levels. index: {}, levels length: {}. parent height:{}",
                     level_index, block_levels_len, parent_height
@@ -409,7 +406,7 @@ impl InMemoryShareChain {
                 .blocks
                 .iter()
                 .enumerate()
-                .find(|(i, b)| b.hash == current_block_hash)
+                .find(|(_i, b)| b.hash == current_block_hash)
                 .ok_or_else(|| {
                     Error::BlockValidation(format!(
                         "Block parent is not found in levels. parent height: {}, parent hash: {}",
@@ -422,7 +419,7 @@ impl InMemoryShareChain {
             }
 
             curr_level.in_chain_index = new_index;
-            current_block_hash = new_parent.prev_hash.clone();
+            current_block_hash = new_parent.prev_hash;
         }
 
         block_levels.cached_shares = None;
@@ -446,7 +443,7 @@ impl InMemoryShareChain {
         } else {
             block_levels
                 .levels
-                .get_mut(level_index.checked_sub(1).unwrap() as usize)
+                .get_mut(level_index.checked_sub(1).unwrap())
                 .unwrap()
                 .add_block(block.clone(), true)?;
         }
@@ -476,14 +473,13 @@ impl ShareChain for InMemoryShareChain {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
-            let result = self
-                .submit_block_with_lock(
-                    &mut block_levels_write_lock,
-                    &block,
-                    self.block_validation_params.clone(),
-                    true,
-                )
-                .await?;
+            self.submit_block_with_lock(
+                &mut block_levels_write_lock,
+                &block,
+                self.block_validation_params.clone(),
+                true,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -526,7 +522,7 @@ impl ShareChain for InMemoryShareChain {
             // Main blocks
             if let Some(main_block) = level.block_in_main_chain() {
                 let miner_address = main_block.miner_wallet_address.clone();
-                if !miner_address.is_none() {
+                if miner_address.is_some() {
                     let entry = miners_to_shares.entry(miner_address.unwrap().to_base58()).or_insert(0);
                     *entry += MAIN_CHAIN_SHARE_AMOUNT;
                 }
@@ -534,7 +530,7 @@ impl ShareChain for InMemoryShareChain {
                 error!(target: LOG_TARGET, "No main block in level: {:?}", level.height);
             }
             shares_left = shares_left.saturating_sub(MAIN_CHAIN_SHARE_AMOUNT);
-            if shares_left <= 0 {
+            if shares_left == 0 {
                 break;
             }
 
@@ -558,7 +554,7 @@ impl ShareChain for InMemoryShareChain {
                 *share_count += UNCLE_BLOCK_SHARE_AMOUNT;
                 shares_left = shares_left.saturating_sub(UNCLE_BLOCK_SHARE_AMOUNT);
             }
-            if shares_left <= 0 {
+            if shares_left == 0 {
                 break;
             }
         }
@@ -598,7 +594,7 @@ impl ShareChain for InMemoryShareChain {
 
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
-            .with_prev_hash(last_block.hash.clone())
+            .with_prev_hash(last_block.hash)
             .with_height(last_block.height + 1)
             .with_original_block_header(origin_block.header.clone())
             .with_miner_wallet_address(
@@ -619,7 +615,7 @@ impl ShareChain for InMemoryShareChain {
             return Ok(res);
         }
 
-        for level in block_levels_read_lock.levels.iter() {
+        for level in &block_levels_read_lock.levels {
             if level.height < from_height {
                 break;
             }
