@@ -1,29 +1,22 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use axum::{extract::State, http::StatusCode, Json};
 use log::{error, info};
 use serde::Serialize;
-use tari_core::{proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
-use tari_utilities::{epoch_time::EpochTime, hex::Hex};
+use tari_core::proof_of_work::PowAlgorithm;
+use tari_utilities::epoch_time::EpochTime;
 use tokio::sync::oneshot;
 
 use super::{models::ChainStats, MAX_ACCEPTABLE_HTTP_TIMEOUT};
 use crate::server::{
     http::{
         server::AppState,
-        stats::{
-            algo_stat_key,
-            models::{BlockStats, EstimatedEarnings, SquadDetails, Stats},
-            MINER_STAT_ACCEPTED_BLOCKS_COUNT,
-            MINER_STAT_REJECTED_BLOCKS_COUNT,
-            P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
-            P2POOL_STAT_REJECTED_BLOCKS_COUNT,
-        },
+        stats::models::{SquadDetails, Stats},
     },
-    p2p::{ConnectedPeerInfo, ConnectionCounters, ConnectionInfo, NetworkInfo, P2pServiceQuery},
+    p2p::{ConnectedPeerInfo, P2pServiceQuery},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats::get";
@@ -35,10 +28,9 @@ pub(crate) struct BlockResult {
     timestamp: EpochTime,
     prev_hash: String,
     height: u64,
-    // original_block_header: BlockHeader,
-    miner_wallet_address: Option<String>,
+    miner_wallet_address: String,
     sent_to_main_chain: bool,
-    achieved_difficulty: u64,
+    target_difficulty: u64,
     candidate_block_height: u64,
     candidate_block_prev_hash: String,
     algo: String,
@@ -75,8 +67,8 @@ pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<
     }))
 }
 
-pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
-    let timer = std::time::Instant::now();
+pub(crate) async fn handle_chain(State(_state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+    let _timer = std::time::Instant::now();
     // let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
     //     error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
     //     StatusCode::INTERNAL_SERVER_ERROR
@@ -108,7 +100,7 @@ pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<V
 }
 
 pub(crate) async fn handle_miners_with_shares(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Result<Json<HashMap<String, HashMap<String, u64>>>, StatusCode> {
     // let timer = std::time::Instant::now();
     // let mut result = HashMap::with_capacity(2);
@@ -197,7 +189,7 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
 }
 
 #[allow(clippy::too_many_lines)]
-async fn get_chain_stats(state: AppState, algo: PowAlgorithm) -> Result<ChainStats, StatusCode> {
+async fn get_chain_stats(state: AppState, _algo: PowAlgorithm) -> Result<ChainStats, StatusCode> {
     return Ok(ChainStats {
         share_chain_height: 0,
         share_chain_length: 0,
@@ -240,28 +232,27 @@ async fn get_chain_stats(state: AppState, algo: PowAlgorithm) -> Result<ChainSta
     // error!(target: LOG_TARGET, "Failed to get hash rate of share chain: {error:?}");
     // StatusCode::INTERNAL_SERVER_ERROR
     // })?;
-    todo!();
-    let share_chain_length = 0;
-    let share_chain_height = 0;
-
-    let result = ChainStats {
-        // num_of_miners: shares.keys().len(),
-        // num_of_miners: 0,
-        share_chain_height,
-        share_chain_length,
-        // pool_hash_rate: pool_hash_rate.to_string(),
-        // pool_total_earnings: MicroMinotari::from(0),
-        // pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(0)),
-        // total_earnings: Default::default(),
-        // estimated_earnings: Default::default(),
-        // miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
-        // p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
-        squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
-    };
+    // let share_chain_length = 0;
+    // let share_chain_height = 0;
+    //
+    // let result = ChainStats {
+    //     // num_of_miners: shares.keys().len(),
+    //     // num_of_miners: 0,
+    //     share_chain_height,
+    //     share_chain_length,
+    //     // pool_hash_rate: pool_hash_rate.to_string(),
+    //     // pool_total_earnings: MicroMinotari::from(0),
+    //     // pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(0)),
+    //     // total_earnings: Default::default(),
+    //     // estimated_earnings: Default::default(),
+    //     // miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
+    //     // p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
+    //     squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
+    // };
 
     // stats_cache.update(result.clone(), algo).await;
 
-    Ok(result)
+    // Ok(result)
 }
 
 // vasync fn miner_block_stats(stats_store: Arc<StatsStore>, algo: PowAlgorithm) -> BlockStats {

@@ -3,23 +3,14 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::RwLock,
     time::{Duration, Instant},
 };
 
-use itertools::Itertools;
 use libp2p::PeerId;
-use log::{debug, warn};
-use moka::future::{Cache, CacheBuilder};
-use tari_core::proof_of_work::PowAlgorithm;
-use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::{
-    http::stats_collector::StatsBroadcastClient,
-    p2p::{messages::PeerInfo, Squad},
-};
+use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
 
-const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
+// const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
 
 #[derive(Copy, Clone, Debug)]
@@ -87,7 +78,7 @@ pub struct PeerStore {
 
 impl PeerStore {
     /// Constructs a new peer store with config.
-    pub fn new(config: &PeerStoreConfig, stats_broadcast_client: StatsBroadcastClient) -> Self {
+    pub fn new(_config: &PeerStoreConfig, stats_broadcast_client: StatsBroadcastClient) -> Self {
         Self {
             stats_broadcast_client,
             whitelist_peers: HashMap::new(),
@@ -225,7 +216,7 @@ impl PeerStore {
 
     pub async fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
         if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
-            let mut record = self.whitelist_peers.remove(&peer_id.to_base58());
+            let record = self.whitelist_peers.remove(&peer_id.to_base58());
             if let Some(mut record) = record {
                 record.last_grey_list_reason = Some(reason.clone());
                 self.greylist_peers.insert(peer_id.to_base58(), record);

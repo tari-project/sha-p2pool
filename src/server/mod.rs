@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub use config::*;
-pub use server::*;
 
 mod config;
 
 #[allow(clippy::module_inception)]
-mod server;
+pub mod server;
 
 pub mod grpc;
 pub mod http;

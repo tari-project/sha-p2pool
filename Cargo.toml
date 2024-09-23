@@ -4,14 +4,15 @@ name = "sha_p2pool"
 version = "0.3.4"
 
 [dependencies]
-minotari_app_grpc = {git = "https://github.com/tari-project/tari.git"}
-minotari_node_grpc_client = {git = "https://github.com/tari-project/tari.git"}
-tari_common = {git = "https://github.com/tari-project/tari.git"}
-tari_common_types = {git = "https://github.com/tari-project/tari.git"}
-tari_core = {git = "https://github.com/tari-project/tari.git"}
-# tari_crypto = "0.20.1"
-tari_shutdown = {git = "https://github.com/tari-project/tari.git"}
-tari_utilities = {version = "0.7", features = ["borsh"]}
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
+tari_core = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
+tari_script = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
+tari_crypto = "0.21.0"
+tari_utilities = {version = "0.8", features = ["borsh"]}
 
 anyhow = "1.0"
 async-trait = "0.1.80"
@@ -55,7 +56,7 @@ serde_cbor = "0.11.2"
 serde_json = "1.0.122"
 thiserror = "1.0"
 tokio = {version = "1.38.0", features = ["full"]}
-tonic = "0.8.3"
+tonic = "0.12.3"
 
 [package.metadata.cargo-machete]
 ignored = ["log4rs"]

@@ -10,42 +10,50 @@ use tari_core::{
 };
 use thiserror::Error;
 
-use crate::sharechain::block::Block;
+use crate::sharechain::p2block::P2Block;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("gRPC Block conversion error: {0}")]
-    BlockConvert(#[from] BlockConvertError),
-    #[error("Share chain is empty!")]
-    Empty,
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {0:?}")]
-    InvalidBlock(Block),
-    #[error("Too many blocks in this level")]
-    TooManyBlocksInThisLevel,
+    InvalidBlock(P2Block),
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
-    #[error("Difficulty calculation error: {0}")]
-    Difficulty(#[from] DifficultyError),
-    #[error("RandomX difficulty calculation error: {0}")]
-    RandomXDifficulty(#[from] MergeMineError),
     #[error("Consensus builder error: {0}")]
     ConsensusBuilder(#[from] ConsensusBuilderError),
     #[error("Failed to convert to block hash: {0}")]
     BlockHashConversion(#[from] FixedHashSizeError),
     #[error("Block validation error: {0}")]
     BlockValidation(String),
+    #[error("Difficulty calculation has overflowed")]
+    DifficultyOverflow,
+    #[error("Uncle block not found in chain")]
+    UncleBlockNotFound,
+    #[error("Block not found in chain")]
+    BlockNotFound,
+    #[error("Expected Block level not found in chain")]
+    BlockLevelNotFound,
+    #[error("Validation error: {0}")]
+    ValidationError(#[from] ValidationError),
     #[error("Block parent does not exist")]
     BlockParentDoesNotExist { num_missing_parents: u64 },
-    #[error("The POW algo is not correct for this chain")]
-    WrongPowAlgorithm,
+    #[error("Missing block validation params!")]
+    MissingBlockValidationParams,
 }
 
 #[derive(Error, Debug)]
-pub enum BlockConvertError {
-    #[error("Missing field: {0}")]
-    MissingField(String),
-    #[error("Converting gRPC block error: {0}")]
-    GrpcBlockConvert(String),
+pub enum ValidationError {
+    #[error("Proof of work algorithm does not match chain algorithm")]
+    InvalidPowAlgorithm,
+    #[error("Difficulty is below the allowed minimum")]
+    DifficultyBelowMinimum,
+    #[error("Number conversion error: {0}")]
+    FromIntConversion(#[from] TryFromIntError),
+    #[error("Missing block validation params!")]
+    MissingBlockValidationParams,
+    #[error("Difficulty calculation error: {0}")]
+    Difficulty(#[from] DifficultyError),
+    #[error("RandomX difficulty calculation error: {0}")]
+    RandomXDifficulty(#[from] MergeMineError),
 }

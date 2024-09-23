@@ -18,7 +18,6 @@ mod network;
 pub mod peer_store;
 mod relay_store;
 pub mod util;
-
 pub const MAX_MISSING_PARENTS_TO_SNOOZE: u64 = 10;
 pub const MAX_SNOOZES: usize = 5;
 pub const MAX_SNOOZE_DURATION: Duration = Duration::from_secs(2); // 2 seconds, max 10 seconds of snoozing

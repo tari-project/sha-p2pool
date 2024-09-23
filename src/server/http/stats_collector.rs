@@ -1,5 +1,4 @@
 use log::{error, info};
-use num_format::{Locale, ToFormattedString};
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::epoch_time::EpochTime;
@@ -61,17 +60,17 @@ impl StatsCollector {
 
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
-            StatData::ChainStats { chain, .. } => {},
-            StatData::MinerBlockAccepted { pow_algo, .. } => {
+            StatData::ChainStats { .. } => {},
+            StatData::MinerBlockAccepted { .. } => {
                 self.miner_accepted += 1;
             },
-            StatData::MinerBlockRejected { pow_algo, .. } => {
+            StatData::MinerBlockRejected { .. } => {
                 self.miner_rejected += 1;
             },
-            StatData::PoolBlockAccepted { pow_algo, .. } => {
+            StatData::PoolBlockAccepted { .. } => {
                 self.pool_accepted += 1;
             },
-            StatData::PoolBlockRejected { pow_algo, .. } => {
+            StatData::PoolBlockRejected { .. } => {
                 self.pool_rejected += 1;
             },
             StatData::ChainChanged {
@@ -126,7 +125,7 @@ impl StatsCollector {
                 },
                 res = self.request_rx.recv() => {
                     match res {
-                        Some(StatsRequest::GetStats(pow, tx)) => {
+                        Some(StatsRequest::GetStats(_pow, _tx)) => {
                             todo!();
                             // let _ = tx.send(hashrate);
                         },

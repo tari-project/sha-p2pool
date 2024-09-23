@@ -1,29 +1,28 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
+use tari_common_types::tari_address::TariAddress;
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::{server::p2p::ConnectionInfo, sharechain::block::Block};
+use crate::{server::p2p::ConnectionInfo, sharechain::p2block::P2Block};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StatsBlock {
     pub hash: String,
     pub height: u64,
     pub timestamp: EpochTime,
-    pub miner_wallet_address: Option<String>,
+    pub miner_wallet_address: TariAddress,
 }
 
-impl From<Block> for StatsBlock {
-    fn from(block: Block) -> Self {
+impl From<P2Block> for StatsBlock {
+    fn from(block: P2Block) -> Self {
         StatsBlock {
             hash: block.hash.to_hex(),
             height: block.height,
             timestamp: block.timestamp,
-            miner_wallet_address: block.miner_wallet_address.clone().map(|addr| addr.to_base58()),
+            miner_wallet_address: block.miner_wallet_address.clone(),
         }
     }
 }
