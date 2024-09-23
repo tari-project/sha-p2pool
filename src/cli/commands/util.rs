@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{env, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc};
 
 use libp2p::identity::Keypair;
 use log::info;
@@ -12,6 +12,7 @@ use tari_core::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
+use tokio::sync::RwLock;
 
 use crate::{
     cli::args::{Cli, StartArgs},
@@ -99,14 +100,28 @@ genesis_block_hash.to_hex());
         consensus_manager.clone(),
         genesis_block_hash,
     ));
-    let share_chain_sha3x =
-        InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager.clone())?;
+    let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+    let share_chain_sha3x = InMemoryShareChain::new(
+        MAX_BLOCKS_COUNT,
+        PowAlgorithm::Sha3x,
+        None,
+        consensus_manager.clone(),
+        coinbase_extras.clone(),
+    )?;
     let share_chain_random_x = InMemoryShareChain::new(
         MAX_BLOCKS_COUNT,
         PowAlgorithm::RandomX,
         Some(block_validation_params.clone()),
         consensus_manager,
+        coinbase_extras.clone(),
     )?;
 
-    Ok(Server::new(config, share_chain_sha3x, share_chain_random_x, shutdown_signal).await?)
+    Ok(Server::new(
+        config,
+        share_chain_sha3x,
+        share_chain_random_x,
+        coinbase_extras.clone(),
+        shutdown_signal,
+    )
+    .await?)
 }

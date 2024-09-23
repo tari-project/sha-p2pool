@@ -36,6 +36,7 @@ pub(crate) struct Block {
     pub miner_wallet_address: Option<TariAddress>,
     pub sent_to_main_chain: bool,
     pub achieved_difficulty: Difficulty,
+    pub miner_coinbase_extra: Vec<u8>,
 }
 impl_conversions!(Block);
 
@@ -76,6 +77,7 @@ impl BlockBuilder {
                 miner_wallet_address: Default::default(),
                 sent_to_main_chain: false,
                 achieved_difficulty: Difficulty::min(),
+                miner_coinbase_extra: vec![],
             },
         }
     }
@@ -97,6 +99,11 @@ impl BlockBuilder {
 
     pub fn with_original_block_header(&mut self, original_block_header: BlockHeader) -> &mut Self {
         self.block.original_block_header = original_block_header;
+        self
+    }
+
+    pub fn with_miner_coinbase_extra(&mut self, coinbase_extra: Vec<u8>) -> &mut Self {
+        self.block.miner_coinbase_extra = coinbase_extra;
         self
     }
 

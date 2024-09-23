@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -13,6 +14,7 @@ use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 use crate::{
     server::{
@@ -60,6 +62,7 @@ where S: ShareChain
         config: config::Config,
         share_chain_sha3x: S,
         share_chain_random_x: S,
+        coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
@@ -103,6 +106,8 @@ where S: ShareChain
                 randomx_factory,
                 consensus_manager,
                 genesis_block_hash,
+                config.p2p_service.tribe.clone(),
+                coinbase_extras.clone(),
             )
             .await
             .map_err(Error::Grpc)?;

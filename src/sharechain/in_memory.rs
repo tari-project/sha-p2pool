@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{vec_deque, HashMap, VecDeque},
     slice::Iter,
     str::FromStr,
     sync::Arc,
 };
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
@@ -23,7 +24,10 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use super::MAX_BLOCKS_COUNT;
 use crate::{
-    server::grpc::p2pool::min_difficulty,
+    server::{
+        grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
+        p2p::Tribe,
+    },
     sharechain::{
         error::{BlockConvertError, Error},
         Block,
@@ -63,6 +67,7 @@ pub(crate) struct InMemoryShareChain {
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
+    coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 /// A collection of blocks with the same height.
@@ -117,6 +122,7 @@ impl InMemoryShareChain {
         pow_algo: PowAlgorithm,
         block_validation_params: Option<Arc<BlockValidationParams>>,
         consensus_manager: ConsensusManager,
+        coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(Error::MissingBlockValidationParams);
@@ -133,6 +139,7 @@ impl InMemoryShareChain {
             pow_algo,
             block_validation_params,
             consensus_manager,
+            coinbase_extras,
         })
     }
 
@@ -453,6 +460,38 @@ impl InMemoryShareChain {
 
         Ok(())
     }
+
+    async fn find_coinbase_extra(
+        &self,
+        block_level_iter: vec_deque::Iter<'_, BlockLevel>,
+        miner_wallet_address: TariAddress,
+    ) -> Option<Vec<u8>> {
+        // check if we have coinbase in cache (it is the newest, since miner sent it recently)
+        let coinbase_extras_lock = self.coinbase_extras.read().await;
+        if let Some(found_coinbase_extras) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
+            return Some(found_coinbase_extras.clone());
+        }
+        drop(coinbase_extras_lock);
+
+        Some(
+            block_level_iter
+                .map(|level| {
+                    level
+                        .blocks
+                        .as_slice()
+                        .iter()
+                        .cloned()
+                        .filter(|block| block.miner_wallet_address == Some(miner_wallet_address.clone()))
+                        .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
+                        .last()
+                })
+                .filter(|block_option| block_option.is_some())
+                .map(|block_option| block_option.unwrap())
+                .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
+                .last()?
+                .miner_coinbase_extra,
+        )
+    }
 }
 
 #[async_trait]
@@ -493,7 +532,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(tip_level)
     }
 
-    async fn generate_shares(&self) -> Vec<NewBlockCoinbase> {
+    async fn generate_shares(&self, tribe: Tribe) -> Vec<NewBlockCoinbase> {
         let bl = self.block_levels.read().await;
         if let Some(ref cached_shares) = bl.cached_shares {
             return cached_shares.clone();
@@ -563,12 +602,24 @@ impl ShareChain for InMemoryShareChain {
         }
 
         for (key, value) in miners_to_shares {
+            // find coinbase extra for wallet address
+            let mut coinbase_extra = convert_coinbase_extra(tribe.clone(), String::new());
+            if let Ok(miner_wallet_address) = TariAddress::from_str(key.as_str()) {
+                if let Some(coinbase_extra_found) =
+                    self.find_coinbase_extra(bl.levels.iter(), miner_wallet_address).await
+                {
+                    coinbase_extra = coinbase_extra_found;
+                }
+            }
+
+            info!(target: LOG_TARGET, "Current coinbase extra: {:?}", coinbase_extra.to_hex()); // TODO: remove
+
             res.push(NewBlockCoinbase {
                 address: key,
                 value,
                 stealth_payment: false,
                 revealed_value_proof: true,
-                coinbase_extra: vec![],
+                coinbase_extra,
             });
         }
 
@@ -577,7 +628,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block> {
+    async fn new_block(&self, request: &SubmitBlockRequest, tribe: Tribe) -> ShareChainResult<Block> {
         let origin_block_grpc = request
             .block
             .as_ref()
@@ -595,14 +646,25 @@ impl ShareChain for InMemoryShareChain {
             .block_in_main_chain()
             .ok_or_else(|| Error::Empty)?;
 
+        let miner_wallet_address =
+            TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?;
+
+        // coinbase extra
+        let coinbase_extras_lock = self.coinbase_extras.read().await;
+        let coinbase_extra =
+            if let Some(found_coinbase_extra) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
+                found_coinbase_extra.clone()
+            } else {
+                convert_coinbase_extra(tribe, String::new())
+            };
+
         Ok(Block::builder()
             .with_timestamp(EpochTime::now())
             .with_prev_hash(last_block.hash)
             .with_height(last_block.height + 1)
+            .with_miner_coinbase_extra(coinbase_extra)
             .with_original_block_header(origin_block.header.clone())
-            .with_miner_wallet_address(
-                TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?,
-            )
+            .with_miner_wallet_address(miner_wallet_address)
             .build())
     }
 
@@ -682,14 +744,14 @@ impl ShareChain for InMemoryShareChain {
         // Ok(hash_rates_sum.div(hash_rates_count))
     }
 
-    async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>> {
+    async fn miners_with_shares(&self, tribe: Tribe) -> ShareChainResult<HashMap<String, u64>> {
         let bl = self.block_levels.read().await;
         if let Some(ref shares) = bl.cached_shares {
             return Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect());
         }
 
         drop(bl);
-        let shares = self.generate_shares().await;
+        let shares = self.generate_shares(tribe).await;
         Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect())
     }
 }

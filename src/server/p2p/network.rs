@@ -111,6 +111,10 @@ impl Tribe {
     pub fn formatted(&self) -> String {
         self.inner.to_case(Case::Lower).replace("_", " ").to_case(Case::Title)
     }
+
+    pub fn as_string(&self) -> String {
+        self.inner.to_case(Case::Lower)
+    }
 }
 
 impl ToValue for Tribe {

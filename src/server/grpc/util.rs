@@ -10,7 +10,10 @@ use tari_shutdown::ShutdownSignal;
 use tokio::select;
 use tonic::transport::Channel;
 
-use crate::server::grpc::error::{Error, TonicError};
+use crate::server::{
+    grpc::error::{Error, TonicError},
+    p2p::Tribe,
+};
 
 /// Utility function to connect to a Base node and try infinitely when it fails until gets connected.
 pub async fn connect_base_node(
@@ -48,4 +51,18 @@ pub async fn connect_base_node(
     };
 
     Ok(client)
+}
+
+pub fn convert_coinbase_extra(tribe: Tribe, custom_coinbase_extra: String) -> Vec<u8> {
+    let type_length_value_marker = 0xFFu8;
+    let tribe_type_marker = 0x02u8;
+    let custom_message_type_marker = 0x01u8;
+    let mut current_tribe = tribe.as_string().into_bytes();
+    let mut result = vec![type_length_value_marker, tribe_type_marker, current_tribe.len() as u8];
+    result.append(&mut current_tribe);
+    let mut coinbase_extra_bytes = custom_coinbase_extra.into_bytes();
+    result.append(&mut vec![custom_message_type_marker, coinbase_extra_bytes.len() as u8]);
+    result.append(&mut coinbase_extra_bytes);
+
+    result
 }
