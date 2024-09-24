@@ -2918,8 +2918,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -2948,8 +2948,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_ledger_wallet_common"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "bs58 0.5.1",
 ]
@@ -2957,7 +2957,7 @@ dependencies = [
 [[package]]
 name = "minotari_node_grpc_client"
 version = "0.1.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -4406,7 +4406,7 @@ dependencies = [
 
 [[package]]
 name = "sha_p2pool"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4763,8 +4763,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "anyhow",
  "config",
@@ -4787,8 +4787,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_sqlite"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -4801,8 +4801,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_types"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "base64 0.21.7",
  "bitflags 2.6.0",
@@ -4827,8 +4827,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4871,8 +4871,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_dht"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
@@ -4906,8 +4906,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_rpc_macros"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4916,8 +4916,8 @@ dependencies = [
 
 [[package]]
 name = "tari_core"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "async-trait",
  "bincode",
@@ -5007,13 +5007,13 @@ dependencies = [
 
 [[package]]
 name = "tari_features"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 
 [[package]]
 name = "tari_hashing"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "borsh",
  "digest",
@@ -5022,8 +5022,8 @@ dependencies = [
 
 [[package]]
 name = "tari_key_manager"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5055,8 +5055,8 @@ dependencies = [
 
 [[package]]
 name = "tari_max_size"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "borsh",
  "serde",
@@ -5066,8 +5066,8 @@ dependencies = [
 
 [[package]]
 name = "tari_mmr"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "borsh",
  "digest",
@@ -5080,8 +5080,8 @@ dependencies = [
 
 [[package]]
 name = "tari_p2p"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "anyhow",
  "fs2",
@@ -5110,8 +5110,8 @@ dependencies = [
 
 [[package]]
 name = "tari_script"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "blake2",
  "borsh",
@@ -5128,8 +5128,8 @@ dependencies = [
 
 [[package]]
 name = "tari_service_framework"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5143,16 +5143,16 @@ dependencies = [
 
 [[package]]
 name = "tari_shutdown"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "futures 0.3.30",
 ]
 
 [[package]]
 name = "tari_storage"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "bincode",
  "lmdb-zero",
@@ -5163,8 +5163,8 @@ dependencies = [
 
 [[package]]
 name = "tari_test_utils"
-version = "1.5.0-pre.0"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/p2pool-coinbase-extra#4ad63cd5b17e43682c9cf990099eebc9133bb38e"
+version = "1.5.1-pre.0"
+source = "git+https://github.com/tari-project/tari.git#fd41ba490470ff43fb3dc7e31fc6fc77266f264e"
 dependencies = [
  "futures 0.3.30",
  "rand",
