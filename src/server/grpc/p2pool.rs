@@ -312,10 +312,16 @@ where S: ShareChain
             .map_err(|error| Status::internal(error.to_string()))?;
 
         let origin_block_header = &&block.original_block_header.clone();
+        debug!(
+            "Submitted block pow_data size: {} bytes, hash: {}",
+            block.original_block_header.pow.pow_data.len(),
+            block.hash
+        );
 
         debug!(target: LOG_TARGET, "Trace - getting block difficulty: {}", timer.elapsed().as_millis());
         // Check block's difficulty compared to the latest network one to increase the probability
         // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
+        let start = Instant::now();
         let request_block_difficulty = match origin_block_header.pow.pow_algo {
             PowAlgorithm::Sha3x => {
                 sha3x_difficulty(origin_block_header).map_err(|error| Status::internal(error.to_string()))?
@@ -329,9 +335,11 @@ where S: ShareChain
             .map_err(|error| Status::internal(error.to_string()))?,
         };
         info!(
-            target: LOG_TARGET,
-            "Submitted {} block difficulty: {}",
-            origin_block_header.pow.pow_algo, request_block_difficulty
+            "Submitted {} block difficulty: {} (calculated in {:.2?}, hash: {}",
+            origin_block_header.pow.pow_algo,
+            request_block_difficulty,
+            start.elapsed(),
+            block.hash
         );
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
         // waste time before submitting it, or we might lose a share
@@ -378,7 +386,16 @@ where S: ShareChain
         if *max_difficulty < request_block_difficulty {
             *max_difficulty = request_block_difficulty;
         }
-
+        info!(
+            "Max difficulty: {}. Network difficulty {}. Accepted {}, hash: {}",
+            (*max_difficulty).as_u64().to_formatted_string(&Locale::en),
+            network_difficulty.as_u64().to_formatted_string(&Locale::en),
+            self.stats_store
+                .get(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT))
+                .await
+                .to_formatted_string(&Locale::en),
+            block.hash
+        );
         block.achieved_difficulty = request_block_difficulty;
 
         debug!(target: LOG_TARGET, "Trace - checking if can submit to main chain: {}", timer.elapsed().as_millis());
