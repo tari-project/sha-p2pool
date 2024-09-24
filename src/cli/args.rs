@@ -8,7 +8,7 @@ use tari_shutdown::ShutdownSignal;
 
 use crate::cli::{
     commands,
-    util::{cli_styles, validate_tribe},
+    util::{cli_styles, validate_squad},
 };
 
 #[allow(clippy::struct_excessive_bools)]
@@ -63,12 +63,12 @@ pub struct StartArgs {
     #[arg(long, value_name = "stable-peer", default_value_t = false)]
     pub stable_peer: bool,
 
-    /// Tribe to enter (a team of miners).
-    /// A tribe can have any name.
+    /// Squad to enter (a team of miners).
+    /// A squad can have any name.
     #[arg(
-        long, value_name = "tribe", default_value = "default", value_parser = validate_tribe
+        long, alias = "tribe", value_name = "squad", default_value = "default", value_parser = validate_squad
     )]
-    pub tribe: String,
+    pub squad: String,
 
     /// Private key folder.
     ///
@@ -110,10 +110,10 @@ pub struct StartArgs {
 }
 
 #[derive(Clone, Parser, Debug)]
-pub struct ListTribeArgs {
-    /// List tribe command timeout in seconds.
+pub struct ListSquadArgs {
+    /// List squad command timeout in seconds.
     ///
-    /// The list-tribes commands tries to look for all the currently available tribes
+    /// The list-squads commands tries to look for all the currently available squads
     /// for this amount of time maximum.
     #[arg(long, value_name = "timeout", default_value_t = 15)]
     pub timeout: u64,
@@ -130,13 +130,13 @@ pub enum Commands {
     /// Generating new identity.
     GenerateIdentity,
 
-    /// Listing all tribes that are present on the network.
-    ListTribes {
+    /// Listing all squads that are present on the network.
+    ListSquads {
         #[clap(flatten)]
         args: StartArgs,
 
         #[clap(flatten)]
-        list_tribe_args: ListTribeArgs,
+        list_squad_args: ListSquadArgs,
     },
 }
 
@@ -157,9 +157,9 @@ impl Cli {
                 .clone()
                 .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
             Commands::GenerateIdentity => dirs::home_dir().unwrap().join(".tari/p2pool"),
-            Commands::ListTribes {
+            Commands::ListSquads {
                 args,
-                list_tribe_args: _list_tribe_args,
+                list_squad_args: _list_squad_args,
             } => args
                 .base_dir
                 .clone()
@@ -180,8 +180,8 @@ impl Cli {
             Commands::GenerateIdentity => {
                 commands::handle_generate_identity().await?;
             },
-            Commands::ListTribes { args, list_tribe_args } => {
-                commands::handle_list_tribes(cli_ref.clone(), args, list_tribe_args, cli_shutdown.clone()).await?;
+            Commands::ListSquads { args, list_squad_args } => {
+                commands::handle_list_squads(cli_ref.clone(), args, list_squad_args, cli_shutdown.clone()).await?;
             },
         }
 

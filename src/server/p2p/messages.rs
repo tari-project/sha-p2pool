@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
 
 use crate::{
-    server::p2p::{Error, Tribe},
+    server::p2p::{Error, Squad},
     sharechain::block::Block,
 };
 
@@ -48,20 +48,20 @@ pub struct PeerInfo {
     pub version: u64,
     pub current_sha3x_height: u64,
     pub current_random_x_height: u64,
-    pub tribe: Tribe,
+    pub squad: Squad,
     pub timestamp: u128,
     pub user_agent: Option<String>,
     pub user_agent_version: Option<String>,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
-    pub fn new(current_sha3x_height: u64, current_random_x_height: u64, tribe: Tribe) -> Self {
+    pub fn new(current_sha3x_height: u64, current_random_x_height: u64, squad: Squad) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
             version: 1,
             current_sha3x_height,
             current_random_x_height,
-            tribe,
+            squad,
             timestamp,
             user_agent: Some("tari-p2pool".to_string()),
             user_agent_version: Some(env!("CARGO_PKG_VERSION").to_string()),

@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{num::TryFromIntError, time::Duration};
 
 use log::error;
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
@@ -10,7 +10,10 @@ use tari_shutdown::ShutdownSignal;
 use tokio::select;
 use tonic::transport::Channel;
 
-use crate::server::grpc::error::{Error, TonicError};
+use crate::server::{
+    grpc::error::{Error, TonicError},
+    p2p::Squad,
+};
 
 /// Utility function to connect to a Base node and try infinitely when it fails until gets connected.
 pub async fn connect_base_node(
@@ -48,4 +51,22 @@ pub async fn connect_base_node(
     };
 
     Ok(client)
+}
+
+pub fn convert_coinbase_extra(squad: Squad, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
+    let type_length_value_marker = 0xFFu8;
+    let squad_type_marker = 0x02u8;
+    let custom_message_type_marker = 0x01u8;
+
+    let mut current_squad = squad.as_string().into_bytes();
+    let current_squad_len = u8::try_from(current_squad.len())?;
+    let mut result = vec![type_length_value_marker, squad_type_marker, current_squad_len];
+    result.append(&mut current_squad);
+
+    let mut custom_coinbase_extra_bytes = custom_coinbase_extra.into_bytes();
+    let custom_coinbase_extra_len = u8::try_from(custom_coinbase_extra_bytes.len())?;
+    result.append(&mut vec![custom_message_type_marker, custom_coinbase_extra_len]);
+    result.append(&mut custom_coinbase_extra_bytes);
+
+    Ok(result)
 }

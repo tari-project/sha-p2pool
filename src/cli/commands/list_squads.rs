@@ -10,16 +10,16 @@ use tokio::{select, sync::oneshot, task::JoinHandle, time};
 
 use crate::{
     cli::{
-        args::{Cli, ListTribeArgs, StartArgs},
+        args::{Cli, ListSquadArgs, StartArgs},
         commands::util,
     },
     server::p2p::peer_store::PeerStore,
 };
 
-pub async fn handle_list_tribes(
+pub async fn handle_list_squads(
     cli: Arc<Cli>,
     args: &StartArgs,
-    list_tribe_args: &ListTribeArgs,
+    list_squad_args: &ListSquadArgs,
     cli_shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
     // start server asynchronously
@@ -43,9 +43,9 @@ pub async fn handle_list_tribes(
     // wait for peer store from started server
     let peer_store = peer_store_channel_rx.await?;
 
-    // collect tribes for the given timeout
-    let mut tribes = vec![];
-    let timeout = time::sleep(Duration::from_secs(list_tribe_args.timeout));
+    // collect squads for the given timeout
+    let mut squads = vec![];
+    let timeout = time::sleep(Duration::from_secs(list_squad_args.timeout));
     tokio::pin!(timeout);
     tokio::pin!(cli_shutdown_signal);
     loop {
@@ -56,9 +56,9 @@ pub async fn handle_list_tribes(
             () = &mut timeout => {
                 break;
             }
-            current_tribes = peer_store.tribes() => {
-                tribes = current_tribes;
-                if tribes.len() > 1 {
+            current_squads = peer_store.squads() => {
+                squads = current_squads;
+                if squads.len() > 1 {
                     break;
                 }
             }
@@ -67,8 +67,8 @@ pub async fn handle_list_tribes(
     shutdown.trigger();
     handle.await??;
 
-    let tribes = tribes.iter().map(|tribe| tribe.to_string()).collect_vec();
-    print!("{}", serde_json::to_value(tribes)?);
+    let squads = squads.iter().map(|squad| squad.to_string()).collect_vec();
+    print!("{}", serde_json::to_value(squads)?);
 
     Ok(())
 }

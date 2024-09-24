@@ -72,11 +72,11 @@ impl BlockStats {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct TribeDetails {
+pub struct SquadDetails {
     pub id: String,
     pub name: String,
 }
-impl TribeDetails {
+impl SquadDetails {
     pub fn new(id: String, name: String) -> Self {
         Self { id, name }
     }
@@ -86,7 +86,7 @@ impl TribeDetails {
 pub struct Stats {
     pub connected: bool,
     pub connected_since: Option<EpochTime>,
-    pub tribe: TribeDetails,
+    pub squad: SquadDetails,
     pub num_of_miners: usize,
     pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,

@@ -15,7 +15,7 @@ use crate::server::{
         server::AppState,
         stats::{
             algo_stat_key,
-            models::{BlockStats, EstimatedEarnings, Stats, TribeDetails},
+            models::{BlockStats, EstimatedEarnings, SquadDetails, Stats},
             MINER_STAT_ACCEPTED_BLOCKS_COUNT,
             MINER_STAT_REJECTED_BLOCKS_COUNT,
             P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
@@ -81,17 +81,25 @@ pub(crate) async fn handle_miners_with_shares(
     let mut result = HashMap::with_capacity(2);
     result.insert(
         PowAlgorithm::Sha3x.to_string().to_lowercase(),
-        state.share_chain_sha3x.miners_with_shares().await.map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to get Sha3x miners with shares: {error:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?,
+        state
+            .share_chain_sha3x
+            .miners_with_shares(state.squad.clone())
+            .await
+            .map_err(|error| {
+                error!(target: LOG_TARGET, "Failed to get Sha3x miners with shares: {error:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
     );
     result.insert(
         PowAlgorithm::RandomX.to_string().to_lowercase(),
-        state.share_chain_random_x.miners_with_shares().await.map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to get RandomX miners with shares: {error:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?,
+        state
+            .share_chain_random_x
+            .miners_with_shares(state.squad.clone())
+            .await
+            .map_err(|error| {
+                error!(target: LOG_TARGET, "Failed to get RandomX miners with shares: {error:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
     );
 
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
@@ -140,10 +148,13 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     // connected
     let connected = state.peer_store.peer_count().await > 0;
 
-    let shares = share_chain.miners_with_shares().await.map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let shares = share_chain
+        .miners_with_shares(state.squad.clone())
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     // collect number of miners
     // let num_of_miners = chain
     // .iter()
@@ -256,7 +267,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         estimated_earnings: Default::default(),
         miner_block_stats: miner_block_stats(state.stats_store.clone(), algo).await,
         p2pool_block_stats: p2pool_block_stats(state.stats_store.clone(), algo).await,
-        tribe: TribeDetails::new(state.tribe.to_string(), state.tribe.formatted()),
+        squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
     };
 
     stats_cache.update(result.clone(), algo).await;

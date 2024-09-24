@@ -8,7 +8,7 @@ use libp2p::identity::Keypair;
 use crate::server::{
     http,
     p2p,
-    p2p::{peer_store::PeerStoreConfig, Tribe},
+    p2p::{peer_store::PeerStoreConfig, Squad},
 };
 
 /// Config is the server configuration struct.
@@ -68,8 +68,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_tribe(&mut self, tribe: Tribe) -> &mut Self {
-        self.config.p2p_service.tribe = tribe;
+    pub fn with_squad(&mut self, squad: Squad) -> &mut Self {
+        self.config.p2p_service.squad = squad;
         self
     }
 

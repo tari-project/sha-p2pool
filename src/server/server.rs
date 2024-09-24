@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -13,6 +14,7 @@ use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 use crate::{
     server::{
@@ -60,12 +62,14 @@ where S: ShareChain
         config: config::Config,
         share_chain_sha3x: S,
         share_chain_random_x: S,
+        coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
         let sync_in_progress = Arc::new(AtomicBool::new(true));
-        let tribe_peer_store = Arc::new(PeerStore::new(&config.peer_store));
+        let squad_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let stats_store = Arc::new(StatsStore::new());
 
@@ -73,7 +77,7 @@ where S: ShareChain
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
-            tribe_peer_store.clone(),
+            squad_peer_store.clone(),
             network_peer_store.clone(),
             sync_in_progress.clone(),
             shutdown_signal.clone(),
@@ -103,6 +107,9 @@ where S: ShareChain
                 randomx_factory,
                 consensus_manager,
                 genesis_block_hash,
+                config.p2p_service.squad.clone(),
+                coinbase_extras_sha3x.clone(),
+                coinbase_extras_random_x.clone(),
             )
             .await
             .map_err(Error::Grpc)?;
@@ -115,10 +122,10 @@ where S: ShareChain
             Some(Arc::new(HttpServer::new(
                 share_chain_sha3x.clone(),
                 share_chain_random_x.clone(),
-                tribe_peer_store.clone(),
+                squad_peer_store.clone(),
                 stats_store.clone(),
                 config.http_server.port,
-                config.p2p_service.tribe.clone(),
+                config.p2p_service.squad.clone(),
                 http_stats_cache.clone(),
                 shutdown_signal.clone(),
             )))

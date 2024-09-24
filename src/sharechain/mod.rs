@@ -9,11 +9,14 @@ use num::BigUint;
 use tari_common_types::types::FixedHash;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 
-use crate::sharechain::{block::Block, error::Error};
+use crate::{
+    server::p2p::Squad,
+    sharechain::{block::Block, error::Error},
+};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
-pub const CHAIN_ID: usize = 1;
+pub const CHAIN_ID: usize = 2;
 
 /// How many blocks to keep overall.
 pub const MAX_BLOCKS_COUNT: usize = 2001;
@@ -83,10 +86,10 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self) -> Vec<NewBlockCoinbase>;
+    async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
-    async fn new_block(&self, request: &SubmitBlockRequest) -> ShareChainResult<Block>;
+    async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<Block>;
 
     /// Returns blocks from the given height (`from_height`, exclusive).
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
@@ -97,5 +100,5 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn hash_rate(&self) -> ShareChainResult<BigUint>;
 
     /// Returns the current miners with all the current shares in the current blocks window.
-    async fn miners_with_shares(&self) -> ShareChainResult<HashMap<String, u64>>;
+    async fn miners_with_shares(&self, squad: Squad) -> ShareChainResult<HashMap<String, u64>>;
 }

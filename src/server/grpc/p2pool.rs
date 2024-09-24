@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
 
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
@@ -16,7 +16,7 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockResponse,
 };
 use num_format::{Locale, ToFormattedString};
-use tari_common_types::types::FixedHash;
+use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
     proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
@@ -37,6 +37,7 @@ use crate::{
             P2POOL_STAT_REJECTED_BLOCKS_COUNT,
         },
         p2p,
+        p2p::Squad,
         stats_store::StatsStore,
     },
     sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
@@ -77,6 +78,9 @@ where S: ShareChain
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
     consensus_manager: ConsensusManager,
     submit_block_semaphore: Arc<Semaphore>,
+    squad: Squad,
+    coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -92,6 +96,9 @@ where S: ShareChain
         random_x_factory: RandomXFactory,
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
+        squad: Squad,
+        coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(RwLock::new(
@@ -111,6 +118,9 @@ where S: ShareChain
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
             consensus_manager,
             submit_block_semaphore: Arc::new(Semaphore::new(1)),
+            squad,
+            coinbase_extras_sha3x,
+            coinbase_extras_random_x,
         })
     }
 
@@ -153,16 +163,16 @@ where S: ShareChain
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
+    #[allow(clippy::too_many_lines)]
     async fn get_new_block(
         &self,
         request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
         let timer = Instant::now();
+        let grpc_req = request.into_inner();
+
         // extract pow algo
-        let grpc_block_header_pow = request
-            .into_inner()
-            .pow
-            .ok_or(Status::invalid_argument("missing pow in request"))?;
+        let grpc_block_header_pow = grpc_req.pow.ok_or(Status::invalid_argument("missing pow in request"))?;
         let grpc_pow_algo = PowAlgos::from_i32(grpc_block_header_pow.pow_algo)
             .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
         let pow_algo = match grpc_pow_algo {
@@ -187,12 +197,26 @@ where S: ShareChain
             .ok_or_else(|| Status::internal("missing miner data"))?;
         // let reward = miner_data.reward;
 
+        // update coinbase extras cache
+        let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
+            .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
+        let mut coinbase_extras_lock = match pow_algo {
+            PowAlgorithm::RandomX => self.coinbase_extras_random_x.write().await,
+            PowAlgorithm::Sha3x => self.coinbase_extras_sha3x.write().await,
+        };
+        coinbase_extras_lock.insert(
+            wallet_payment_address.to_base58(),
+            util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
+                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
+        );
+        drop(coinbase_extras_lock);
+
         // request new block template with shares as coinbases
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let shares = share_chain.generate_shares().await;
+        let shares = share_chain.generate_shares(self.squad.clone()).await;
 
         let mut response = self
             .client
@@ -257,6 +281,7 @@ where S: ShareChain
         if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
             warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
         }
+
         Ok(Response::new(GetNewBlockResponse {
             block: Some(response),
             target_difficulty: target_difficulty.as_u64(),
@@ -307,7 +332,7 @@ where S: ShareChain
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
         let mut block = share_chain
-            .new_block(grpc_block)
+            .new_block(grpc_block, self.squad.clone())
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 
