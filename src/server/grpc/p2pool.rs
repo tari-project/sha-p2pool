@@ -342,7 +342,7 @@ where S: ShareChain
             block.hash
         );
         // TODO: Cache this so that we don't ask each time. If we have a block we should not
-        // waste time before submitting it, or we might lose a share
+        // TODO: waste time before submitting it, or we might lose a share
         // let mut network_difficulty_stream = self
         //     .client
         //     .lock()
