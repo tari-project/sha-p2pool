@@ -13,7 +13,7 @@ use moka::future::{Cache, CacheBuilder};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::p2p::{messages::PeerInfo, Tribe};
+use crate::server::p2p::{messages::PeerInfo, Squad};
 
 const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
 const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
@@ -143,11 +143,11 @@ impl PeerStore {
         self.set_last_connected().await;
     }
 
-    /// Collects all current tribes from all PeerInfo collected from broadcasts.
-    pub async fn tribes(&self) -> Vec<Tribe> {
+    /// Collects all current squads from all PeerInfo collected from broadcasts.
+    pub async fn squads(&self) -> Vec<Squad> {
         self.peers
             .iter()
-            .map(|(_, record)| record.peer_info.tribe)
+            .map(|(_, record)| record.peer_info.squad)
             .unique()
             .collect_vec()
     }

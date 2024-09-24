@@ -14,10 +14,10 @@ pub fn cli_styles() -> Styles {
         .valid(AnsiColor::BrightGreen.on_default())
 }
 
-pub fn validate_tribe(tribe: &str) -> Result<String, String> {
-    if tribe.trim().is_empty() {
-        return Err(String::from("tribe must be set"));
+pub fn validate_squad(squad: &str) -> Result<String, String> {
+    if squad.trim().is_empty() {
+        return Err(String::from("squad must be set"));
     }
 
-    Ok(String::from(tribe))
+    Ok(String::from(squad))
 }

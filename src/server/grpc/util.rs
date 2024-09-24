@@ -12,7 +12,7 @@ use tonic::transport::Channel;
 
 use crate::server::{
     grpc::error::{Error, TonicError},
-    p2p::Tribe,
+    p2p::Squad,
 };
 
 /// Utility function to connect to a Base node and try infinitely when it fails until gets connected.
@@ -53,15 +53,15 @@ pub async fn connect_base_node(
     Ok(client)
 }
 
-pub fn convert_coinbase_extra(tribe: Tribe, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
+pub fn convert_coinbase_extra(squad: Squad, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
     let type_length_value_marker = 0xFFu8;
-    let tribe_type_marker = 0x02u8;
+    let squad_type_marker = 0x02u8;
     let custom_message_type_marker = 0x01u8;
 
-    let mut current_tribe = tribe.as_string().into_bytes();
-    let current_tribe_len = u8::try_from(current_tribe.len())?;
-    let mut result = vec![type_length_value_marker, tribe_type_marker, current_tribe_len];
-    result.append(&mut current_tribe);
+    let mut current_squad = squad.as_string().into_bytes();
+    let current_squad_len = u8::try_from(current_squad.len())?;
+    let mut result = vec![type_length_value_marker, squad_type_marker, current_squad_len];
+    result.append(&mut current_squad);
 
     let mut custom_coinbase_extra_bytes = custom_coinbase_extra.into_bytes();
     let custom_coinbase_extra_len = u8::try_from(custom_coinbase_extra_bytes.len())?;

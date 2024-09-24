@@ -37,7 +37,7 @@ use crate::{
             P2POOL_STAT_REJECTED_BLOCKS_COUNT,
         },
         p2p,
-        p2p::Tribe,
+        p2p::Squad,
         stats_store::StatsStore,
     },
     sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
@@ -78,8 +78,9 @@ where S: ShareChain
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
     consensus_manager: ConsensusManager,
     submit_block_semaphore: Arc<Semaphore>,
-    tribe: Tribe,
-    coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    squad: Squad,
+    coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -95,8 +96,9 @@ where S: ShareChain
         random_x_factory: RandomXFactory,
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
-        tribe: Tribe,
-        coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        squad: Squad,
+        coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(RwLock::new(
@@ -116,8 +118,9 @@ where S: ShareChain
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
             consensus_manager,
             submit_block_semaphore: Arc::new(Semaphore::new(1)),
-            tribe,
-            coinbase_extras: coinbase_extras.clone(),
+            squad,
+            coinbase_extras_sha3x,
+            coinbase_extras_random_x,
         })
     }
 
@@ -160,6 +163,7 @@ where S: ShareChain
 {
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
+    #[allow(clippy::too_many_lines)]
     async fn get_new_block(
         &self,
         request: Request<GetNewBlockRequest>,
@@ -196,10 +200,13 @@ where S: ShareChain
         // update coinbase extras cache
         let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
             .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
-        let mut coinbase_extras_lock = self.coinbase_extras.write().await;
+        let mut coinbase_extras_lock = match pow_algo {
+            PowAlgorithm::RandomX => self.coinbase_extras_random_x.write().await,
+            PowAlgorithm::Sha3x => self.coinbase_extras_sha3x.write().await,
+        };
         coinbase_extras_lock.insert(
             wallet_payment_address.to_base58(),
-            util::convert_coinbase_extra(self.tribe.clone(), grpc_req.coinbase_extra)
+            util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
                 .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
         );
         drop(coinbase_extras_lock);
@@ -209,7 +216,7 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let shares = share_chain.generate_shares(self.tribe.clone()).await;
+        let shares = share_chain.generate_shares(self.squad.clone()).await;
 
         let mut response = self
             .client
@@ -325,7 +332,7 @@ where S: ShareChain
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
         let mut block = share_chain
-            .new_block(grpc_block, self.tribe.clone())
+            .new_block(grpc_block, self.squad.clone())
             .await
             .map_err(|error| Status::internal(error.to_string()))?;
 

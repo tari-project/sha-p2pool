@@ -16,7 +16,7 @@ use crate::{
             stats::{cache::StatsCache, handlers},
             version,
         },
-        p2p::{peer_store::PeerStore, Tribe},
+        p2p::{peer_store::PeerStore, Squad},
         stats_store::StatsStore,
     },
     sharechain::ShareChain,
@@ -53,7 +53,7 @@ where S: ShareChain
     peer_store: Arc<PeerStore>,
     stats_store: Arc<StatsStore>,
     port: u16,
-    tribe: Tribe,
+    squad: Squad,
     stats_cache: Arc<StatsCache>,
     shutdown_signal: ShutdownSignal,
 }
@@ -64,7 +64,7 @@ pub struct AppState {
     pub share_chain_random_x: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
-    pub tribe: Tribe,
+    pub squad: Squad,
     pub stats_cache: Arc<StatsCache>,
 }
 
@@ -77,7 +77,7 @@ where S: ShareChain
         peer_store: Arc<PeerStore>,
         stats_store: Arc<StatsStore>,
         port: u16,
-        tribe: Tribe,
+        squad: Squad,
         stats_cache: Arc<StatsCache>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
@@ -87,7 +87,7 @@ where S: ShareChain
             peer_store,
             stats_store,
             port,
-            tribe,
+            squad,
             stats_cache,
             shutdown_signal,
         }
@@ -106,7 +106,7 @@ where S: ShareChain
                 share_chain_random_x: self.share_chain_random_x.clone(),
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
-                tribe: self.tribe.clone(),
+                squad: self.squad.clone(),
                 stats_cache: self.stats_cache.clone(),
             })
     }

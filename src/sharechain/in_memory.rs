@@ -26,7 +26,7 @@ use super::MAX_BLOCKS_COUNT;
 use crate::{
     server::{
         grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
-        p2p::Tribe,
+        p2p::Squad,
     },
     sharechain::{
         error::{BlockConvertError, Error},
@@ -530,7 +530,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(tip_level)
     }
 
-    async fn generate_shares(&self, tribe: Tribe) -> Vec<NewBlockCoinbase> {
+    async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase> {
         let bl = self.block_levels.read().await;
         if let Some(ref cached_shares) = bl.cached_shares {
             return cached_shares.clone();
@@ -601,7 +601,7 @@ impl ShareChain for InMemoryShareChain {
 
         for (key, value) in miners_to_shares {
             // find coinbase extra for wallet address
-            let mut coinbase_extra = convert_coinbase_extra(tribe.clone(), String::new()).unwrap_or_default();
+            let mut coinbase_extra = convert_coinbase_extra(squad.clone(), String::new()).unwrap_or_default();
             if let Ok(miner_wallet_address) = TariAddress::from_str(key.as_str()) {
                 if let Some(coinbase_extra_found) =
                     self.find_coinbase_extra(bl.levels.iter(), miner_wallet_address).await
@@ -624,7 +624,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn new_block(&self, request: &SubmitBlockRequest, tribe: Tribe) -> ShareChainResult<Block> {
+    async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<Block> {
         let origin_block_grpc = request
             .block
             .as_ref()
@@ -651,7 +651,7 @@ impl ShareChain for InMemoryShareChain {
             if let Some(found_coinbase_extra) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
                 found_coinbase_extra.clone()
             } else {
-                convert_coinbase_extra(tribe, String::new())?
+                convert_coinbase_extra(squad, String::new())?
             };
 
         Ok(Block::builder()
@@ -740,14 +740,14 @@ impl ShareChain for InMemoryShareChain {
         // Ok(hash_rates_sum.div(hash_rates_count))
     }
 
-    async fn miners_with_shares(&self, tribe: Tribe) -> ShareChainResult<HashMap<String, u64>> {
+    async fn miners_with_shares(&self, squad: Squad) -> ShareChainResult<HashMap<String, u64>> {
         let bl = self.block_levels.read().await;
         if let Some(ref shares) = bl.cached_shares {
             return Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect());
         }
 
         drop(bl);
-        let shares = self.generate_shares(tribe).await;
+        let shares = self.generate_shares(squad).await;
         Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect())
     }
 }

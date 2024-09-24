@@ -10,7 +10,7 @@ use tari_common_types::types::FixedHash;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 
 use crate::{
-    server::p2p::Tribe,
+    server::p2p::Squad,
     sharechain::{block::Block, error::Error},
 };
 
@@ -86,10 +86,10 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, tribe: Tribe) -> Vec<NewBlockCoinbase>;
+    async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
-    async fn new_block(&self, request: &SubmitBlockRequest, tribe: Tribe) -> ShareChainResult<Block>;
+    async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<Block>;
 
     /// Returns blocks from the given height (`from_height`, exclusive).
     async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
@@ -100,5 +100,5 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn hash_rate(&self) -> ShareChainResult<BigUint>;
 
     /// Returns the current miners with all the current shares in the current blocks window.
-    async fn miners_with_shares(&self, tribe: Tribe) -> ShareChainResult<HashMap<String, u64>>;
+    async fn miners_with_shares(&self, squad: Squad) -> ShareChainResult<HashMap<String, u64>>;
 }
