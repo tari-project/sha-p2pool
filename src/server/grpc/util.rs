@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{num::TryFromIntError, time::Duration};
 
 use log::error;
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
@@ -53,16 +53,20 @@ pub async fn connect_base_node(
     Ok(client)
 }
 
-pub fn convert_coinbase_extra(tribe: Tribe, custom_coinbase_extra: String) -> Vec<u8> {
+pub fn convert_coinbase_extra(tribe: Tribe, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
     let type_length_value_marker = 0xFFu8;
     let tribe_type_marker = 0x02u8;
     let custom_message_type_marker = 0x01u8;
-    let mut current_tribe = tribe.as_string().into_bytes();
-    let mut result = vec![type_length_value_marker, tribe_type_marker, current_tribe.len() as u8];
-    result.append(&mut current_tribe);
-    let mut coinbase_extra_bytes = custom_coinbase_extra.into_bytes();
-    result.append(&mut vec![custom_message_type_marker, coinbase_extra_bytes.len() as u8]);
-    result.append(&mut coinbase_extra_bytes);
 
-    result
+    let mut current_tribe = tribe.as_string().into_bytes();
+    let current_tribe_len = u8::try_from(current_tribe.len())?;
+    let mut result = vec![type_length_value_marker, tribe_type_marker, current_tribe_len];
+    result.append(&mut current_tribe);
+
+    let mut custom_coinbase_extra_bytes = custom_coinbase_extra.into_bytes();
+    let custom_coinbase_extra_len = u8::try_from(custom_coinbase_extra_bytes.len())?;
+    result.append(&mut vec![custom_message_type_marker, custom_coinbase_extra_len]);
+    result.append(&mut custom_coinbase_extra_bytes);
+
+    Ok(result)
 }

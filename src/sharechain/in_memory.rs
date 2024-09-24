@@ -473,24 +473,22 @@ impl InMemoryShareChain {
         }
         drop(coinbase_extras_lock);
 
-        Some(
-            block_level_iter
-                .map(|level| {
-                    level
-                        .blocks
-                        .as_slice()
-                        .iter()
-                        .cloned()
-                        .filter(|block| block.miner_wallet_address == Some(miner_wallet_address.clone()))
-                        .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-                        .last()
-                })
-                .filter(|block_option| block_option.is_some())
-                .map(|block_option| block_option.unwrap())
-                .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-                .last()?
-                .miner_coinbase_extra,
-        )
+        let result = block_level_iter
+            .filter_map(|level| {
+                level
+                    .blocks
+                    .as_slice()
+                    .iter()
+                    .filter(|block| block.miner_wallet_address == Some(miner_wallet_address.clone()))
+                    .cloned()
+                    .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
+                    .last()
+            })
+            .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
+            .last()?
+            .miner_coinbase_extra;
+
+        Some(result)
     }
 }
 
@@ -603,7 +601,7 @@ impl ShareChain for InMemoryShareChain {
 
         for (key, value) in miners_to_shares {
             // find coinbase extra for wallet address
-            let mut coinbase_extra = convert_coinbase_extra(tribe.clone(), String::new());
+            let mut coinbase_extra = convert_coinbase_extra(tribe.clone(), String::new()).unwrap_or_default();
             if let Ok(miner_wallet_address) = TariAddress::from_str(key.as_str()) {
                 if let Some(coinbase_extra_found) =
                     self.find_coinbase_extra(bl.levels.iter(), miner_wallet_address).await
@@ -612,7 +610,7 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
 
-            info!(target: LOG_TARGET, "Current coinbase extra: {:?}", coinbase_extra.to_hex()); // TODO: remove
+            info!(target: LOG_TARGET, "Current coinbase extra: {:?}", coinbase_extra.to_hex());
 
             res.push(NewBlockCoinbase {
                 address: key,
@@ -655,7 +653,7 @@ impl ShareChain for InMemoryShareChain {
             if let Some(found_coinbase_extra) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
                 found_coinbase_extra.clone()
             } else {
-                convert_coinbase_extra(tribe, String::new())
+                convert_coinbase_extra(tribe, String::new())?
             };
 
         Ok(Block::builder()
@@ -804,8 +802,15 @@ mod test {
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
             .build()
             .unwrap();
-        let share_chain =
-            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let share_chain = InMemoryShareChain::new(
+            MAX_BLOCKS_COUNT,
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+        )
+        .unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -834,8 +839,15 @@ mod test {
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
             .build()
             .unwrap();
-        let share_chain =
-            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let share_chain = InMemoryShareChain::new(
+            MAX_BLOCKS_COUNT,
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+        )
+        .unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -864,8 +876,15 @@ mod test {
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
             .build()
             .unwrap();
-        let share_chain =
-            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let share_chain = InMemoryShareChain::new(
+            MAX_BLOCKS_COUNT,
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+        )
+        .unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert
@@ -896,8 +915,15 @@ mod test {
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
             .build()
             .unwrap();
-        let share_chain =
-            InMemoryShareChain::new(MAX_BLOCKS_COUNT, PowAlgorithm::Sha3x, None, consensus_manager).unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let share_chain = InMemoryShareChain::new(
+            MAX_BLOCKS_COUNT,
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+        )
+        .unwrap();
         let shares = share_chain.miners_with_shares(blocks);
 
         // assert

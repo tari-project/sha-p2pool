@@ -199,7 +199,8 @@ where S: ShareChain
         let mut coinbase_extras_lock = self.coinbase_extras.write().await;
         coinbase_extras_lock.insert(
             wallet_payment_address.to_base58(),
-            util::convert_coinbase_extra(self.tribe.clone(), grpc_req.coinbase_extra),
+            util::convert_coinbase_extra(self.tribe.clone(), grpc_req.coinbase_extra)
+                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
         );
         drop(coinbase_extras_lock);
 
