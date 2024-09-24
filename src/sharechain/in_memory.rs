@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{vec_deque, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     slice::Iter,
     str::FromStr,
     sync::Arc,
 };
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use log::*;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
@@ -458,37 +457,22 @@ impl InMemoryShareChain {
                 .add_block(block.clone(), true)?;
         }
 
+        // update coinbase extra cache
+        let mut coinbase_extras_lock = self.coinbase_extras.write().await;
+        if let Some(miner_wallet_address) = &block.miner_wallet_address {
+            coinbase_extras_lock.insert(miner_wallet_address.to_base58(), block.miner_coinbase_extra.clone());
+        }
+
         Ok(())
     }
 
-    async fn find_coinbase_extra(
-        &self,
-        block_level_iter: vec_deque::Iter<'_, BlockLevel>,
-        miner_wallet_address: TariAddress,
-    ) -> Option<Vec<u8>> {
-        // check if we have coinbase in cache (it is the newest, since miner sent it recently)
+    async fn find_coinbase_extra(&self, miner_wallet_address: TariAddress) -> Option<Vec<u8>> {
         let coinbase_extras_lock = self.coinbase_extras.read().await;
         if let Some(found_coinbase_extras) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
             return Some(found_coinbase_extras.clone());
         }
-        drop(coinbase_extras_lock);
 
-        let result = block_level_iter
-            .filter_map(|level| {
-                level
-                    .blocks
-                    .as_slice()
-                    .iter()
-                    .filter(|block| block.miner_wallet_address == Some(miner_wallet_address.clone()))
-                    .cloned()
-                    .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-                    .last()
-            })
-            .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-            .last()?
-            .miner_coinbase_extra;
-
-        Some(result)
+        None
     }
 }
 
@@ -603,12 +587,12 @@ impl ShareChain for InMemoryShareChain {
             // find coinbase extra for wallet address
             let mut coinbase_extra = convert_coinbase_extra(squad.clone(), String::new()).unwrap_or_default();
             if let Ok(miner_wallet_address) = TariAddress::from_str(key.as_str()) {
-                if let Some(coinbase_extra_found) =
-                    self.find_coinbase_extra(bl.levels.iter(), miner_wallet_address).await
-                {
+                if let Some(coinbase_extra_found) = self.find_coinbase_extra(miner_wallet_address).await {
                     coinbase_extra = coinbase_extra_found;
                 }
             }
+
+            info!(target: LOG_TARGET, "Current coinbase extra: {:?}", coinbase_extra.to_hex());
 
             res.push(NewBlockCoinbase {
                 address: key,
@@ -646,9 +630,8 @@ impl ShareChain for InMemoryShareChain {
             TariAddress::from_str(request.wallet_payment_address.as_str()).map_err(Error::TariAddress)?;
 
         // coinbase extra
-        let coinbase_extras_lock = self.coinbase_extras.read().await;
         let coinbase_extra =
-            if let Some(found_coinbase_extra) = coinbase_extras_lock.get(&miner_wallet_address.to_base58()) {
+            if let Some(found_coinbase_extra) = self.find_coinbase_extra(miner_wallet_address.clone()).await {
                 found_coinbase_extra.clone()
             } else {
                 convert_coinbase_extra(squad, String::new())?
