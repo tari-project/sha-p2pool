@@ -592,8 +592,6 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
 
-            info!(target: LOG_TARGET, "Current coinbase extra: {:?}", coinbase_extra.to_hex());
-
             res.push(NewBlockCoinbase {
                 address: key,
                 value,
