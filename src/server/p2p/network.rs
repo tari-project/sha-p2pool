@@ -113,7 +113,7 @@ impl Squad {
     }
 
     pub fn as_string(&self) -> String {
-        self.inner.to_case(Case::Lower)
+        self.inner.clone()
     }
 }
 
@@ -1173,5 +1173,22 @@ where S: ShareChain
 
     pub fn network_peer_store(&self) -> Arc<PeerStore> {
         self.network_peer_store.clone()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn squad_as_string_no_spaces_no_underscores() {
+        let squad = Squad::from("default".to_string());
+        assert_eq!(squad.as_string(), "default");
+    }
+
+    #[test]
+    fn squad_as_string_with_spaces_with_underscores() {
+        let squad = Squad::from("default 2".to_string());
+        assert_eq!(squad.as_string(), "default_2");
     }
 }
