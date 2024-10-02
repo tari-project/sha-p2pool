@@ -26,7 +26,7 @@ lazy_static! {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub(crate) struct Block {
+pub(crate) struct PoolBlock {
     pub chain_id: String,
     pub hash: BlockHash,
     pub timestamp: EpochTime,
@@ -38,11 +38,11 @@ pub(crate) struct Block {
     pub achieved_difficulty: Difficulty,
     pub miner_coinbase_extra: Vec<u8>,
 }
-impl_conversions!(Block);
+impl_conversions!(PoolBlock);
 
-impl Block {
-    pub fn builder() -> BlockBuilder {
-        BlockBuilder::new()
+impl PoolBlock {
+    pub fn builder() -> PoolBlockBuilder {
+        PoolBlockBuilder::new()
     }
 
     pub fn generate_hash(&self) -> BlockHash {
@@ -58,16 +58,16 @@ impl Block {
     }
 }
 
-pub(crate) struct BlockBuilder {
-    block: Block,
+pub(crate) struct PoolBlockBuilder {
+    block: PoolBlock,
     use_specific_hash: bool,
 }
 
-impl BlockBuilder {
+impl PoolBlockBuilder {
     pub fn new() -> Self {
         Self {
             use_specific_hash: false,
-            block: Block {
+            block: PoolBlock {
                 chain_id: CURRENT_CHAIN_ID.clone(),
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
@@ -118,7 +118,7 @@ impl BlockBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Block {
+    pub fn build(&mut self) -> PoolBlock {
         if !self.use_specific_hash {
             self.block.hash = self.block.generate_hash();
         }

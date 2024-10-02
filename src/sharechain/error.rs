@@ -10,7 +10,7 @@ use tari_core::{
 };
 use thiserror::Error;
 
-use crate::sharechain::block::Block;
+use crate::sharechain::pool_block::PoolBlock;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -21,7 +21,7 @@ pub enum Error {
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {0:?}")]
-    InvalidBlock(Block),
+    InvalidBlock(PoolBlock),
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
     #[error("Difficulty calculation error: {0}")]

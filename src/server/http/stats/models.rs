@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::sharechain::block::Block;
+use crate::sharechain::pool_block::PoolBlock;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StatsBlock {
@@ -17,8 +17,8 @@ pub struct StatsBlock {
     pub miner_wallet_address: Option<String>,
 }
 
-impl From<Block> for StatsBlock {
-    fn from(block: Block) -> Self {
+impl From<PoolBlock> for StatsBlock {
+    fn from(block: PoolBlock) -> Self {
         StatsBlock {
             hash: block.hash.to_hex(),
             height: block.height,

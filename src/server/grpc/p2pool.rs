@@ -40,7 +40,7 @@ use crate::{
         p2p::Squad,
         stats_store::StatsStore,
     },
-    sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
+    sharechain::{pool_block::PoolBlock, BlockValidationParams, ShareChain, SHARE_COUNT},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
@@ -125,7 +125,7 @@ where S: ShareChain
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
+    pub async fn submit_share_chain_block(&self, block: &PoolBlock) -> Result<(), Status> {
         let pow_algo = block.original_block_header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),

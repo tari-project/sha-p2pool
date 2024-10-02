@@ -21,13 +21,14 @@ use tari_core::{
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use super::MAX_BLOCKS_COUNT;
+use super::{pool_chain::PoolChain, MAX_BLOCKS_COUNT};
 use crate::{
     server::{
         grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
         p2p::Squad,
     },
     sharechain::{
+        block_level::BlockLevel,
         error::{BlockConvertError, Error},
         Block,
         BlockValidationParams,
@@ -43,66 +44,13 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 
-pub(crate) struct BlockLevels {
-    cached_shares: Option<Vec<NewBlockCoinbase>>,
-    levels: VecDeque<BlockLevel>,
-}
-
-impl BlockLevels {
-    pub fn get_at_height(&self, height: u64) -> Option<&BlockLevel> {
-        let tip = self.levels.front()?.height;
-        if height > tip {
-            return None;
-        }
-        let index = tip.checked_sub(height);
-        self.levels
-            .get(usize::try_from(index?).expect("32 bit systems not supported"))
-    }
-}
-
 pub(crate) struct InMemoryShareChain {
     max_blocks_count: usize,
-    block_levels: Arc<RwLock<BlockLevels>>,
+    block_levels: Arc<RwLock<PoolChain>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-}
-
-/// A collection of blocks with the same height.
-pub struct BlockLevel {
-    blocks: Vec<Block>,
-    height: u64,
-    in_chain_index: usize,
-}
-
-impl BlockLevel {
-    pub fn new(blocks: Vec<Block>, height: u64) -> Self {
-        Self {
-            blocks,
-            height,
-            in_chain_index: 0,
-        }
-    }
-
-    pub fn add_block(&mut self, block: Block, replace_tip: bool) -> Result<(), Error> {
-        if self.height != block.height {
-            return Err(Error::InvalidBlock(block));
-        }
-        if replace_tip {
-            self.in_chain_index = self.blocks.len();
-        }
-        self.blocks.push(block);
-        Ok(())
-    }
-
-    pub fn block_in_main_chain(&self) -> Option<&Block> {
-        if self.in_chain_index < self.blocks.len() {
-            Some(&self.blocks[self.in_chain_index])
-        } else {
-            None
-        }
-    }
 }
 
 fn genesis_block() -> Block {
@@ -126,12 +74,9 @@ impl InMemoryShareChain {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(Error::MissingBlockValidationParams);
         }
-        let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
-        levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
-        let block_levels = BlockLevels {
-            cached_shares: None,
-            levels,
-        };
+        let block_levels = PoolChain::new(max_blocks_count);
+        block_levels.add_level(genesis_block(), true);
+
         Ok(Self {
             max_blocks_count,
             block_levels: Arc::new(RwLock::new(block_levels)),
@@ -165,28 +110,6 @@ impl InMemoryShareChain {
                 Ok(difficulty.as_u64())
             },
         }
-    }
-
-    /// Returns the current (strongest) chain
-    fn chain(&self, block_level_iter: Iter<'_, BlockLevel>) -> Vec<Block> {
-        let mut result = vec![];
-        block_level_iter.for_each(|level| {
-            level
-                .blocks
-                .iter()
-                .max_by(|block1, block2| {
-                    let diff1 = self.block_difficulty(block1).unwrap_or(0);
-                    let diff2 = self.block_difficulty(block2).unwrap_or(0);
-                    diff1.cmp(&diff2)
-                })
-                .iter()
-                .copied()
-                .for_each(|block| {
-                    result.push(block.clone());
-                });
-        });
-
-        result
     }
 
     /// Generating number of shares for all the miners.
@@ -318,7 +241,7 @@ impl InMemoryShareChain {
     #[allow(clippy::too_many_lines)]
     async fn submit_block_with_lock(
         &self,
-        block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
+        pool_chain: &mut RwLockWriteGuard<'_, PoolChain>,
         block: &Block,
         params: Option<Arc<BlockValidationParams>>,
         sync: bool,
@@ -330,25 +253,26 @@ impl InMemoryShareChain {
             // return Err(Error::BlockValidation("Block height is 0".to_string()));
         }
 
-        if block_levels.levels.is_empty() {
+        if pool_chain.is_empty() {
             // TODO: Validate the block
-            block_levels
-                .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            pool_chain.new_level(block, true);
+
             return Ok(());
         }
-        let block_levels_len = block_levels.levels.len();
+        // let block_levels_len = block_levels.levels.len();
 
-        let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
-        let tip_height = tip_level.height;
+        // let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
+        let tip_height = pool_chain.tip_height();
 
-        // If we are syncing and we are very far behind, clear out the blocks we have and just add it
+        // If we are syncing and we are very far behind,  just add it in future
         if (tip_height < block.height - 1) && sync {
             // TODO: Validate the block
-            block_levels.levels.clear();
-            block_levels
-                .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            // block_levels.levels.clear();
+            block_levels.add_at_height(block.clone(), block.height);
+            // .levels
+            // .push_front(BlockLevel::new(vec![block.clone()], block.height));
+
+            // NOTE: don't change the tip level
             return Ok(());
         }
 

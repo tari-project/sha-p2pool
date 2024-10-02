@@ -11,7 +11,7 @@ use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::Ran
 
 use crate::{
     server::p2p::Squad,
-    sharechain::{block::Block, error::Error},
+    sharechain::{error::Error, pool_block::Block},
 };
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
@@ -36,9 +36,11 @@ pub const MAIN_CHAIN_SHARE_AMOUNT: u64 = 5;
 // Uncle blocks count 40%
 pub const UNCLE_BLOCK_SHARE_AMOUNT: u64 = 2;
 
-pub mod block;
+pub mod block_level;
 pub mod error;
 pub mod in_memory;
+pub mod pool_block;
+pub mod pool_chain;
 
 pub type ShareChainResult<T> = Result<T, Error>;
 

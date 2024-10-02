@@ -9,7 +9,7 @@ use tari_core::proof_of_work::PowAlgorithm;
 
 use crate::{
     server::p2p::{Error, Squad},
-    sharechain::block::Block,
+    sharechain::pool_block::PoolBlock,
 };
 
 #[macro_export]
@@ -96,11 +96,11 @@ impl LocalShareChainSyncRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
     pub algo: PowAlgorithm,
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<PoolBlock>,
 }
 
 impl ShareChainSyncResponse {
-    pub fn new(algo: PowAlgorithm, blocks: Vec<Block>) -> Self {
+    pub fn new(algo: PowAlgorithm, blocks: Vec<PoolBlock>) -> Self {
         Self { algo, blocks }
     }
 }
