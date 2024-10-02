@@ -155,7 +155,7 @@ where S: ShareChain
             .add_service(base_node_service)
             .add_service(p2pool_service)
             .serve_with_shutdown(
-                SocketAddr::from_str(format!("0.0.0.0:{}", grpc_port).as_str()).map_err(Error::AddrParse)?,
+                SocketAddr::from_str(format!("127.0.0.1:{}", grpc_port).as_str()).map_err(Error::AddrParse)?,
                 shutdown_signal,
             )
             .await

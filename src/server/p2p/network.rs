@@ -849,8 +849,8 @@ where S: ShareChain
                     _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
-                    identify::Event::Received { peer_id, info } => self.handle_peer_identified(peer_id, info).await,
-                    identify::Event::Error { peer_id, error } => {
+                    identify::Event::Received { peer_id, info, .. } => self.handle_peer_identified(peer_id, info).await,
+                    identify::Event::Error { peer_id, error, .. } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
@@ -1124,7 +1124,7 @@ where S: ShareChain
         // listen on local address
         self.swarm
             .listen_on(
-                format!("/ip4/0.0.0.0/tcp/{}", self.port)
+                format!("/ip4/127.0.0.1/tcp/{}", self.port)
                     .parse()
                     .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
             )
