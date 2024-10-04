@@ -35,9 +35,9 @@ impl ServiceClient {
     }
 
     /// Triggering broadcasting of a new block to p2pool network.
-    pub async fn broadcast_block(&self, block: &PoolBlock) -> Result<(), ClientError> {
+    pub async fn broadcast_block(&self, block: PoolBlock) -> Result<(), ClientError> {
         self.broadcast_block_sender
-            .send(block.clone())
+            .send(block)
             .map_err(|error| ClientError::ChannelSend(Box::new(ChannelSendError::BroadcastBlock(error))))?;
 
         Ok(())

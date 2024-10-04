@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 
 use crate::sharechain::{
@@ -39,5 +37,9 @@ impl BlockLevel {
         } else {
             None
         }
+    }
+
+    pub fn height(&self) -> u64 {
+        self.height
     }
 }

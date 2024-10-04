@@ -6,13 +6,11 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
+use pool_block::PoolBlock;
 use tari_common_types::types::FixedHash;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 
-use crate::{
-    server::p2p::Squad,
-    sharechain::{error::Error, pool_block::Block},
-};
+use crate::{server::p2p::Squad, sharechain::error::Error};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
@@ -79,10 +77,10 @@ impl BlockValidationParams {
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: &Block) -> ShareChainResult<()>;
+    async fn submit_block(&self, block: PoolBlock) -> ShareChainResult<()>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()>;
+    async fn add_synced_blocks(&self, blocks: Vec<PoolBlock>) -> ShareChainResult<()>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> ShareChainResult<u64>;
@@ -91,10 +89,10 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
-    async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<Block>;
+    async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<PoolBlock>;
 
     /// Returns blocks from the given height (`from_height`, exclusive).
-    async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<Block>>;
+    async fn blocks(&self, from_height: u64) -> ShareChainResult<Vec<PoolBlock>>;
 
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).
