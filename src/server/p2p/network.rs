@@ -89,7 +89,7 @@ use crate::{
         },
     },
     sharechain::{
-        block::{Block, CURRENT_CHAIN_ID},
+        pool_block::{PoolBlock, CURRENT_CHAIN_ID},
         ShareChain,
     },
 };
@@ -98,6 +98,7 @@ const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
+const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -198,8 +199,8 @@ where S: ShareChain
 
     // service client related channels
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
-    client_broadcast_block_tx: broadcast::Sender<Block>,
-    client_broadcast_block_rx: broadcast::Receiver<Block>,
+    client_broadcast_block_tx: broadcast::Sender<PoolBlock>,
+    client_broadcast_block_rx: broadcast::Receiver<PoolBlock>,
 
     relay_store: Arc<RwLock<RelayStore>>,
 }
@@ -221,7 +222,7 @@ where S: ShareChain
         let swarm = Self::new_swarm(config).await?;
 
         // client related channels
-        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
+        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<PoolBlock>(1000);
         let (share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
 
         Ok(Self {
@@ -409,7 +410,7 @@ where S: ShareChain
     }
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
-    async fn broadcast_block(&mut self, result: Result<Block, RecvError>) {
+    async fn broadcast_block(&mut self, result: Result<PoolBlock, RecvError>) {
         if self.sync_in_progress.load(Ordering::SeqCst) {
             return;
         }
@@ -490,6 +491,7 @@ where S: ShareChain
     /// Main method to handle any message comes from gossipsub.
     #[allow(clippy::too_many_lines)]
     async fn handle_new_gossipsub_message(&mut self, message: Message) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
         let peer = message.source;
         if peer.is_none() {
             warn!("Message source is not set! {:?}", message);
@@ -502,6 +504,7 @@ where S: ShareChain
         match topic {
             topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
+                    debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
                     debug!(target: LOG_TARGET, squad = &self.config.squad; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
                 },
                 Err(error) => {
@@ -511,6 +514,7 @@ where S: ShareChain
             topic if topic == Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) => {
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
+                        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {peer:?} -> {payload:?}");
                         let current_randomx_height = payload.current_random_x_height;
                         let current_sha3x_height = payload.current_sha3x_height;
@@ -551,12 +555,14 @@ where S: ShareChain
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like
             // 20%))
             topic if topic == Self::squad_topic(&self.config.squad, NEW_BLOCK_TOPIC) => {
+                debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?}");
                 if self.sync_in_progress.load(Ordering::SeqCst) {
                     return;
                 }
 
-                match Block::try_from(message) {
+                match PoolBlock::try_from(message) {
                     Ok(payload) => {
+                        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");
                         info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.hash.to_hex());
                         let share_chain = match payload.original_block_header.pow.pow_algo {
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -578,6 +584,7 @@ where S: ShareChain
                 }
             },
             _ => {
+                debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Unknown topic {topic:?}!");
                 warn!(target: LOG_TARGET, squad = &self.config.squad; "Unknown topic {topic:?}!");
             },
         }
@@ -589,7 +596,7 @@ where S: ShareChain
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
-        debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync request: {request:?}");
         let share_chain = match request.algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -615,6 +622,7 @@ where S: ShareChain
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
         let timer = Instant::now();
         if !self.sync_in_progress.load(Ordering::SeqCst) {
             return;
@@ -768,6 +776,7 @@ where S: ShareChain
     /// Main method to handle libp2p events.
     #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New event: {event:?}");
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
@@ -838,9 +847,10 @@ where S: ShareChain
                         addresses,
                         ..
                     } => {
-                        addresses.iter().for_each(|addr| {
-                            self.swarm.add_peer_address(peer, addr.clone());
-                        });
+                        // I don't think this is needed
+                        // addresses.iter().for_each(|addr| {
+                        //     self.swarm.add_peer_address(peer, addr.clone());
+                        // });
                         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         if let Some(old_peer) = old_peer {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
@@ -849,15 +859,15 @@ where S: ShareChain
                     _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
-                    identify::Event::Received { peer_id, info } => self.handle_peer_identified(peer_id, info).await,
-                    identify::Event::Error { peer_id, error } => {
+                    identify::Event::Received { peer_id, info, .. } => self.handle_peer_identified(peer_id, info).await,
+                    identify::Event::Error { peer_id, error, .. } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                     },
                     _ => {},
                 },
-                ServerNetworkBehaviourEvent::RelayServer(event) => {
+                ServerNetworkBehaviourEvent::RelayServer(event, ..) => {
                     debug!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::RelayClient(event) => {
@@ -873,6 +883,7 @@ where S: ShareChain
     }
 
     async fn handle_peer_identified(&mut self, peer_id: PeerId, info: Info) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Peer identified: {peer_id:?} -> {info:?}");
         if *self.swarm.local_peer_id() == peer_id {
             warn!(target: LOG_TARGET, "Dialled ourselves");
             return;

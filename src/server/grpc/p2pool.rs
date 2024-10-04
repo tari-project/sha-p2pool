@@ -40,7 +40,7 @@ use crate::{
         p2p::Squad,
         stats_store::StatsStore,
     },
-    sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
+    sharechain::{pool_block::PoolBlock, BlockValidationParams, ShareChain, SHARE_COUNT},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
@@ -125,13 +125,14 @@ where S: ShareChain
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
+    pub async fn submit_share_chain_block(&self, block: PoolBlock) -> Result<(), Status> {
         let pow_algo = block.original_block_header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.submit_block(block).await {
+        let hash = block.hash.to_hex();
+        match share_chain.submit_block(block.clone()).await {
             Ok(_) => {
                 self.stats_store
                     .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
@@ -142,7 +143,7 @@ where S: ShareChain
                     .await
                     .map_err(|error| Status::internal(error.to_string()));
                 if res.is_ok() {
-                    info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
+                    info!(target: LOG_TARGET, "Broadcast new block: {:?}", hash);
                 }
                 res
             },
@@ -406,6 +407,7 @@ where S: ShareChain
 
         block.achieved_difficulty = request_block_difficulty;
 
+        let block_hash = block.hash.clone();
         debug!(target: LOG_TARGET, "Trace - checking if can submit to main chain: {}", timer.elapsed().as_millis());
         if network_difficulty_matches {
             // submit block to base node
@@ -425,7 +427,7 @@ where S: ShareChain
                         origin_block_header.hash()
                     );
                     block.sent_to_main_chain = true;
-                    self.submit_share_chain_block(&block).await?;
+                    self.submit_share_chain_block(block).await?;
                 },
                 Err(error) => {
                     warn!(
@@ -437,7 +439,7 @@ where S: ShareChain
                         .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
                         .await;
                     block.sent_to_main_chain = false;
-                    self.submit_share_chain_block(&block).await?;
+                    self.submit_share_chain_block(block).await?;
 
                     if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
                         warn!(target: LOG_TARGET, "submit_block took {}ms and errored", timer.elapsed().as_millis());
@@ -449,7 +451,7 @@ where S: ShareChain
             debug!(target: LOG_TARGET, "Trace - submitting to share chain: {}", timer.elapsed().as_millis());
             block.sent_to_main_chain = false;
             // Don't error if we can't submit it.
-            match self.submit_share_chain_block(&block).await {
+            match self.submit_share_chain_block(block).await {
                 Ok(_) => {
                     let pow_type = origin_block_header.pow.pow_algo.to_string();
                     info!(target: LOG_TARGET, "🔗 Block submitted to {} share chain!", pow_type);
@@ -485,7 +487,7 @@ where S: ShareChain
         }
 
         Ok(Response::new(SubmitBlockResponse {
-            block_hash: block.hash.to_vec(),
+            block_hash: block_hash.to_vec(),
         }))
     }
 }
