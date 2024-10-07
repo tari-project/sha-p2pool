@@ -59,6 +59,7 @@ use log::{
     warn,
 };
 use serde::{Deserialize, Serialize};
+use serde_cbor::tags;
 use tari_common::configuration::Network;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
@@ -69,6 +70,7 @@ use tokio::{
     select,
     sync::{
         broadcast::{self, error::RecvError},
+        mpsc,
         RwLock,
     },
     time::{self, MissedTickBehavior},
@@ -79,13 +81,15 @@ use crate::{
         config,
         p2p::{
             global_ip::GlobalIp,
-            messages,
-            messages::{LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
+            messages::{self, LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::PeerStore,
             relay_store::RelayStore,
             Error,
             LibP2PError,
             ServiceClient,
+            MAX_MISSING_PARENTS_TO_SNOOZE,
+            MAX_SNOOZES,
+            MAX_SNOOZE_DURATION,
         },
     },
     sharechain::{
@@ -98,6 +102,7 @@ const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
+const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -200,6 +205,8 @@ where S: ShareChain
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
     client_broadcast_block_tx: broadcast::Sender<Block>,
     client_broadcast_block_rx: broadcast::Receiver<Block>,
+    snooze_block_tx: mpsc::Sender<(usize, Block)>,
+    snooze_block_rx: mpsc::Receiver<(usize, Block)>,
 
     relay_store: Arc<RwLock<RelayStore>>,
 }
@@ -223,6 +230,7 @@ where S: ShareChain
         // client related channels
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
         let (share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
+        let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, Block)>(1000);
 
         Ok(Self {
             swarm,
@@ -238,6 +246,8 @@ where S: ShareChain
             sync_in_progress,
             share_chain_sync_tx,
             share_chain_sync_rx,
+            snooze_block_rx,
+            snooze_block_tx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
         })
     }
@@ -307,6 +317,7 @@ where S: ShareChain
                     .heartbeat_interval(Duration::from_secs(10))
                     .validation_mode(gossipsub::ValidationMode::Strict)
                     .message_id_fn(message_id_fn)
+                    .max_transmit_size(8192)
                     .build()
                     .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
                 let gossipsub = gossipsub::Behaviour::new(
@@ -375,6 +386,7 @@ where S: ShareChain
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
     /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
     async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
+        dbg!("Broadcast peer info");
         // get peer info
         let share_chain_sha3x = self.share_chain_sha3x.clone();
         let share_chain_random_x = self.share_chain_random_x.clone();
@@ -410,6 +422,7 @@ where S: ShareChain
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
     async fn broadcast_block(&mut self, result: Result<Block, RecvError>) {
+        dbg!("Broadcast block");
         if self.sync_in_progress.load(Ordering::SeqCst) {
             return;
         }
@@ -490,6 +503,7 @@ where S: ShareChain
     /// Main method to handle any message comes from gossipsub.
     #[allow(clippy::too_many_lines)]
     async fn handle_new_gossipsub_message(&mut self, message: Message) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
         let peer = message.source;
         if peer.is_none() {
             warn!("Message source is not set! {:?}", message);
@@ -502,6 +516,7 @@ where S: ShareChain
         match topic {
             topic if topic == Self::network_topic(PEER_INFO_TOPIC) => match messages::PeerInfo::try_from(message) {
                 Ok(payload) => {
+                    debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
                     debug!(target: LOG_TARGET, squad = &self.config.squad; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
                 },
                 Err(error) => {
@@ -511,6 +526,8 @@ where S: ShareChain
             topic if topic == Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) => {
                 match messages::PeerInfo::try_from(message) {
                     Ok(payload) => {
+                        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
+
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {peer:?} -> {payload:?}");
                         let current_randomx_height = payload.current_random_x_height;
                         let current_sha3x_height = payload.current_sha3x_height;
@@ -551,25 +568,29 @@ where S: ShareChain
             // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent (like
             // 20%))
             topic if topic == Self::squad_topic(&self.config.squad, NEW_BLOCK_TOPIC) => {
+                debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?}");
+
                 if self.sync_in_progress.load(Ordering::SeqCst) {
                     return;
                 }
 
                 match Block::try_from(message) {
                     Ok(payload) => {
+                        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");
+
                         info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.hash.to_hex());
                         let share_chain = match payload.original_block_header.pow.pow_algo {
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         // TODO: Treating this as a sync for now.
-                        match share_chain.add_synced_blocks(vec![payload.clone()]).await {
-                            Ok(_result) => {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "New block added to local share chain via gossip: {}. Height: {}", &payload.hash.to_hex(), &payload.height);
-                            },
-                            Err(error) => {
-                                error!(target: LOG_TARGET, squad = &self.config.squad; "Could not add new block to local share chain: {error:?}");
-                            },
+                        if let Ok(snoozed) = Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
+                        {
+                            if snoozed {
+                                let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
+                            }
+                        } else {
+                            error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add new block to share chain");
                         }
                     },
                     Err(error) => {
@@ -578,7 +599,35 @@ where S: ShareChain
                 }
             },
             _ => {
+                debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Unknown topic {topic:?}!");
+
                 warn!(target: LOG_TARGET, squad = &self.config.squad; "Unknown topic {topic:?}!");
+            },
+        }
+    }
+
+    async fn try_add_propagated_block(
+        share_chain: &Arc<S>,
+        block: Block,
+    ) -> Result<bool, crate::sharechain::error::Error> {
+        match share_chain.add_synced_blocks(vec![block.clone()]).await {
+            Ok(_result) => {
+                info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}", &block.hash.to_hex(), &block.height);
+                Ok(false)
+            },
+            Err(error) => match error {
+                crate::sharechain::error::Error::BlockParentDoesNotExist { num_missing_parents } => {
+                    if num_missing_parents < MAX_MISSING_PARENTS_TO_SNOOZE {
+                        // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
+                        return Ok(true);
+                    }
+                    error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?} and too many missing parents");
+                    Err(error)
+                },
+                _ => {
+                    error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
+                    Err(error)
+                },
             },
         }
     }
@@ -589,6 +638,8 @@ where S: ShareChain
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync request: {request:?}");
+
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
         let share_chain = match request.algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -615,6 +666,8 @@ where S: ShareChain
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
+
         let timer = Instant::now();
         if !self.sync_in_progress.load(Ordering::SeqCst) {
             return;
@@ -690,7 +743,7 @@ where S: ShareChain
         squad: Squad,
         shutdown_signal: ShutdownSignal,
     ) {
-        info!(target: LOG_TARGET, squad = &squad; "Initially syncing share chain (timeout: {timeout:?})...");
+        warn!(target: LOG_TARGET, squad = &squad; "Initially syncing share chain (timeout: {timeout:?})...");
         in_progress.store(true, Ordering::SeqCst);
         let sleep = time::sleep(timeout);
         tokio::pin!(sleep);
@@ -768,7 +821,19 @@ where S: ShareChain
     /// Main method to handle libp2p events.
     #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New event: {event:?}");
+
         match event {
+            SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id,
+                endpoint,
+                num_established,
+                concurrent_dial_errors,
+                established_in,
+            } => {
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
+            },
             SwarmEvent::NewListenAddr { address, .. } => {
                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
             },
@@ -838,19 +903,19 @@ where S: ShareChain
                         addresses,
                         ..
                     } => {
-                        addresses.iter().for_each(|addr| {
-                            self.swarm.add_peer_address(peer, addr.clone());
-                        });
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                        if let Some(old_peer) = old_peer {
-                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
-                        }
+                        // addresses.iter().for_each(|addr| {
+                        //     self.swarm.add_peer_address(peer, addr.clone());
+                        // });
+                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                        // if let Some(old_peer) = old_peer {
+                        //     self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
+                        // }
                     },
                     _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
                 },
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
-                    identify::Event::Received { peer_id, info } => self.handle_peer_identified(peer_id, info).await,
-                    identify::Event::Error { peer_id, error } => {
+                    identify::Event::Received { peer_id, info, .. } => self.handle_peer_identified(peer_id, info).await,
+                    identify::Event::Error { peer_id, error, .. } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
@@ -974,9 +1039,11 @@ where S: ShareChain
                    self.handle_event(event).await;
                 }
                 block = self.client_broadcast_block_rx.recv() => {
+                    dbg!("client broadcast");
                     self.broadcast_block(block).await;
                 }
                 _ = publish_peer_info_interval.tick() => {
+                    dbg!("pub peer");
                     // handle case when we have some peers removed
                     let expired_peers = self.squad_peer_store.cleanup().await;
                     for exp_peer in expired_peers {
@@ -997,8 +1064,33 @@ where S: ShareChain
                             }
                         }
                     }
-                }
+                },
+                res = self.snooze_block_rx.recv() => {
+                         dbg!("snooze");
+                         if let Some((snoozes_left, block)) = res {
+                            let snooze_sender = self.snooze_block_tx.clone();
+                            let share_chain = match block.original_block_header.pow.pow_algo {
+                                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+                            };
+                         tokio::spawn(async move {
+                            warn!(target: LOG_TARGET, "Trying snoozed block again after {snoozes_left} snoozes left...");
+                            tokio::time::sleep(MAX_SNOOZE_DURATION).await;
+
+                            if let Ok(snoozed) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
+                                if snoozed && snoozes_left > 1 {
+                                    let _ = snooze_sender.send((snoozes_left - 1, block)).await;
+                                }
+                            } else {
+                                error!(target: LOG_TARGET, "Failed to add snoozed block to share chain");
+                            }
+                         });
+                        } else {
+                            error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
+                        }
+                },
                 req = self.share_chain_sync_rx.recv() => {
+                    dbg!("share chain sync rx");
                     match req {
                         Ok(request) => {
                             self.swarm.behaviour_mut().share_chain_sync
@@ -1010,6 +1102,7 @@ where S: ShareChain
                     }
                 },
                 _ = kademlia_bootstrap_interval.tick() => {
+                    dbg!("kad boot");
                     if let Err(error) = self.bootstrap_kademlia() {
                         warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to do kademlia bootstrap: {error:?}");
                     }
@@ -1152,6 +1245,7 @@ where S: ShareChain
         let share_chain_sync_tx = self.share_chain_sync_tx.clone();
         let squad = self.config.squad.clone();
         let shutdown_signal = self.shutdown_signal.clone();
+        warn!(target: LOG_TARGET, "Starting initial share chain sync...");
         tokio::spawn(async move {
             Self::initial_share_chain_sync(
                 in_progress,
@@ -1159,12 +1253,14 @@ where S: ShareChain
                 share_chain_sha3x,
                 share_chain_random_x,
                 share_chain_sync_tx,
-                Duration::from_secs(30),
+                Duration::from_secs(3),
                 squad,
                 shutdown_signal,
             )
             .await;
         });
+
+        warn!(target: LOG_TARGET, "Starting main loop");
 
         self.main_loop().await?;
         info!(target: LOG_TARGET,"P2P service has been stopped!");

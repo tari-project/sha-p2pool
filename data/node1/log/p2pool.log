@@ -1,0 +1,60 @@
+[2024-10-07 19:41:16.931734200 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 19:41:16.932202700 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 19:41:16.932769000 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 19:41:16.932888600 [tari::p2pool::server::server] ERROR GRPC encountered an error: tonic::transport::Error(Transport, hyper::Error(Listen, Os { code: 10048, kind: AddrInUse, message: "Only one usage of each socket address (protocol/network address/port) is normally permitted." })) // src\server\server.rs:163
+[2024-10-07 19:41:16.933535700 [tari::p2pool::server::server] ERROR GRPC Server encountered an error: Grpc(Tonic(Transport(tonic::transport::Error(Transport, hyper::Error(Listen, Os { code: 10048, kind: AddrInUse, message: "Only one usage of each socket address (protocol/network address/port) is normally permitted." }))))) // src\server\server.rs:185
+[2024-10-07 19:53:53.381662100 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 6020 Tip is now 6020 // src\sharechain\in_memory.rs:478
+[2024-10-07 19:53:53.916673900 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 6021 Tip is now 6021 // src\sharechain\in_memory.rs:478
+[2024-10-07 19:53:55.127767500 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 6022 Tip is now 6022 // src\sharechain\in_memory.rs:478
+[2024-10-07 19:53:55.248333500 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 6023 Tip is now 6023 // src\sharechain\in_memory.rs:478
+[2024-10-07 20:19:03.155630000 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:19:03.156068500 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:19:03.156590000 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:19:03.189450800 [tari::p2pool::server::server] INFO  gRPC server stopped! // src\server\server.rs:167
+[2024-10-07 20:19:52.518807700 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:19:52.519578400 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:19:52.520597400 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:26:24.561802100 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:26:24.562305500 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:26:24.562763400 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:31:08.421263500 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:31:08.421722900 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:31:08.422438700 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:34:41.552215700 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:34:41.552614200 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:34:41.553178300 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:37:38.377136400 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:37:38.377716800 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:37:38.378305600 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:57:29.158451300 [tari::p2pool::server::server] INFO  ⛏ Starting Tari SHA-3 mining P2Pool... // src\server\server.rs:173
+[2024-10-07 20:57:29.158926200 [tari::p2pool::server::server] INFO  Starting gRPC server on port 18145! // src\server\server.rs:152
+[2024-10-07 20:57:29.159319200 [tari::p2pool::server::stats] INFO  Starting Stats HTTP server at http://127.0.0.1:19001 // src\server\http\server.rs:120
+[2024-10-07 20:57:36.151977800 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10465 Tip is now 10465 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:37.969418600 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10466 Tip is now 10466 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:38.044482300 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10467 Tip is now 10467 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:39.300866200 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10468 Tip is now 10468 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:42.710595700 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10469 Tip is now 10469 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:43.076907000 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10470 Tip is now 10470 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:43.111957100 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10471 Tip is now 10471 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:44.139493700 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10472 Tip is now 10472 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:45.486708100 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10473 Tip is now 10473 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:45.977135500 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10474 Tip is now 10474 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:46.575942900 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10475 Tip is now 10475 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:46.755882100 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10476 Tip is now 10476 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:47.912880800 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10477 Tip is now 10477 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:48.131924300 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10478 Tip is now 10478 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:48.793777800 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10479 Tip is now 10479 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:49.027487800 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10480 Tip is now 10480 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:49.503303300 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10481 Tip is now 10481 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:50.990468300 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10482 Tip is now 10482 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:51.891785600 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10483 Tip is now 10483 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:52.302461900 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10484 Tip is now 10484 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:52.525416100 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10485 Tip is now 10485 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:52.788649500 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10486 Tip is now 10486 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:53.217369500 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10487 Tip is now 10487 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:54.088171700 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10488 Tip is now 10488 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:54.137152200 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10489 Tip is now 10489 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:54.544685600 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10490 Tip is now 10490 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:54.922409200 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10491 Tip is now 10491 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:55.114403400 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10492 Tip is now 10492 // src\sharechain\in_memory.rs:476
+[2024-10-07 20:57:56.053230400 [tari::p2pool::sharechain::in_memory] INFO  [Sha3x] ✅ Block added: 10493 Tip is now 10493 // src\sharechain\in_memory.rs:476

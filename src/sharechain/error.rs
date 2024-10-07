@@ -36,6 +36,8 @@ pub enum Error {
     BlockHashConversion(#[from] FixedHashSizeError),
     #[error("Block validation error: {0}")]
     BlockValidation(String),
+    #[error("Block parent does not exist")]
+    BlockParentDoesNotExist { num_missing_parents: u64 },
 }
 
 #[derive(Error, Debug)]

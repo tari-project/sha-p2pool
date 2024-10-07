@@ -1,0 +1,181 @@
+2024-10-07 19:41:16.949799000 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1230
+2024-10-07 19:41:16.950275000 WARN  Starting main loop // src\server\p2p\network.rs:1245
+2024-10-07 19:41:16.950333200 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 19:41:16.958610200 INFO  Peer count: 0 // src\server\p2p\network.rs:1040
+2024-10-07 19:41:16.959059100 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1044
+2024-10-07 19:41:19.964733400 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 19:41:19.965344800 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 19:41:42.861921000 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:959
+2024-10-07 19:41:42.862414400 INFO  Try to listen on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit... // src\server\p2p\network.rs:990
+2024-10-07 19:41:42.862807700 INFO  Listening on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit // src\server\p2p\network.rs:997
+2024-10-07 19:46:16.954232400 INFO  Peer count: 0 // src\server\p2p\network.rs:1040
+2024-10-07 19:46:16.954692700 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1044
+2024-10-07 19:51:16.952498000 INFO  Peer count: 0 // src\server\p2p\network.rs:1040
+2024-10-07 19:51:16.952958300 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1044
+2024-10-07 19:53:52.603178300 INFO  🆕 New block from broadcast: "44eebe9e3de57cbf0a773638d31981e4d97604f55012876fcf7017bcf9fa0bfa" // src\server\p2p\network.rs:578
+2024-10-07 19:53:52.603596800 INFO  New block added to local share chain via gossip: 44eebe9e3de57cbf0a773638d31981e4d97604f55012876fcf7017bcf9fa0bfa. Height: 971 // src\server\p2p\network.rs:612
+2024-10-07 19:53:52.937541900 INFO  🆕 New block from broadcast: "fba84cc2f7b96fd7387c8b9d08bf9023c10e78ec72792c8529f68c19e6411e99" // src\server\p2p\network.rs:578
+2024-10-07 19:53:52.937933000 INFO  New block added to local share chain via gossip: fba84cc2f7b96fd7387c8b9d08bf9023c10e78ec72792c8529f68c19e6411e99. Height: 6019 // src\server\p2p\network.rs:612
+2024-10-07 19:53:53.381319200 INFO  🆕 New block from broadcast: "cd83a758a011008b7b21356e0ed1e0bfa968b57662f9f0fc39faa503bacdec4d" // src\server\p2p\network.rs:578
+2024-10-07 19:53:53.381879000 INFO  New block added to local share chain via gossip: cd83a758a011008b7b21356e0ed1e0bfa968b57662f9f0fc39faa503bacdec4d. Height: 6020 // src\server\p2p\network.rs:612
+2024-10-07 19:53:53.916385900 INFO  🆕 New block from broadcast: "5564dfaadbcfa747b898c8ea3749ba788463be4e02665d567d8400a82738ac25" // src\server\p2p\network.rs:578
+2024-10-07 19:53:53.916892800 INFO  New block added to local share chain via gossip: 5564dfaadbcfa747b898c8ea3749ba788463be4e02665d567d8400a82738ac25. Height: 6021 // src\server\p2p\network.rs:612
+2024-10-07 19:53:55.127461000 INFO  🆕 New block from broadcast: "84516da3bed55a7f9023304deb177979b543c80497f87da99d98000db0bcff38" // src\server\p2p\network.rs:578
+2024-10-07 19:53:55.127978700 INFO  New block added to local share chain via gossip: 84516da3bed55a7f9023304deb177979b543c80497f87da99d98000db0bcff38. Height: 6022 // src\server\p2p\network.rs:612
+2024-10-07 19:53:55.248047600 INFO  🆕 New block from broadcast: "b665285084927257e2750fa935bb72b141fbad178c4edcd427d877989bfaf155" // src\server\p2p\network.rs:578
+2024-10-07 19:53:55.248547100 INFO  New block added to local share chain via gossip: b665285084927257e2750fa935bb72b141fbad178c4edcd427d877989bfaf155. Height: 6023 // src\server\p2p\network.rs:612
+2024-10-07 20:19:57.544521800 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1230
+2024-10-07 20:19:57.545021300 WARN  Starting main loop // src\server\p2p\network.rs:1245
+2024-10-07 20:19:57.545090700 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 20:19:57.554215200 INFO  Peer count: 0 // src\server\p2p\network.rs:1040
+2024-10-07 20:19:57.554558000 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1044
+2024-10-07 20:20:00.556579400 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:20:00.556971100 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:20:18.476122100 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:959
+2024-10-07 20:20:18.476732200 INFO  Try to listen on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit... // src\server\p2p\network.rs:990
+2024-10-07 20:20:18.477122200 INFO  Listening on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit // src\server\p2p\network.rs:997
+2024-10-07 20:26:29.590022000 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1236
+2024-10-07 20:26:29.590577400 WARN  Starting main loop // src\server\p2p\network.rs:1251
+2024-10-07 20:26:29.590623400 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 20:26:29.608104400 INFO  Peer count: 0 // src\server\p2p\network.rs:1043
+2024-10-07 20:26:29.608390900 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1047
+2024-10-07 20:26:32.600238600 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:26:32.600691400 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:26:50.299959100 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:959
+2024-10-07 20:26:50.300277100 INFO  Try to listen on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit... // src\server\p2p\network.rs:990
+2024-10-07 20:26:50.300565300 INFO  Listening on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit // src\server\p2p\network.rs:997
+2024-10-07 20:31:08.436853700 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1246
+2024-10-07 20:31:08.437411700 WARN  Starting main loop // src\server\p2p\network.rs:1261
+2024-10-07 20:31:08.437446100 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 20:31:08.448532800 INFO  Peer count: 0 // src\server\p2p\network.rs:1053
+2024-10-07 20:31:08.449024300 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1057
+2024-10-07 20:31:08.997605300 INFO  Connection established: PeerId("12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W") -> Dialer { address: /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W, role_override: Dialer, port_use: Reuse } (1/Some([])/545.8ms) // src\server\p2p\network.rs:832
+2024-10-07 20:31:09.001928100 INFO  Connection established: PeerId("12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw") -> Dialer { address: /ip4/54.74.1.110/tcp/19001/p2p/12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw, role_override: Dialer, port_use: Reuse } (1/Some([])/550.9934ms) // src\server\p2p\network.rs:832
+2024-10-07 20:31:09.003797500 INFO  Connection established: PeerId("12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB") -> Dialer { address: /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB, role_override: Dialer, port_use: Reuse } (1/Some([])/553.6913ms) // src\server\p2p\network.rs:832
+2024-10-07 20:31:11.441957600 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:31:11.442431200 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:31:34.334803400 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:969
+2024-10-07 20:31:34.335113100 INFO  Try to listen on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit... // src\server\p2p\network.rs:1000
+2024-10-07 20:31:34.335445100 INFO  Listening on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit // src\server\p2p\network.rs:1007
+2024-10-07 20:34:41.568303000 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1246
+2024-10-07 20:34:41.568619100 WARN  Starting main loop // src\server\p2p\network.rs:1261
+2024-10-07 20:34:41.568639600 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 20:34:41.576870800 INFO  Peer count: 0 // src\server\p2p\network.rs:1053
+2024-10-07 20:34:41.577291900 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1057
+2024-10-07 20:34:42.136907600 WARN  Connection established: PeerId("12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw") -> Dialer { address: /ip4/54.74.1.110/tcp/19001/p2p/12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw, role_override: Dialer, port_use: Reuse } (1/Some([])/556.9179ms) // src\server\p2p\network.rs:832
+2024-10-07 20:34:42.137472600 WARN  Connection established: PeerId("12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W") -> Dialer { address: /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W, role_override: Dialer, port_use: Reuse } (1/Some([])/558.2545ms) // src\server\p2p\network.rs:832
+2024-10-07 20:34:42.138253200 WARN  Connection established: PeerId("12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB") -> Dialer { address: /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB, role_override: Dialer, port_use: Reuse } (1/Some([])/559.4143ms) // src\server\p2p\network.rs:832
+2024-10-07 20:34:44.576683700 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:34:44.577142700 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:35:07.487839600 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:969
+2024-10-07 20:35:07.488348000 INFO  Try to listen on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit... // src\server\p2p\network.rs:1000
+2024-10-07 20:35:07.488667900 INFO  Listening on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit // src\server\p2p\network.rs:1007
+2024-10-07 20:37:38.391258900 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1246
+2024-10-07 20:37:38.391631500 WARN  Starting main loop // src\server\p2p\network.rs:1261
+2024-10-07 20:37:38.391651900 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:743
+2024-10-07 20:37:38.400881700 INFO  Peer count: 0 // src\server\p2p\network.rs:1053
+2024-10-07 20:37:38.401196500 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1057
+2024-10-07 20:37:38.947490300 INFO  Connection established: PeerId("12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB") -> Dialer { address: /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB, role_override: Dialer, port_use: Reuse } (1/Some([])/543.5699ms) // src\server\p2p\network.rs:832
+2024-10-07 20:37:38.948282400 INFO  Connection established: PeerId("12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W") -> Dialer { address: /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W, role_override: Dialer, port_use: Reuse } (1/Some([])/545.108ms) // src\server\p2p\network.rs:832
+2024-10-07 20:37:38.958067200 INFO  Connection established: PeerId("12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw") -> Dialer { address: /ip4/54.74.1.110/tcp/19001/p2p/12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw, role_override: Dialer, port_use: Reuse } (1/Some([])/555.0799ms) // src\server\p2p\network.rs:832
+2024-10-07 20:37:41.394229700 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:37:41.394749900 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:812
+2024-10-07 20:38:04.299139100 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:969
+2024-10-07 20:38:04.299504400 INFO  Try to listen on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit... // src\server\p2p\network.rs:1000
+2024-10-07 20:38:04.299791600 INFO  Listening on /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W/p2p-circuit // src\server\p2p\network.rs:1007
+2024-10-07 20:42:38.397461100 INFO  Peer count: 0 // src\server\p2p\network.rs:1053
+2024-10-07 20:42:38.397787000 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1057
+2024-10-07 20:47:38.401088200 INFO  Peer count: 0 // src\server\p2p\network.rs:1053
+2024-10-07 20:47:38.401421200 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1057
+2024-10-07 20:57:29.167614300 WARN  Starting initial share chain sync... // src\server\p2p\network.rs:1249
+2024-10-07 20:57:29.168005400 WARN  Starting main loop // src\server\p2p\network.rs:1264
+2024-10-07 20:57:29.168048900 WARN  Initially syncing share chain (timeout: 3s)... // src\server\p2p\network.rs:746
+2024-10-07 20:57:29.179086700 INFO  Peer count: 0 // src\server\p2p\network.rs:1056
+2024-10-07 20:57:29.179724400 WARN  No peers to broadcast peer info! // src\server\p2p\network.rs:1060
+2024-10-07 20:57:29.183991500 INFO  Connection established: PeerId("12D3KooWSot4j5SGUttrBHesQzTmuz7Ja4KtWzgWSLmJ6CQkMkke") -> Dialer { address: /ip4/172.16.0.2/tcp/61371/p2p/12D3KooWSot4j5SGUttrBHesQzTmuz7Ja4KtWzgWSLmJ6CQkMkke, role_override: Dialer, port_use: Reuse } (1/Some([])/2.3771ms) // src\server\p2p\network.rs:835
+2024-10-07 20:57:29.731668800 INFO  Connection established: PeerId("12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw") -> Dialer { address: /ip4/54.74.1.110/tcp/19001/p2p/12D3KooWAMK15FhoEZTT9iLitaX46LrYQSxnxCQsEJixi88pFivw, role_override: Dialer, port_use: Reuse } (1/Some([])/549.0569ms) // src\server\p2p\network.rs:835
+2024-10-07 20:57:29.735165800 INFO  Connection established: PeerId("12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB") -> Dialer { address: /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB, role_override: Dialer, port_use: Reuse } (1/Some([])/551.8507ms) // src\server\p2p\network.rs:835
+2024-10-07 20:57:29.741052400 INFO  Connection established: PeerId("12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W") -> Dialer { address: /ip4/34.245.136.119/tcp/19001/p2p/12D3KooWRbP8Qsrs1FRe3A41EeEQP5bjTo84etLaoPvdY2orxZ3W, role_override: Dialer, port_use: Reuse } (1/Some([])/558.1239ms) // src\server\p2p\network.rs:835
+2024-10-07 20:57:32.184256500 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:815
+2024-10-07 20:57:32.184732300 ERROR Failed to get peer with highest share chain height! // src\server\p2p\network.rs:815
+2024-10-07 20:57:34.806418200 INFO  🆕 New block from broadcast: "8da8e851653a9435de39cbf9b8839392fef8d4b3c632b4a684c3944e01849842" // src\server\p2p\network.rs:581
+2024-10-07 20:57:34.806904800 INFO  New block added to local share chain via gossip: 8da8e851653a9435de39cbf9b8839392fef8d4b3c632b4a684c3944e01849842. Height: 10464 // src\server\p2p\network.rs:615
+2024-10-07 20:57:35.868607500 INFO  🆕 New block from broadcast: "51146a323fd147875c30e091d1e1fe6c30bceebd24413f0a5a23d2865e237f42" // src\server\p2p\network.rs:581
+2024-10-07 20:57:35.868949500 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1778 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:35.869252700 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593
+2024-10-07 20:57:36.151593600 INFO  🆕 New block from broadcast: "e0f1a8ad2f535338f5def70145e874435f3a9c7f9e167d1f90528e6cc49640ea" // src\server\p2p\network.rs:581
+2024-10-07 20:57:36.152266900 INFO  New block added to local share chain via gossip: e0f1a8ad2f535338f5def70145e874435f3a9c7f9e167d1f90528e6cc49640ea. Height: 10465 // src\server\p2p\network.rs:615
+2024-10-07 20:57:37.969154500 INFO  🆕 New block from broadcast: "c2ccb540ba935675a35039e041b74687fcc83af124ec4608e205e40c006a37b2" // src\server\p2p\network.rs:581
+2024-10-07 20:57:37.969644700 INFO  New block added to local share chain via gossip: c2ccb540ba935675a35039e041b74687fcc83af124ec4608e205e40c006a37b2. Height: 10466 // src\server\p2p\network.rs:615
+2024-10-07 20:57:38.044196200 INFO  🆕 New block from broadcast: "c83b1333ac8d7408326e02f45d79382e13798bd44be4ba1324813bbcbd10e9a0" // src\server\p2p\network.rs:581
+2024-10-07 20:57:38.044789700 INFO  New block added to local share chain via gossip: c83b1333ac8d7408326e02f45d79382e13798bd44be4ba1324813bbcbd10e9a0. Height: 10467 // src\server\p2p\network.rs:615
+2024-10-07 20:57:39.300533800 INFO  🆕 New block from broadcast: "90425b6cac78fabaed1c153541f1579b0da2224cbcd0321d6b33709d83e38665" // src\server\p2p\network.rs:581
+2024-10-07 20:57:39.301119500 INFO  New block added to local share chain via gossip: 90425b6cac78fabaed1c153541f1579b0da2224cbcd0321d6b33709d83e38665. Height: 10468 // src\server\p2p\network.rs:615
+2024-10-07 20:57:39.889461200 INFO  🆕 New block from broadcast: "979103ae26591980c9908c17e50bae9bb045c18035f27d12db9327c3079976ca" // src\server\p2p\network.rs:581
+2024-10-07 20:57:39.889759000 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1779 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:39.890074700 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593
+2024-10-07 20:57:42.710354900 INFO  🆕 New block from broadcast: "802dfdc20f1c54a00a22a6594dc5e3c1c703f532d547c73f07db60668929f568" // src\server\p2p\network.rs:581
+2024-10-07 20:57:42.710803200 INFO  New block added to local share chain via gossip: 802dfdc20f1c54a00a22a6594dc5e3c1c703f532d547c73f07db60668929f568. Height: 10469 // src\server\p2p\network.rs:615
+2024-10-07 20:57:43.076659600 INFO  🆕 New block from broadcast: "2bbea2aa56567dad274f19f9170f78648d96029bfffc9b0a8a362112b437a0e5" // src\server\p2p\network.rs:581
+2024-10-07 20:57:43.077121800 INFO  New block added to local share chain via gossip: 2bbea2aa56567dad274f19f9170f78648d96029bfffc9b0a8a362112b437a0e5. Height: 10470 // src\server\p2p\network.rs:615
+2024-10-07 20:57:43.111630900 INFO  🆕 New block from broadcast: "4fa9b8d5402c3a1862133fa1e5d2a011e7f102dedf9a47d6ab8765eae09e37a7" // src\server\p2p\network.rs:581
+2024-10-07 20:57:43.112162900 INFO  New block added to local share chain via gossip: 4fa9b8d5402c3a1862133fa1e5d2a011e7f102dedf9a47d6ab8765eae09e37a7. Height: 10471 // src\server\p2p\network.rs:615
+2024-10-07 20:57:44.139243300 INFO  🆕 New block from broadcast: "908046ff8fa7e85a3686e858d4d05fc3dd886dec61d214028e729bd7f740ac15" // src\server\p2p\network.rs:581
+2024-10-07 20:57:44.139705100 INFO  New block added to local share chain via gossip: 908046ff8fa7e85a3686e858d4d05fc3dd886dec61d214028e729bd7f740ac15. Height: 10472 // src\server\p2p\network.rs:615
+2024-10-07 20:57:45.486456100 INFO  🆕 New block from broadcast: "c45967387b7214588a1ff33692812c02dda060f3d3200ce7a81d3485b441cb67" // src\server\p2p\network.rs:581
+2024-10-07 20:57:45.486912000 INFO  New block added to local share chain via gossip: c45967387b7214588a1ff33692812c02dda060f3d3200ce7a81d3485b441cb67. Height: 10473 // src\server\p2p\network.rs:615
+2024-10-07 20:57:45.976833600 INFO  🆕 New block from broadcast: "ad98ecf8e9692d5c0a41235da2f13b7389ec6ac57dc7a0135340cd80072a0b7d" // src\server\p2p\network.rs:581
+2024-10-07 20:57:45.977392400 INFO  New block added to local share chain via gossip: ad98ecf8e9692d5c0a41235da2f13b7389ec6ac57dc7a0135340cd80072a0b7d. Height: 10474 // src\server\p2p\network.rs:615
+2024-10-07 20:57:46.575594300 INFO  🆕 New block from broadcast: "a24b98e69fd4de85bd388271ed9dea45dd97f1f3f0db8e870576071435d84fc2" // src\server\p2p\network.rs:581
+2024-10-07 20:57:46.576219100 INFO  New block added to local share chain via gossip: a24b98e69fd4de85bd388271ed9dea45dd97f1f3f0db8e870576071435d84fc2. Height: 10475 // src\server\p2p\network.rs:615
+2024-10-07 20:57:46.744503600 INFO  🆕 New block from broadcast: "2a2e1b8abac4749c95b2e86c9fda68c48ea9dd1c3ac97b47f15e3bdfea3c500c" // src\server\p2p\network.rs:581
+2024-10-07 20:57:46.744831700 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1780 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:46.745132700 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593
+2024-10-07 20:57:46.755554200 INFO  🆕 New block from broadcast: "09216c0008a7d75527dfbdf3e5f9bffb4f17bd59dd71de105e017d348db2841b" // src\server\p2p\network.rs:581
+2024-10-07 20:57:46.756154600 INFO  New block added to local share chain via gossip: 09216c0008a7d75527dfbdf3e5f9bffb4f17bd59dd71de105e017d348db2841b. Height: 10476 // src\server\p2p\network.rs:615
+2024-10-07 20:57:47.912585900 INFO  🆕 New block from broadcast: "f8828ddf149ab0b17fdabc7467faa4d36f3b7a9290000d2d45993fafcca3eab7" // src\server\p2p\network.rs:581
+2024-10-07 20:57:47.913139900 INFO  New block added to local share chain via gossip: f8828ddf149ab0b17fdabc7467faa4d36f3b7a9290000d2d45993fafcca3eab7. Height: 10477 // src\server\p2p\network.rs:615
+2024-10-07 20:57:48.131662000 INFO  🆕 New block from broadcast: "6ec2d28aa5a24b6d72db962a8cb311f82243bb87a3a90e4ee5ffeab3df7aa243" // src\server\p2p\network.rs:581
+2024-10-07 20:57:48.132131800 INFO  New block added to local share chain via gossip: 6ec2d28aa5a24b6d72db962a8cb311f82243bb87a3a90e4ee5ffeab3df7aa243. Height: 10478 // src\server\p2p\network.rs:615
+2024-10-07 20:57:48.793473700 INFO  🆕 New block from broadcast: "db024642448847af70af3e390707df22cea1e3073af16503cdbde6bd386e8a62" // src\server\p2p\network.rs:581
+2024-10-07 20:57:48.794033900 INFO  New block added to local share chain via gossip: db024642448847af70af3e390707df22cea1e3073af16503cdbde6bd386e8a62. Height: 10479 // src\server\p2p\network.rs:615
+2024-10-07 20:57:49.027187200 INFO  🆕 New block from broadcast: "c97b39354b1ceacd113f126bde9d716fe252d2f3f6315a19424d701cf1c89a43" // src\server\p2p\network.rs:581
+2024-10-07 20:57:49.027810800 INFO  New block added to local share chain via gossip: c97b39354b1ceacd113f126bde9d716fe252d2f3f6315a19424d701cf1c89a43. Height: 10480 // src\server\p2p\network.rs:615
+2024-10-07 20:57:49.502943900 INFO  🆕 New block from broadcast: "ec8005d3c49221cb0c5a0db132875cbe63a025edee713b7c764954cfdb873dbb" // src\server\p2p\network.rs:581
+2024-10-07 20:57:49.503629200 INFO  New block added to local share chain via gossip: ec8005d3c49221cb0c5a0db132875cbe63a025edee713b7c764954cfdb873dbb. Height: 10481 // src\server\p2p\network.rs:615
+2024-10-07 20:57:49.946828900 INFO  🆕 New block from broadcast: "7daaed37b27361503250a5f5fe9f522b78b66030af2bd2a342f28d87c2e733c1" // src\server\p2p\network.rs:581
+2024-10-07 20:57:49.947137300 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1781 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:49.947380400 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593
+2024-10-07 20:57:50.990144000 INFO  🆕 New block from broadcast: "75b25208e0733f7b4fafa1ff8ef17588f06def3f6f8e28b37d8194ca6a3391c6" // src\server\p2p\network.rs:581
+2024-10-07 20:57:50.990758100 INFO  New block added to local share chain via gossip: 75b25208e0733f7b4fafa1ff8ef17588f06def3f6f8e28b37d8194ca6a3391c6. Height: 10482 // src\server\p2p\network.rs:615
+2024-10-07 20:57:51.891443700 INFO  🆕 New block from broadcast: "ecce79f34c1743f0d7631d61c69050fd31b9a8eb37d8a0d0532e950cd2af8bc2" // src\server\p2p\network.rs:581
+2024-10-07 20:57:51.892078400 INFO  New block added to local share chain via gossip: ecce79f34c1743f0d7631d61c69050fd31b9a8eb37d8a0d0532e950cd2af8bc2. Height: 10483 // src\server\p2p\network.rs:615
+2024-10-07 20:57:52.302207600 INFO  🆕 New block from broadcast: "10e3bd4885ba59f6e5509f942cb78a77c73b34d4393909cd9cd222feb0fb46e2" // src\server\p2p\network.rs:581
+2024-10-07 20:57:52.302690500 INFO  New block added to local share chain via gossip: 10e3bd4885ba59f6e5509f942cb78a77c73b34d4393909cd9cd222feb0fb46e2. Height: 10484 // src\server\p2p\network.rs:615
+2024-10-07 20:57:52.525086400 INFO  🆕 New block from broadcast: "825afce8024a1a3cd71974668fbb1a4cce8ac5c178f847d05c58fc3108b28ebd" // src\server\p2p\network.rs:581
+2024-10-07 20:57:52.525708300 INFO  New block added to local share chain via gossip: 825afce8024a1a3cd71974668fbb1a4cce8ac5c178f847d05c58fc3108b28ebd. Height: 10485 // src\server\p2p\network.rs:615
+2024-10-07 20:57:52.788332300 INFO  🆕 New block from broadcast: "8276b38b53610e4b26929122014b94a8ae3900a2ca0d28228f610b057382e0ed" // src\server\p2p\network.rs:581
+2024-10-07 20:57:52.788988100 INFO  New block added to local share chain via gossip: 8276b38b53610e4b26929122014b94a8ae3900a2ca0d28228f610b057382e0ed. Height: 10486 // src\server\p2p\network.rs:615
+2024-10-07 20:57:53.217080900 INFO  🆕 New block from broadcast: "feca22a99195bfdc51a9e1bb9e59e4da7dcaa6eb9bb91c409c28c6d09c29e478" // src\server\p2p\network.rs:581
+2024-10-07 20:57:53.217596800 INFO  New block added to local share chain via gossip: feca22a99195bfdc51a9e1bb9e59e4da7dcaa6eb9bb91c409c28c6d09c29e478. Height: 10487 // src\server\p2p\network.rs:615
+2024-10-07 20:57:54.087845700 INFO  🆕 New block from broadcast: "b9cdd0287aee767216f7e0ab2abe517a109590ef6b421a8864065228c8777c54" // src\server\p2p\network.rs:581
+2024-10-07 20:57:54.088436400 INFO  New block added to local share chain via gossip: b9cdd0287aee767216f7e0ab2abe517a109590ef6b421a8864065228c8777c54. Height: 10488 // src\server\p2p\network.rs:615
+2024-10-07 20:57:54.136856100 INFO  🆕 New block from broadcast: "f9d705c1df9c8d8851bd09585c09a3f6c465010d76de06fa65e089092e431079" // src\server\p2p\network.rs:581
+2024-10-07 20:57:54.137402800 INFO  New block added to local share chain via gossip: f9d705c1df9c8d8851bd09585c09a3f6c465010d76de06fa65e089092e431079. Height: 10489 // src\server\p2p\network.rs:615
+2024-10-07 20:57:54.303685700 INFO  🆕 New block from broadcast: "119ed9ab091a4906b1165af62a3ce3e4c33ec9906a909df133d6009f0767323b" // src\server\p2p\network.rs:581
+2024-10-07 20:57:54.303929300 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1782 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:54.304241100 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593
+2024-10-07 20:57:54.544405900 INFO  🆕 New block from broadcast: "5c3115c550145b6e4d5b44cfdce351d87561dc047aaea20cc2fe7a4587f6feb9" // src\server\p2p\network.rs:581
+2024-10-07 20:57:54.544909200 INFO  New block added to local share chain via gossip: 5c3115c550145b6e4d5b44cfdce351d87561dc047aaea20cc2fe7a4587f6feb9. Height: 10490 // src\server\p2p\network.rs:615
+2024-10-07 20:57:54.922073000 INFO  🆕 New block from broadcast: "20a973e05ed488d857b197aa4abe7d7b6296cf4f37c928b54e66d24a6ca1e307" // src\server\p2p\network.rs:581
+2024-10-07 20:57:54.922722600 INFO  New block added to local share chain via gossip: 20a973e05ed488d857b197aa4abe7d7b6296cf4f37c928b54e66d24a6ca1e307. Height: 10491 // src\server\p2p\network.rs:615
+2024-10-07 20:57:55.067582200 WARN  [AUTONAT]: We are behind a NAT, connecting to relay! // src\server\p2p\network.rs:972
+2024-10-07 20:57:55.067959900 INFO  Try to listen on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit... // src\server\p2p\network.rs:1003
+2024-10-07 20:57:55.068348900 INFO  Listening on /ip4/54.154.211.24/tcp/19001/p2p/12D3KooWEH7TARFSQ3T9byiV5hFwoipP9JYEZ7ZMWDN1yVnteQhB/p2p-circuit // src\server\p2p\network.rs:1010
+2024-10-07 20:57:55.114131700 INFO  🆕 New block from broadcast: "b2eb261a8083a0bdee7042a9124e4ff1b1227ff96ebab6f0f7e5b82f5329e659" // src\server\p2p\network.rs:581
+2024-10-07 20:57:55.114635300 INFO  New block added to local share chain via gossip: b2eb261a8083a0bdee7042a9124e4ff1b1227ff96ebab6f0f7e5b82f5329e659. Height: 10492 // src\server\p2p\network.rs:615
+2024-10-07 20:57:56.052935500 INFO  🆕 New block from broadcast: "718cff825fffb38be32f76757c892a0c91c3789209df237cec04b95eb8e16094" // src\server\p2p\network.rs:581
+2024-10-07 20:57:56.053512400 INFO  New block added to local share chain via gossip: 718cff825fffb38be32f76757c892a0c91c3789209df237cec04b95eb8e16094. Height: 10493 // src\server\p2p\network.rs:615
+2024-10-07 20:57:56.565625600 INFO  🆕 New block from broadcast: "90cbf9ad18d5f97b97f475b3e3a51fc9f24c72d9b66201fb7b6584816d1d4177" // src\server\p2p\network.rs:581
+2024-10-07 20:57:56.565864200 ERROR Could not add new block to local share chain: BlockParentDoesNotExist { num_missing_parents: 1783 } and too many missing parents // src\server\p2p\network.rs:624
+2024-10-07 20:57:56.566111900 ERROR Failed to add new block to share chain // src\server\p2p\network.rs:593

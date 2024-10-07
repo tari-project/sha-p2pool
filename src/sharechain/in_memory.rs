@@ -343,13 +343,21 @@ impl InMemoryShareChain {
         let tip_height = tip_level.height;
 
         // If we are syncing and we are very far behind, clear out the blocks we have and just add it
-        if (tip_height < block.height - 1) && sync {
+        if tip_height < block.height.saturating_sub(self.max_blocks_count as u64) && sync {
             // TODO: Validate the block
             block_levels.levels.clear();
             block_levels
                 .levels
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
             return Ok(());
+        }
+
+        // Else if there is a gap in the chain, snooze it in the hopes that we will catch up
+        if tip_height < block.height.saturating_sub(1) && sync {
+            // TODO: Validate the block
+            return Err(Error::BlockParentDoesNotExist {
+                num_missing_parents: block.height - tip_height,
+            });
         }
 
         // Check if already added.
@@ -430,7 +438,9 @@ impl InMemoryShareChain {
             current_block_hash = new_parent.prev_hash;
         }
 
-        info!(target: LOG_TARGET, "Reorged {} blocks", num_reorged);
+        if num_reorged > 0 {
+            info!(target: LOG_TARGET, "[{:?}] 🔄 Reorged {} blocks", self.pow_algo, num_reorged);
+        }
         block_levels.cached_shares = None;
         // remove the first couple of block levels if needed
         if block_levels.levels.len() >= self.max_blocks_count {
@@ -462,6 +472,8 @@ impl InMemoryShareChain {
         if let Some(miner_wallet_address) = &block.miner_wallet_address {
             coinbase_extras_lock.insert(miner_wallet_address.to_base58(), block.miner_coinbase_extra.clone());
         }
+
+        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.front().map(|b| b.height).unwrap_or_default());
 
         Ok(())
     }

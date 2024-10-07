@@ -146,7 +146,8 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     // })?;
 
     // connected
-    let connected = state.peer_store.peer_count().await > 0;
+    let peer_count = state.peer_store.peer_count().await;
+    let connected = peer_count > 0;
 
     let shares = share_chain
         .miners_with_shares(state.squad.clone())
@@ -256,6 +257,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
 
     let result = Stats {
         connected,
+        peer_count,
         num_of_miners: shares.keys().len(),
         last_block_won,
         share_chain_height,

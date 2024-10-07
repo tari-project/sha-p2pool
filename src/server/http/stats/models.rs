@@ -85,6 +85,7 @@ impl SquadDetails {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Stats {
     pub connected: bool,
+    pub peer_count: u64,
     pub connected_since: Option<EpochTime>,
     pub squad: SquadDetails,
     pub num_of_miners: usize,
