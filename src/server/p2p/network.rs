@@ -585,8 +585,15 @@ where S: ShareChain
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         // TODO: Treating this as a sync for now.
-                        if let Ok(snoozed) = Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
+                        if let Ok((snoozed, num_missing_parents)) =
+                            Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
                         {
+                            self.sync_share_chain(
+                                payload.original_block_header.pow.pow_algo,
+                                Some(peer),
+                                Some(payload.height.saturating_sub(num_missing_parents)),
+                            )
+                            .await;
                             if snoozed {
                                 let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
                             }
@@ -610,17 +617,17 @@ where S: ShareChain
     async fn try_add_propagated_block(
         share_chain: &Arc<S>,
         block: Block,
-    ) -> Result<bool, crate::sharechain::error::Error> {
+    ) -> Result<(bool, u64), crate::sharechain::error::Error> {
         match share_chain.add_synced_blocks(vec![block.clone()]).await {
             Ok(_result) => {
                 info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}", &block.hash.to_hex(), &block.height);
-                Ok(false)
+                Ok((false, 0))
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { num_missing_parents } => {
                     if num_missing_parents < MAX_MISSING_PARENTS_TO_SNOOZE {
                         // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
-                        return Ok(true);
+                        return Ok((true, num_missing_parents));
                     }
                     error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?} and too many missing parents");
                     Err(error)
@@ -835,6 +842,9 @@ where S: ShareChain
             } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
+            SwarmEvent::Dialing { peer_id, connection_id } => {
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
+            },
             SwarmEvent::NewListenAddr { address, .. } => {
                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
             },
@@ -904,13 +914,14 @@ where S: ShareChain
                         addresses,
                         ..
                     } => {
-                        // addresses.iter().for_each(|addr| {
-                        //     self.swarm.add_peer_address(peer, addr.clone());
-                        // });
-                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                        // if let Some(old_peer) = old_peer {
-                        //     self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
-                        // }
+                        info!(target: LOG_TARGET, squad = &self.config.squad; "Routing updated: {peer:?} -> {addresses:?}");
+                        addresses.iter().for_each(|addr| {
+                            self.swarm.add_peer_address(peer, addr.clone());
+                        });
+                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                        if let Some(old_peer) = old_peer {
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
+                        }
                     },
                     _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
                 },
@@ -939,24 +950,25 @@ where S: ShareChain
     }
 
     async fn handle_peer_identified(&mut self, peer_id: PeerId, info: Info) {
+        dbg!("Peer identified");
         if *self.swarm.local_peer_id() == peer_id {
             warn!(target: LOG_TARGET, "Dialled ourselves");
             return;
         }
 
-        self.swarm.add_external_address(info.observed_addr.clone());
+        // self.swarm.add_external_address(info.observed_addr.clone());
 
         let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
 
         // adding peer to kademlia and gossipsub
         for addr in info.listen_addrs {
-            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+            // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
             if Self::is_p2p_address(&addr) && addr.is_global_ip() && is_relay {
                 let mut lock = self.relay_store.write().await;
                 lock.add_possible_relay(peer_id, addr);
             }
         }
-        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
     }
 
     fn is_p2p_address(address: &Multiaddr) -> bool {
@@ -964,10 +976,15 @@ where S: ShareChain
     }
 
     async fn handle_autonat_event(&mut self, event: autonat::Event) {
+        dbg!("Autonat event");
         match event {
             autonat::Event::StatusChanged { old: _old, new } => match self.swarm.behaviour().autonat.public_address() {
                 Some(public_address) => {
                     info!(target: LOG_TARGET, "[AUTONAT]: Our public address is {public_address}");
+                    // self.swarm
+                    //     .behaviour_mut()
+                    //     .relay_server
+                    //     .set_public_address(public_address.clone());
                 },
                 None => {
                     warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
@@ -985,6 +1002,7 @@ where S: ShareChain
     }
 
     async fn attempt_relay_reservation(&mut self) {
+        dbg!("Attempt relay reservation");
         let mut lock = self.relay_store.write().await;
         lock.select_random_relay();
         if let Some(relay) = lock.selected_relay_mut() {
@@ -1077,8 +1095,13 @@ where S: ShareChain
                          tokio::spawn(async move {
                             warn!(target: LOG_TARGET, "Trying snoozed block again after {snoozes_left} snoozes left...");
                             tokio::time::sleep(MAX_SNOOZE_DURATION).await;
-
-                            if let Ok(snoozed) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
+                            // self.sync_share_chain(
+                                // payload.original_block_header.pow.pow_algo,
+                                // Some(peer),
+                                // Some(payload.height.saturating_sub(num_missing_parents)),
+                            // )
+                            // .await;
+                            if let Ok((snoozed, _num_missing_parents)) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
                                 if snoozed && snoozes_left > 1 {
                                     let _ = snooze_sender.send((snoozes_left - 1, block)).await;
                                 }
@@ -1247,19 +1270,19 @@ where S: ShareChain
         let squad = self.config.squad.clone();
         let shutdown_signal = self.shutdown_signal.clone();
         warn!(target: LOG_TARGET, "Starting initial share chain sync...");
-        tokio::spawn(async move {
-            Self::initial_share_chain_sync(
-                in_progress,
-                peer_store,
-                share_chain_sha3x,
-                share_chain_random_x,
-                share_chain_sync_tx,
-                Duration::from_secs(3),
-                squad,
-                shutdown_signal,
-            )
-            .await;
-        });
+        // tokio::spawn(async move {
+        //     Self::initial_share_chain_sync(
+        //         in_progress,
+        //         peer_store,
+        //         share_chain_sha3x,
+        //         share_chain_random_x,
+        //         share_chain_sync_tx,
+        //         Duration::from_secs(3),
+        //         squad,
+        //         shutdown_signal,
+        //     )
+        //     .await;
+        // });
 
         warn!(target: LOG_TARGET, "Starting main loop");
 
