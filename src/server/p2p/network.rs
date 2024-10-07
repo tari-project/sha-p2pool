@@ -372,7 +372,8 @@ where S: ShareChain
             .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
             .build();
 
-        swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
+        dbg!("Check if we must set the kademlia mode");
+        // swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
         Ok(swarm)
     }
