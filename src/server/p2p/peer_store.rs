@@ -97,7 +97,6 @@ impl PeerStore {
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
-        dbg!("New peer added", &peer_id, &peer_info);
         if self.banned_peers.contains_key(&peer_id) {
             return;
         }

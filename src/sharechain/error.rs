@@ -38,6 +38,8 @@ pub enum Error {
     BlockValidation(String),
     #[error("Block parent does not exist")]
     BlockParentDoesNotExist { num_missing_parents: u64 },
+    #[error("The POW algo is not correct for this chain")]
+    WrongPowAlgorithm,
 }
 
 #[derive(Error, Debug)]

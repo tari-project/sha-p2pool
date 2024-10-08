@@ -32,7 +32,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::p2pool::server::server";
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub(crate) enum Error {
     #[error("P2P service error: {0}")]
     P2PService(#[from] p2p::Error),
     #[error("gRPC error: {0}")]
@@ -44,7 +44,7 @@ pub enum Error {
 }
 
 /// Server represents the server running all the necessary components for sha-p2pool.
-pub struct Server<S>
+pub(crate) struct Server<S>
 where S: ShareChain
 {
     config: config::Config,
@@ -68,7 +68,6 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let sync_in_progress = Arc::new(AtomicBool::new(true));
         let squad_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let stats_store = Arc::new(StatsStore::new());
@@ -79,7 +78,6 @@ where S: ShareChain
             share_chain_random_x.clone(),
             squad_peer_store.clone(),
             network_peer_store.clone(),
-            sync_in_progress.clone(),
             shutdown_signal.clone(),
         )
         .await
