@@ -1,7 +1,12 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
@@ -23,7 +28,10 @@ use tari_core::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::{
+    sync::{RwLock, Semaphore},
+    time::timeout,
+};
 use tonic::{Request, Response, Status};
 
 use crate::{
@@ -168,124 +176,138 @@ where S: ShareChain
         &self,
         request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
-        let timer = Instant::now();
-        let grpc_req = request.into_inner();
+        let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT + Duration::from_secs(5);
 
-        // extract pow algo
-        let grpc_block_header_pow = grpc_req.pow.ok_or(Status::invalid_argument("missing pow in request"))?;
-        let grpc_pow_algo = PowAlgos::from_i32(grpc_block_header_pow.pow_algo)
-            .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
-        let pow_algo = match grpc_pow_algo {
-            PowAlgos::Randomx => PowAlgorithm::RandomX,
-            PowAlgos::Sha3x => PowAlgorithm::Sha3x,
-        };
+        let result = timeout(timeout_duration, async {
+            let timer = Instant::now();
 
-        // request original block template to get reward
-        let req = NewBlockTemplateRequest {
-            algo: Some(grpc_block_header_pow.clone()),
-            max_weight: 0,
-        };
-        let template_response = self
-            .client
-            .write()
-            .await
-            .get_new_block_template(req)
-            .await?
-            .into_inner();
-        let _miner_data = template_response
-            .miner_data
-            .ok_or_else(|| Status::internal("missing miner data"))?;
-        // let reward = miner_data.reward;
+            let grpc_req = request.into_inner();
 
-        // update coinbase extras cache
-        let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
-            .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
-        let mut coinbase_extras_lock = match pow_algo {
-            PowAlgorithm::RandomX => self.coinbase_extras_random_x.write().await,
-            PowAlgorithm::Sha3x => self.coinbase_extras_sha3x.write().await,
-        };
-        coinbase_extras_lock.insert(
-            wallet_payment_address.to_base58(),
-            util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
-                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
-        );
-        drop(coinbase_extras_lock);
+            // extract pow algo
+            let grpc_block_header_pow = grpc_req.pow.ok_or(Status::invalid_argument("missing pow in request"))?;
+            let grpc_pow_algo = PowAlgos::from_i32(grpc_block_header_pow.pow_algo)
+                .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
+            let pow_algo = match grpc_pow_algo {
+                PowAlgos::Randomx => PowAlgorithm::RandomX,
+                PowAlgos::Sha3x => PowAlgorithm::Sha3x,
+            };
 
-        // request new block template with shares as coinbases
-        let share_chain = match pow_algo {
-            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-        };
-        let shares = share_chain.generate_shares(self.squad.clone()).await;
-
-        let mut response = self
-            .client
-            .write()
-            .await
-            .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
-                algo: Some(grpc_block_header_pow),
+            // request original block template to get reward
+            let req = NewBlockTemplateRequest {
+                algo: Some(grpc_block_header_pow.clone()),
                 max_weight: 0,
-                coinbases: shares,
-            })
-            .await?
-            .into_inner();
-
-        // set target difficulty
-        let miner_data = response
-            .miner_data
-            .clone()
-            .ok_or_else(|| Status::internal("missing miner data"))?;
-
-        let grpc_block = response
-            .block
-            .as_ref()
-            .ok_or_else(|| Status::internal("missing missing block"))?;
-        let height = grpc_block
-            .header
-            .as_ref()
-            .map(|h| h.height)
-            .ok_or_else(|| Status::internal("missing missing header"))?;
-        let actual_diff = Difficulty::from_u64(miner_data.target_difficulty)
-            .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
-        match pow_algo {
-            PowAlgorithm::RandomX => self
-                .randomx_block_height_difficulty_cache
+            };
+            let template_response = self
+                .client
                 .write()
                 .await
-                .insert(height, actual_diff),
-            PowAlgorithm::Sha3x => self
-                .sha3_block_height_difficulty_cache
+                .get_new_block_template(req)
+                .await?
+                .into_inner();
+            let _miner_data = template_response
+                .miner_data
+                .ok_or_else(|| Status::internal("missing miner data"))?;
+            // let reward = miner_data.reward;
+
+            // update coinbase extras cache
+            let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
+                .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
+            let mut coinbase_extras_lock = match pow_algo {
+                PowAlgorithm::RandomX => self.coinbase_extras_random_x.write().await,
+                PowAlgorithm::Sha3x => self.coinbase_extras_sha3x.write().await,
+            };
+            coinbase_extras_lock.insert(
+                wallet_payment_address.to_base58(),
+                util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
+                    .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
+            );
+            drop(coinbase_extras_lock);
+
+            // request new block template with shares as coinbases
+            let share_chain = match pow_algo {
+                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+            };
+            let shares = share_chain.generate_shares(self.squad.clone()).await;
+
+            let mut response = self
+                .client
                 .write()
                 .await
-                .insert(height, actual_diff),
-        };
-        let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
-        let mut target_difficulty = Difficulty::from_u64(
-            miner_data
-                .target_difficulty
-                .checked_div(SHARE_COUNT)
-                .expect("Should only fail on div by 0"),
-        )
-        .map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to get target difficulty: {error:?}");
-            Status::internal(format!("Failed to get target difficulty:  {}", error))
-        })?;
-        if target_difficulty < min_difficulty {
-            target_difficulty = min_difficulty;
-        }
+                .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
+                    algo: Some(grpc_block_header_pow),
+                    max_weight: 0,
+                    coinbases: shares,
+                })
+                .await?
+                .into_inner();
 
-        if let Some(miner_data) = response.miner_data.as_mut() {
-            miner_data.target_difficulty = target_difficulty.as_u64();
-        }
+            // set target difficulty
+            let miner_data = response
+                .miner_data
+                .clone()
+                .ok_or_else(|| Status::internal("missing miner data"))?;
 
-        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
-            warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
-        }
+            let grpc_block = response
+                .block
+                .as_ref()
+                .ok_or_else(|| Status::internal("missing missing block"))?;
+            let height = grpc_block
+                .header
+                .as_ref()
+                .map(|h| h.height)
+                .ok_or_else(|| Status::internal("missing missing header"))?;
+            let actual_diff = Difficulty::from_u64(miner_data.target_difficulty)
+                .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
+            match pow_algo {
+                PowAlgorithm::RandomX => self
+                    .randomx_block_height_difficulty_cache
+                    .write()
+                    .await
+                    .insert(height, actual_diff),
+                PowAlgorithm::Sha3x => self
+                    .sha3_block_height_difficulty_cache
+                    .write()
+                    .await
+                    .insert(height, actual_diff),
+            };
+            let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
+            let mut target_difficulty = Difficulty::from_u64(
+                miner_data
+                    .target_difficulty
+                    .checked_div(SHARE_COUNT)
+                    .expect("Should only fail on div by 0"),
+            )
+            .map_err(|error| {
+                error!(target: LOG_TARGET, "Failed to get target difficulty: {error:?}");
+                Status::internal(format!("Failed to get target difficulty:  {}", error))
+            })?;
+            if target_difficulty < min_difficulty {
+                target_difficulty = min_difficulty;
+            }
 
-        Ok(Response::new(GetNewBlockResponse {
-            block: Some(response),
-            target_difficulty: target_difficulty.as_u64(),
-        }))
+            if let Some(miner_data) = response.miner_data.as_mut() {
+                miner_data.target_difficulty = target_difficulty.as_u64();
+            }
+
+            if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+                warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
+            }
+
+            Ok(Response::new(GetNewBlockResponse {
+                block: Some(response),
+                target_difficulty: target_difficulty.as_u64(),
+            }))
+        })
+        .await;
+
+        match result {
+            Ok(response) => response,
+            Err(e) => {
+                error!(target: LOG_TARGET, "get_new_block timed out: {e:?}");
+                Err(Status::deadline_exceeded("get_new_block timed out"))
+            },
+        }
     }
 
     /// Validates the submitted block with the p2pool network, checks for difficulty matching
@@ -296,6 +318,9 @@ where S: ShareChain
         &self,
         request: Request<SubmitBlockRequest>,
     ) -> Result<Response<SubmitBlockResponse>, Status> {
+        let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT + Duration::from_secs(5);
+
+        let result = timeout(timeout_duration, async {
         let timer = Instant::now();
         // Only one submit at a time
         let _permit = self.submit_block_semaphore.acquire().await;
@@ -487,5 +512,14 @@ where S: ShareChain
         Ok(Response::new(SubmitBlockResponse {
             block_hash: block.hash.to_vec(),
         }))
+    }).await;
+
+        match result {
+            Ok(response) => response,
+            Err(e) => {
+                error!(target: LOG_TARGET, "submit_block timed out: {e:?}");
+                Err(Status::deadline_exceeded("submit_block timed out"))
+            },
+        }
     }
 }

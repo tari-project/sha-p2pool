@@ -933,10 +933,10 @@ where S: ShareChain
                         addresses.iter().for_each(|addr| {
                             self.swarm.add_peer_address(peer, addr.clone());
                         });
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                        if let Some(old_peer) = old_peer {
-                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
-                        }
+                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                        // if let Some(old_peer) = old_peer {
+                        // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
+                        // }
                     },
                     _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
                 },
@@ -944,7 +944,7 @@ where S: ShareChain
                     identify::Event::Received { peer_id, info, .. } => self.handle_peer_identified(peer_id, info).await,
                     identify::Event::Error { peer_id, error, .. } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
-                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                        // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                     },
                     _ => {},
@@ -982,6 +982,15 @@ where S: ShareChain
                 lock.add_possible_relay(peer_id, addr);
             }
         }
+
+        // Try sync from them
+        if self.sync_permits.load(Ordering::SeqCst) > 0 {
+            self.sync_permits.fetch_sub(1, Ordering::SeqCst);
+            self.sync_share_chain(PowAlgorithm::Sha3x, Some(peer_id), None).await;
+            self.sync_permits.fetch_sub(1, Ordering::SeqCst);
+            self.sync_share_chain(PowAlgorithm::RandomX, Some(peer_id), None).await;
+        }
+
         // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
     }
 

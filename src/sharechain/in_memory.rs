@@ -404,11 +404,10 @@ impl InMemoryShareChain {
             })?;
 
         if let Some(params) = &params {
-            todo!("Save difficulty");
+            // todo!("Save difficulty");
             // validate
             // self.validate_block(Some(parent), block, params, sync).await?;
         }
-
         let mut num_reorged = 0;
         // debug!(target: LOG_TARGET, "Reorging to main chain");
         // parent_level.in_chain_index = parent_index;
