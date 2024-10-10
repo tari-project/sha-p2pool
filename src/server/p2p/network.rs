@@ -71,7 +71,8 @@ use tokio::{
     select,
     sync::{
         broadcast::{self, error::RecvError},
-        mpsc,
+        mpsc::{self, Sender},
+        oneshot,
         RwLock,
         Semaphore,
     },
@@ -188,6 +189,14 @@ pub struct ServerNetworkBehaviour {
     pub autonat: autonat::Behaviour,
 }
 
+pub enum P2pServiceQuery {
+    GetConnectionInfo(oneshot::Sender<ConnectionInfo>),
+}
+
+pub struct ConnectionInfo {
+    pub listener_addresses: Vec<Multiaddr>,
+}
+
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
 pub struct Service<S>
@@ -205,6 +214,8 @@ where S: ShareChain
     share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
     share_chain_sync_rx: broadcast::Receiver<LocalShareChainSyncRequest>,
 
+    query_tx: mpsc::Sender<P2pServiceQuery>,
+    query_rx: mpsc::Receiver<P2pServiceQuery>,
     // service client related channels
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
     client_broadcast_block_tx: broadcast::Sender<Block>,
@@ -235,6 +246,7 @@ where S: ShareChain
         let (share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
         let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, Block)>(1000);
         let sync_permits = Arc::new(AtomicU32::new(config.p2p_service.max_in_progress_sync_requests as u32));
+        let (query_tx, query_rx) = mpsc::channel(100);
 
         Ok(Self {
             swarm,
@@ -250,6 +262,8 @@ where S: ShareChain
             sync_permits,
             share_chain_sync_tx,
             share_chain_sync_rx,
+            query_tx,
+            query_rx,
             snooze_block_rx,
             snooze_block_tx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
@@ -1060,6 +1074,17 @@ where S: ShareChain
         }
     }
 
+    async fn handle_query(&mut self, query: P2pServiceQuery) {
+        match query {
+            P2pServiceQuery::GetConnectionInfo(reply) => {
+                let connection_info = ConnectionInfo {
+                    listener_addresses: self.swarm.external_addresses().cloned().collect(),
+                };
+                let _ = reply.send(connection_info);
+            },
+        }
+    }
+
     /// Main loop of the service that drives the events and libp2p swarm forward.
     async fn main_loop(&mut self) -> Result<(), Error> {
         let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
@@ -1077,6 +1102,18 @@ where S: ShareChain
                     info!(target: LOG_TARGET,"Shutting down p2p service...");
                     return Ok(());
                 }
+                req = self.query_rx.recv() => {
+                    dbg!("query");
+                    match req {
+                        Some(req) => {
+                    self.handle_query(req).await;
+                    },
+                    None => {
+                         warn!(target: LOG_TARGET, "Failed to receive query from channel. Sender dropped?");
+                       todo!("Unimplemented");
+                    }
+                }
+                },
                 event = self.swarm.select_next_some() => {
                    self.handle_event(event).await;
                 }
@@ -1258,6 +1295,10 @@ where S: ShareChain
         Ok(())
     }
 
+    pub fn create_query_client(&self) -> Sender<P2pServiceQuery> {
+        self.query_tx.clone()
+    }
+
     /// Starts p2p service.
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -1286,12 +1327,6 @@ where S: ShareChain
 
         // start initial share chain sync
         // let in_progress = self.sync_in_progress.clone();
-        let peer_store = self.squad_peer_store.clone();
-        let share_chain_sha3x = self.share_chain_sha3x.clone();
-        let share_chain_random_x = self.share_chain_random_x.clone();
-        let share_chain_sync_tx = self.share_chain_sync_tx.clone();
-        let squad = self.config.squad.clone();
-        let shutdown_signal = self.shutdown_signal.clone();
         warn!(target: LOG_TARGET, "Starting initial share chain sync...");
         // tokio::spawn(async move {
         //     Self::initial_share_chain_sync(

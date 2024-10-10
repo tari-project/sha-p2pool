@@ -8,6 +8,7 @@ use log::error;
 use serde::Serialize;
 use tari_core::{proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
+use tokio::sync::oneshot;
 
 use super::MAX_ACCEPTABLE_HTTP_TIMEOUT;
 use crate::server::{
@@ -22,6 +23,7 @@ use crate::server::{
             P2POOL_STAT_REJECTED_BLOCKS_COUNT,
         },
     },
+    p2p::P2pServiceQuery,
     stats_store::StatsStore,
 };
 
@@ -254,10 +256,32 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
     //     });
     //     pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
     // }
+    let (tx, rx) = oneshot::channel();
+
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetConnectionInfo(tx))
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let connection_info = rx.await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let listener_addresses = connection_info
+        .listener_addresses
+        .iter()
+        .map(|addr| addr.to_string())
+        .collect();
 
     let result = Stats {
         connected,
         peer_count,
+        listener_addresses,
         num_of_miners: shares.keys().len(),
         last_block_won,
         share_chain_height,

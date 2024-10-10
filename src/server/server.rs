@@ -116,6 +116,7 @@ where S: ShareChain
 
         let http_stats_cache = Arc::new(StatsCache::default());
 
+        let query_client = p2p_service.create_query_client();
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
                 share_chain_sha3x.clone(),
@@ -125,6 +126,7 @@ where S: ShareChain
                 config.http_server.port,
                 config.p2p_service.squad.clone(),
                 http_stats_cache.clone(),
+                query_client,
                 shutdown_signal.clone(),
             )))
         } else {
