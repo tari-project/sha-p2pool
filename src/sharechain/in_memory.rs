@@ -10,19 +10,27 @@ use std::{
 
 use async_trait::async_trait;
 use log::*;
-use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use minotari_app_grpc::tari_rpc::{pow_algo, NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
     consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, PowAlgorithm},
+    proof_of_work::{
+        lwma_diff::LinearWeightedMovingAverage,
+        randomx_difficulty,
+        sha3x_difficulty,
+        Difficulty,
+        DifficultyAdjustment,
+        PowAlgorithm,
+    },
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use super::MAX_BLOCKS_COUNT;
 use crate::{
+    main,
     server::{
         grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
         p2p::Squad,
@@ -64,7 +72,7 @@ pub(crate) struct InMemoryShareChain {
     max_blocks_count: usize,
     block_levels: Arc<RwLock<BlockLevels>>,
     pow_algo: PowAlgorithm,
-    block_validation_params: Option<Arc<BlockValidationParams>>,
+    block_validation_params: Arc<BlockValidationParams>,
     consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
@@ -119,13 +127,10 @@ impl InMemoryShareChain {
     pub fn new(
         max_blocks_count: usize,
         pow_algo: PowAlgorithm,
-        block_validation_params: Option<Arc<BlockValidationParams>>,
+        block_validation_params: Arc<BlockValidationParams>,
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
-        if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
-            return Err(Error::MissingBlockValidationParams);
-        }
         let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
         levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
         let block_levels = BlockLevels {
@@ -146,19 +151,15 @@ impl InMemoryShareChain {
     fn block_difficulty(&self, block: &Block) -> Result<u64, Error> {
         match block.original_block_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
-                if let Some(params) = &self.block_validation_params {
-                    let difficulty = randomx_difficulty(
-                        &block.original_block_header,
-                        params.random_x_factory(),
-                        params.genesis_block_hash(),
-                        params.consensus_manager(),
-                    )
-                    .map_err(Error::RandomXDifficulty)?;
-                    Ok(difficulty.as_u64())
-                } else {
-                    panic!("No params provided for RandomX difficulty calculation!");
-                    // Ok(0)
-                }
+                let params = &self.block_validation_params;
+                let difficulty = randomx_difficulty(
+                    &block.original_block_header,
+                    params.random_x_factory(),
+                    params.genesis_block_hash(),
+                    params.consensus_manager(),
+                )
+                .map_err(Error::RandomXDifficulty)?;
+                Ok(difficulty.as_u64())
             },
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty)?;
@@ -247,71 +248,39 @@ impl InMemoryShareChain {
         &self,
         last_block: Option<&Block>,
         block: &Block,
-        params: Option<Arc<BlockValidationParams>>,
-        sync: bool,
-    ) -> ShareChainResult<bool> {
+        achieved_difficulty: Difficulty,
+        target_difficulty: Difficulty,
+    ) -> ShareChainResult<()> {
         if block.original_block_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
-            return Ok(false);
-        }
-
-        if sync && last_block.is_none() {
-            return Ok(true);
+            return Err(Error::WrongPowAlgorithm);
         }
 
         if let Some(last_block) = last_block {
             // check if we have outdated tip of chain
-            let block_height_diff = i64::try_from(block.height).map_err(Error::FromIntConversion)? -
-                i64::try_from(last_block.height).map_err(Error::FromIntConversion)?;
-            if block_height_diff > 10 {
-                // TODO: use const
-                warn!(target: LOG_TARGET,
-                    "[{:?}] Out-of-sync chain, do a sync now... Height Diff: {:?}, Last: {:?}, New: {:?}",
-                    self.pow_algo,
-                    block_height_diff,
-                    last_block.height,
-                    block.height,
-                );
-                return Ok(false);
-            }
-
-            // validate PoW
-            let pow_algo = block.original_block_header.pow.pow_algo;
-            let curr_difficulty = match pow_algo {
-                PowAlgorithm::RandomX => {
-                    let random_x_params = params.ok_or(Error::MissingBlockValidationParams)?;
-                    randomx_difficulty(
-                        &block.original_block_header,
-                        random_x_params.random_x_factory(),
-                        random_x_params.genesis_block_hash(),
-                        random_x_params.consensus_manager(),
-                    )
-                    .map_err(Error::RandomXDifficulty)
-                },
-                PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
-            };
-            match curr_difficulty {
-                Ok(curr_difficulty) => {
-                    let result =
-                        self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block_header.height)?;
-                    if !result {
-                        return Ok(result);
-                    }
-                },
-                Err(error) => {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", pow_algo);
-                    debug!(target: LOG_TARGET, "[{:?}] Failed to calculate {} difficulty: {error:?}", pow_algo,pow_algo);
-                    return Ok(false);
-                },
-            }
-
-            // TODO: check here for miners
-            // TODO: (send merkle tree root hash and generate here, then compare the two from miners list and shares)
-        } else {
-            return Ok(false);
+            let _block_height_diff = block
+                .height
+                .checked_sub(last_block.height)
+                .ok_or(Error::BlockValidation(
+                    "Block height is less than last block height".to_string(),
+                ))?;
         }
 
-        Ok(true)
+        // validate PoW
+
+        let pow_algo = block.original_block_header.pow.pow_algo;
+        let result = self.validate_min_difficulty(pow_algo, achieved_difficulty, block.original_block_header.height)?;
+        if !result {
+            return Err(Error::BlockValidation(
+                "Difficulty lower than minimum difficulty".to_string(),
+            ));
+        }
+        if achieved_difficulty < target_difficulty {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Difficulty too low!", pow_algo);
+            return Err(Error::BlockValidation("Difficulty too low".to_string()));
+        }
+
+        Ok(())
     }
 
     /// Submits a new block to share chain.
@@ -320,14 +289,35 @@ impl InMemoryShareChain {
         &self,
         block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
         block: &Block,
-        params: Option<Arc<BlockValidationParams>>,
-        sync: bool,
+        params: &BlockValidationParams,
     ) -> ShareChainResult<()> {
         let height = block.height;
         if block.height == 0 {
             // TODO: Find out where this block 0 is coming from
             return Ok(());
             // return Err(Error::BlockValidation("Block height is 0".to_string()));
+        }
+
+        let min_diff = min_difficulty(
+            &self.consensus_manager,
+            block.original_block_header.pow.pow_algo,
+            block.original_block_header.height,
+        );
+        let pow_algo = block.original_block_header.pow.pow_algo;
+        let achieved_difficulty = match pow_algo {
+            PowAlgorithm::RandomX => randomx_difficulty(
+                &block.original_block_header,
+                params.random_x_factory(),
+                params.genesis_block_hash(),
+                params.consensus_manager(),
+            )
+            .map_err(Error::RandomXDifficulty),
+            PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
+        }?;
+
+        if achieved_difficulty < min_diff {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
+            return Err(Error::BlockValidation("Block difficulty is too low".to_string()));
         }
 
         if block_levels.levels.is_empty() {
@@ -337,19 +327,39 @@ impl InMemoryShareChain {
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
             return Ok(());
         }
+
         let block_levels_len = block_levels.levels.len();
 
         let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
         let tip_height = tip_level.height;
 
+        dbg!(block.height);
+        dbg!(tip_height);
         // If we are syncing and we are very far behind, clear out the blocks we have and just add it
-        if (tip_height < block.height - 1) && sync {
+        if tip_height < block.height.saturating_sub(self.max_blocks_count as u64) {
             // TODO: Validate the block
             block_levels.levels.clear();
             block_levels
                 .levels
                 .push_front(BlockLevel::new(vec![block.clone()], block.height));
             return Ok(());
+        }
+
+        if tip_height == 0 {
+            // TODO: Validate the block
+            block_levels.levels.clear();
+            block_levels
+                .levels
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            return Ok(());
+        }
+
+        // Else if there is a gap in the chain, snooze it in the hopes that we will catch up
+        if tip_height < block.height.saturating_sub(1) {
+            // TODO: Validate the block
+            return Err(Error::BlockParentDoesNotExist {
+                num_missing_parents: block.height - tip_height,
+            });
         }
 
         // Check if already added.
@@ -373,8 +383,8 @@ impl InMemoryShareChain {
         .expect("32 bit systems are not supported");
         let parent_level = block_levels.levels.get(level_index).ok_or_else(|| {
             Error::BlockValidation(format!(
-                "Block parent height is not found in levels. index: {},  parent height:{}",
-                level_index, parent_height
+                "Block parent height is not found in levels. index: {},  parent height:{}, levels size: {}",
+                level_index, parent_height, block_levels_len
             ))
         })?;
 
@@ -390,11 +400,23 @@ impl InMemoryShareChain {
                 ))
             })?;
 
-        // validate
-        let validate_result = self.validate_block(Some(parent), block, params, sync).await?;
-        if !validate_result {
-            return Err(Error::InvalidBlock(block.clone()));
+        // note: this is an approximation, wait for actual implementation to be accurate.
+        let mut lwma = LinearWeightedMovingAverage::new(90, 10).expect("Failed to create LWMA");
+        for level in block_levels.levels.iter().rev() {
+            let main_block = level
+                .block_in_main_chain()
+                .ok_or_else(|| Error::BlockValidation(format!("No main block in level: {:?}", level.height)))?;
+            let target = lwma.get_difficulty().unwrap_or(min_diff);
+            lwma.add(main_block.timestamp, target);
         }
+        let target_difficulty = lwma.get_difficulty().unwrap_or_else(|| {
+            warn!(target: LOG_TARGET, "[{:?}] Failed to calculate target difficulty", self.pow_algo);
+            min_diff
+        });
+        // todo!("Save difficulty");
+        // validate
+        self.validate_block(Some(parent), block, achieved_difficulty, target_difficulty)
+            .await?;
 
         let mut num_reorged = 0;
         // debug!(target: LOG_TARGET, "Reorging to main chain");
@@ -430,7 +452,9 @@ impl InMemoryShareChain {
             current_block_hash = new_parent.prev_hash;
         }
 
-        info!(target: LOG_TARGET, "Reorged {} blocks", num_reorged);
+        if num_reorged > 0 {
+            info!(target: LOG_TARGET, "[{:?}] 🔄 Reorged {} blocks", self.pow_algo, num_reorged);
+        }
         block_levels.cached_shares = None;
         // remove the first couple of block levels if needed
         if block_levels.levels.len() >= self.max_blocks_count {
@@ -463,6 +487,8 @@ impl InMemoryShareChain {
             coinbase_extras_lock.insert(miner_wallet_address.to_base58(), block.miner_coinbase_extra.clone());
         }
 
+        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.front().map(|b| b.height).unwrap_or_default());
+
         Ok(())
     }
 
@@ -480,13 +506,8 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
-        self.submit_block_with_lock(
-            &mut block_levels_write_lock,
-            block,
-            self.block_validation_params.clone(),
-            false,
-        )
-        .await
+        self.submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)
+            .await
 
         // let chain = self.chain(block_levels_write_lock.iter());
         // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -497,13 +518,8 @@ impl ShareChain for InMemoryShareChain {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
-            self.submit_block_with_lock(
-                &mut block_levels_write_lock,
-                &block,
-                self.block_validation_params.clone(),
-                true,
-            )
-            .await?;
+            self.submit_block_with_lock(&mut block_levels_write_lock, &block, &self.block_validation_params)
+                .await?;
         }
         Ok(())
     }
@@ -735,181 +751,78 @@ impl ShareChain for InMemoryShareChain {
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
+    use std::assert_matches::assert_matches;
+
     use tari_common::configuration::Network;
-    use tari_common_types::tari_address::TariAddressFeatures;
-    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+    use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 
     use super::*;
-    use crate::sharechain::MAX_BLOCKS_COUNT;
 
-    fn new_random_address() -> TariAddress {
-        let mut rng = rand::thread_rng();
-        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rng);
-        TariAddress::new_single_address(pk, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
-    }
-
-    fn add_blocks(blocks: &mut Vec<Block>, miner: TariAddress, start: u64, n: u64) -> u64 {
-        let n = start + n;
-        for i in start..n {
-            blocks.push(
-                Block::builder()
-                    .with_height(i)
-                    .with_miner_wallet_address(miner.clone())
-                    .build(),
-            );
-        }
-        n
-    }
-
-    #[ignore]
-    #[test]
-    fn miners_with_shares_no_outperformers() {
-        // setup blocks and miners
-        let mut blocks = Vec::new();
-        let miner1 = new_random_address();
-        let n = add_blocks(&mut blocks, miner1.clone(), 0, 10);
-        let miner2 = new_random_address();
-        let n = add_blocks(&mut blocks, miner2.clone(), n, 20);
-        let miner3 = new_random_address();
-        let n = add_blocks(&mut blocks, miner3.clone(), n, 30);
-        let miner4 = new_random_address();
-        add_blocks(&mut blocks, miner4.clone(), n, 40);
-
+    #[tokio::test]
+    async fn test_submit_block() {
         // execute
-        let blocks = blocks.iter().collect_vec();
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
             .build()
             .unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let share_chain = InMemoryShareChain::new(
-            MAX_BLOCKS_COUNT,
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-        )
-        .unwrap();
-        let shares = share_chain.miners_with_shares(blocks);
+        let params = Arc::new(BlockValidationParams::new(
+            RandomXFactory::new(1),
+            consensus_manager.clone(),
+            *consensus_manager.get_genesis_block().hash(),
+        ));
+        let share_chain =
+            InMemoryShareChain::new(20, PowAlgorithm::Sha3x, params, consensus_manager, coinbase_extras).unwrap();
 
-        // assert
-        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 10);
-        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 20);
-        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 30);
-        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 40);
-    }
+        let block = Block::builder().with_height(355).build();
 
-    #[ignore]
-    #[test]
-    fn miners_with_shares_with_outperformer_dont_fill_remaining() {
-        // setup blocks and miners
-        let mut blocks = Vec::new();
-        let miner1 = new_random_address();
-        let n = add_blocks(&mut blocks, miner1.clone(), 0, 60);
-        let miner2 = new_random_address();
-        let n = add_blocks(&mut blocks, miner2.clone(), n, 60);
-        let miner3 = new_random_address();
-        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
-        let miner4 = new_random_address();
-        add_blocks(&mut blocks, miner4.clone(), n, 10);
+        share_chain.submit_block(&block).await.unwrap();
 
-        // execute
-        let blocks = blocks.iter().collect_vec();
-        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
-            .build()
-            .unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let share_chain = InMemoryShareChain::new(
-            MAX_BLOCKS_COUNT,
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-        )
-        .unwrap();
-        let shares = share_chain.miners_with_shares(blocks);
+        assert_eq!(share_chain.tip_height().await.unwrap(), 355);
+        assert_eq!(share_chain.block_levels.read().await.levels.len(), 1);
 
-        // assert
-        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 10);
-    }
+        let block2 = Block::builder()
+            .with_height(376)
+            .with_prev_hash(block.hash.clone())
+            .build();
 
-    #[ignore]
-    #[test]
-    fn miners_with_shares_with_outperformer_losing_shares() {
-        // setup blocks and miners
-        let mut blocks = Vec::new();
-        let miner1 = new_random_address();
-        let n = add_blocks(&mut blocks, miner1.clone(), 0, 100);
-        let miner2 = new_random_address();
-        let n = add_blocks(&mut blocks, miner2.clone(), n, 90);
-        let miner3 = new_random_address();
-        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
-        let miner4 = new_random_address();
-        add_blocks(&mut blocks, miner4.clone(), n, 70);
+        // Because this is higher than the MAX_BLOCKS_COUNT, the first block should be removed
+        share_chain.submit_block(&block2).await.unwrap();
 
-        // execute
-        let blocks = blocks.iter().collect_vec();
-        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
-            .build()
-            .unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let share_chain = InMemoryShareChain::new(
-            MAX_BLOCKS_COUNT,
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-        )
-        .unwrap();
-        let shares = share_chain.miners_with_shares(blocks);
+        assert_eq!(share_chain.tip_height().await.unwrap(), 376);
+        assert_eq!(share_chain.block_levels.read().await.levels.len(), 1);
 
-        // assert
-        assert_eq!(*shares.get(&miner1.to_base58()).unwrap(), 20);
-        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 60);
-    }
+        let block3 = Block::builder()
+            .with_height(377)
+            .with_prev_hash(block2.hash.clone())
+            .build();
 
-    #[ignore]
-    #[test]
-    fn miners_with_shares_with_outperformer_losing_all_shares() {
-        // setup blocks and miners
-        let mut blocks = Vec::new();
-        let miner1 = new_random_address();
-        let n = add_blocks(&mut blocks, miner1.clone(), 0, 100);
-        let miner2 = new_random_address();
-        let n = add_blocks(&mut blocks, miner2.clone(), n, 90);
-        let miner3 = new_random_address();
-        let n = add_blocks(&mut blocks, miner3.clone(), n, 80);
-        let miner4 = new_random_address();
-        let n = add_blocks(&mut blocks, miner4.clone(), n, 70);
-        let miner5 = new_random_address();
-        add_blocks(&mut blocks, miner5.clone(), n, 200);
+        // This should be added fine, since there is a direct parent.
+        share_chain.submit_block(&block3).await.unwrap();
 
-        // execute
-        let blocks = blocks.iter().collect_vec();
-        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default())
-            .build()
-            .unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let share_chain = InMemoryShareChain::new(
-            MAX_BLOCKS_COUNT,
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-        )
-        .unwrap();
-        let shares = share_chain.miners_with_shares(blocks);
+        assert_eq!(share_chain.tip_height().await.unwrap(), 377);
+        assert_eq!(share_chain.block_levels.read().await.levels.len(), 2);
 
-        // assert
-        assert_eq!(shares.get(&miner1.to_base58()), None);
-        assert_eq!(*shares.get(&miner2.to_base58()).unwrap(), 20);
-        assert_eq!(*shares.get(&miner3.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner4.to_base58()).unwrap(), 60);
-        assert_eq!(*shares.get(&miner5.to_base58()).unwrap(), 60);
+        // Add a gap
+        let block4 = Block::builder()
+            .with_height(378)
+            .with_prev_hash(block3.hash.clone())
+            .build();
+
+        let block5 = Block::builder()
+            .with_height(379)
+            .with_prev_hash(block4.hash.clone())
+            .build();
+
+        // This should fail, since there is a gap, but tell us to snooze
+        let res = share_chain.submit_block(&block5).await;
+        assert_matches!(res.unwrap_err(), Error::BlockParentDoesNotExist {
+            num_missing_parents: 2
+        });
+
+        share_chain.submit_block(&block4).await.unwrap();
+        share_chain.submit_block(&block5).await.unwrap();
+
+        assert_eq!(share_chain.tip_height().await.unwrap(), 379);
+        assert_eq!(share_chain.block_levels.read().await.levels.len(), 4);
     }
 }

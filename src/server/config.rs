@@ -30,7 +30,7 @@ impl Default for Config {
             base_node_address: String::from("http://127.0.0.1:18182"),
             p2p_port: 0,      // bind to any free port
             grpc_port: 18145, // to possibly not collide with any other ports
-            idle_connection_timeout: Duration::from_secs(30),
+            idle_connection_timeout: Duration::from_secs(60),
             peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
             mining_enabled: true,
@@ -135,6 +135,11 @@ impl ConfigBuilder {
 
     pub fn with_base_node_address(&mut self, config: String) -> &mut Self {
         self.config.base_node_address = config;
+        self
+    }
+
+    pub fn with_user_agent(&mut self, config: String) -> &mut Self {
+        self.config.p2p_service.user_agent = config;
         self
     }
 

@@ -30,12 +30,14 @@ pub enum Error {
     RandomXDifficulty(#[from] MergeMineError),
     #[error("Consensus builder error: {0}")]
     ConsensusBuilder(#[from] ConsensusBuilderError),
-    #[error("Missing block validation params!")]
-    MissingBlockValidationParams,
     #[error("Failed to convert to block hash: {0}")]
     BlockHashConversion(#[from] FixedHashSizeError),
     #[error("Block validation error: {0}")]
     BlockValidation(String),
+    #[error("Block parent does not exist")]
+    BlockParentDoesNotExist { num_missing_parents: u64 },
+    #[error("The POW algo is not correct for this chain")]
+    WrongPowAlgorithm,
 }
 
 #[derive(Error, Debug)]

@@ -4,10 +4,11 @@
 use std::sync::Arc;
 
 use axum::{routing::get, Router};
+use digest::consts::P2;
 use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
-use tokio::io;
+use tokio::{io, sync::mpsc::Sender};
 
 use crate::{
     server::{
@@ -16,7 +17,7 @@ use crate::{
             stats::{cache::StatsCache, handlers},
             version,
         },
-        p2p::{peer_store::PeerStore, Squad},
+        p2p::{peer_store::PeerStore, P2pServiceQuery, Squad},
         stats_store::StatsStore,
     },
     sharechain::ShareChain,
@@ -55,6 +56,7 @@ where S: ShareChain
     port: u16,
     squad: Squad,
     stats_cache: Arc<StatsCache>,
+    p2p_service_client: Sender<P2pServiceQuery>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -65,6 +67,7 @@ pub struct AppState {
     pub peer_store: Arc<PeerStore>,
     pub stats_store: Arc<StatsStore>,
     pub squad: Squad,
+    pub p2p_service_client: Sender<P2pServiceQuery>,
     pub stats_cache: Arc<StatsCache>,
 }
 
@@ -79,6 +82,7 @@ where S: ShareChain
         port: u16,
         squad: Squad,
         stats_cache: Arc<StatsCache>,
+        p2p_service_client: Sender<P2pServiceQuery>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -89,6 +93,7 @@ where S: ShareChain
             port,
             squad,
             stats_cache,
+            p2p_service_client,
             shutdown_signal,
         }
     }
@@ -101,12 +106,14 @@ where S: ShareChain
             .route("/health", get(health::handle_health))
             .route("/version", get(version::handle_version))
             .route("/chain", get(handlers::handle_chain))
+            .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
                 share_chain_sha3x: self.share_chain_sha3x.clone(),
                 share_chain_random_x: self.share_chain_random_x.clone(),
                 peer_store: self.peer_store.clone(),
                 stats_store: self.stats_store.clone(),
                 squad: self.squad.clone(),
+                p2p_service_client: self.p2p_service_client.clone(),
                 stats_cache: self.stats_cache.clone(),
             })
     }

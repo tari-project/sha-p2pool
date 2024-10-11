@@ -35,7 +35,7 @@ pub struct StartArgs {
     pub external_address: Option<String>,
 
     /// (Optional) Address of the Tari base node.
-    #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18142")]
+    #[arg(long, value_name = "base-node-address", default_value = "http://127.0.0.1:18182")]
     pub base_node_address: String,
 
     /// (Optional) seed peers.
@@ -107,6 +107,9 @@ pub struct StartArgs {
     /// If set, local HTTP server (stats, health-check, status etc...) is disabled.
     #[arg(long, value_name = "http-server-disabled", default_value_t = false)]
     pub http_server_disabled: bool,
+
+    #[arg(long, value_name = "user-agent")]
+    pub user_agent: Option<String>,
 }
 
 #[derive(Clone, Parser, Debug)]

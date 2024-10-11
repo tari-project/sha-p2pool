@@ -13,7 +13,7 @@ tari_shutdown = { git = "https://github.com/tari-project/tari.git" }
 tari_crypto = "0.20.1"
 tari_utilities = { version = "0.7", features = ["borsh"] }
 
-libp2p = { version = "0.53.2", features = [
+libp2p = { version = "0.54.0", features = [
     "dns",
     "identify",
     "macros",

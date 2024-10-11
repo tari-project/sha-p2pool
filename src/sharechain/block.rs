@@ -1,9 +1,12 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops::Mul;
+
 use blake2::Blake2b;
 use digest::consts::U32;
 use lazy_static::lazy_static;
+use libp2p::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
@@ -27,6 +30,8 @@ lazy_static! {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub(crate) struct Block {
+    #[serde(default)]
+    pub version: u32,
     pub chain_id: String,
     pub hash: BlockHash,
     pub timestamp: EpochTime,
@@ -68,6 +73,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: Block {
+                version: 2,
                 chain_id: CURRENT_CHAIN_ID.clone(),
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
