@@ -240,7 +240,7 @@ where S: ShareChain
     config: Config,
     sync_permits: Arc<AtomicU32>,
     shutdown_signal: ShutdownSignal,
-    share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
+    // share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
     share_chain_sync_rx: broadcast::Receiver<LocalShareChainSyncRequest>,
 
     query_tx: mpsc::Sender<P2pServiceQuery>,
@@ -271,7 +271,7 @@ where S: ShareChain
 
         // client related channels
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Block>(1000);
-        let (share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
+        let (_share_chain_sync_tx, share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
         let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, Block)>(1000);
         let sync_permits = Arc::new(AtomicU32::new(config.p2p_service.max_in_progress_sync_requests as u32));
         let (query_tx, query_rx) = mpsc::channel(100);
@@ -287,7 +287,6 @@ where S: ShareChain
             client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
             sync_permits,
-            share_chain_sync_tx,
             share_chain_sync_rx,
             query_tx,
             query_rx,
@@ -822,15 +821,15 @@ where S: ShareChain
         match event {
             SwarmEvent::ConnectionEstablished {
                 peer_id,
-                connection_id,
                 endpoint,
                 num_established,
                 concurrent_dial_errors,
                 established_in,
+                ..
             } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
-            SwarmEvent::Dialing { peer_id, connection_id } => {
+            SwarmEvent::Dialing { peer_id, .. } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
             },
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -893,12 +892,7 @@ where S: ShareChain
                     request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
-                    Event::RoutingUpdated {
-                        peer,
-                        old_peer,
-                        addresses,
-                        ..
-                    } => {
+                    Event::RoutingUpdated { peer, addresses, .. } => {
                         info!(target: LOG_TARGET, squad = &self.config.squad; "Routing updated: {peer:?} -> {addresses:?}");
                         // addresses.iter().for_each(|addr| {
                         //     self.swarm.add_peer_address(peer, addr.clone());

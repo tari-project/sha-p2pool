@@ -248,7 +248,6 @@ impl InMemoryShareChain {
         &self,
         last_block: Option<&Block>,
         block: &Block,
-        params: &BlockValidationParams,
         achieved_difficulty: Difficulty,
         target_difficulty: Difficulty,
     ) -> ShareChainResult<()> {
@@ -291,7 +290,6 @@ impl InMemoryShareChain {
         block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
         block: &Block,
         params: &BlockValidationParams,
-        sync: bool,
     ) -> ShareChainResult<()> {
         let height = block.height;
         if block.height == 0 {
@@ -307,16 +305,13 @@ impl InMemoryShareChain {
         );
         let pow_algo = block.original_block_header.pow.pow_algo;
         let achieved_difficulty = match pow_algo {
-            PowAlgorithm::RandomX => {
-                let random_x_params = params;
-                randomx_difficulty(
-                    &block.original_block_header,
-                    params.random_x_factory(),
-                    params.genesis_block_hash(),
-                    params.consensus_manager(),
-                )
-                .map_err(Error::RandomXDifficulty)
-            },
+            PowAlgorithm::RandomX => randomx_difficulty(
+                &block.original_block_header,
+                params.random_x_factory(),
+                params.genesis_block_hash(),
+                params.consensus_manager(),
+            )
+            .map_err(Error::RandomXDifficulty),
             PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
         }?;
 
@@ -419,7 +414,7 @@ impl InMemoryShareChain {
         });
         // todo!("Save difficulty");
         // validate
-        self.validate_block(Some(parent), block, params, achieved_difficulty, target_difficulty)
+        self.validate_block(Some(parent), block, achieved_difficulty, target_difficulty)
             .await?;
 
         let mut num_reorged = 0;
@@ -510,13 +505,8 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
-        self.submit_block_with_lock(
-            &mut block_levels_write_lock,
-            block,
-            &self.block_validation_params,
-            false,
-        )
-        .await
+        self.submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)
+            .await
 
         // let chain = self.chain(block_levels_write_lock.iter());
         // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -527,13 +517,8 @@ impl ShareChain for InMemoryShareChain {
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
-            self.submit_block_with_lock(
-                &mut block_levels_write_lock,
-                &block,
-                &self.block_validation_params,
-                true,
-            )
-            .await?;
+            self.submit_block_with_lock(&mut block_levels_write_lock, &block, &self.block_validation_params)
+                .await?;
         }
         Ok(())
     }
@@ -765,34 +750,12 @@ impl ShareChain for InMemoryShareChain {
 
 #[cfg(test)]
 mod test {
-    use std::{assert_matches::assert_matches, u64::MAX};
+    use std::assert_matches::assert_matches;
 
-    use itertools::Itertools;
     use tari_common::configuration::Network;
-    use tari_common_types::tari_address::TariAddressFeatures;
-    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+    use tari_core::proof_of_work::randomx_factory::RandomXFactory;
 
     use super::*;
-    use crate::sharechain::MAX_BLOCKS_COUNT;
-
-    fn new_random_address() -> TariAddress {
-        let mut rng = rand::thread_rng();
-        let (_, pk) = RistrettoPublicKey::random_keypair(&mut rng);
-        TariAddress::new_single_address(pk, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
-    }
-
-    fn add_blocks(blocks: &mut Vec<Block>, miner: TariAddress, start: u64, n: u64) -> u64 {
-        let n = start + n;
-        for i in start..n {
-            blocks.push(
-                Block::builder()
-                    .with_height(i)
-                    .with_miner_wallet_address(miner.clone())
-                    .build(),
-            );
-        }
-        n
-    }
 
     #[tokio::test]
     async fn test_submit_block() {
@@ -801,8 +764,13 @@ mod test {
             .build()
             .unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let params = Arc::new(BlockValidationParams::new(
+            RandomXFactory::new(1),
+            consensus_manager.clone(),
+            *consensus_manager.get_genesis_block().hash(),
+        ));
         let share_chain =
-            InMemoryShareChain::new(20, PowAlgorithm::Sha3x, None, consensus_manager, coinbase_extras).unwrap();
+            InMemoryShareChain::new(20, PowAlgorithm::Sha3x, params, consensus_manager, coinbase_extras).unwrap();
 
         let block = Block::builder().with_height(355).build();
 
