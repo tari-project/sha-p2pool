@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
 use tari_common_types::types::FixedHash;
-use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
+use tari_core::{
+    consensus::ConsensusManager,
+    proof_of_work::{randomx_factory::RandomXFactory, Difficulty},
+};
 
 use crate::{
     server::p2p::Squad,
@@ -76,6 +79,8 @@ impl BlockValidationParams {
 
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
+    async fn get_target_difficulty(&self) -> ShareChainResult<Difficulty>;
+
     /// Adds a new block if valid to chain.
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()>;
 

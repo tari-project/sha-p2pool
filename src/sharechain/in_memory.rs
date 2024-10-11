@@ -1,17 +1,18 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
-
 use std::{
     collections::{HashMap, VecDeque},
     slice::Iter,
     str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::{pow_algo, NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
+use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
@@ -53,7 +54,8 @@ const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 
 pub(crate) struct BlockLevels {
     cached_shares: Option<Vec<NewBlockCoinbase>>,
-    levels: VecDeque<BlockLevel>,
+    levels: AllocRingBuffer<BlockLevel>,
+    tip_target_difficulty: Difficulty,
 }
 
 impl BlockLevels {
@@ -77,6 +79,8 @@ pub(crate) struct InMemoryShareChain {
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
+const MAX_BLOCKS_PER_LEVEL: usize = 10;
+
 /// A collection of blocks with the same height.
 pub struct BlockLevel {
     blocks: Vec<Block>,
@@ -96,6 +100,9 @@ impl BlockLevel {
     pub fn add_block(&mut self, block: Block, replace_tip: bool) -> Result<(), Error> {
         if self.height != block.height {
             return Err(Error::InvalidBlock(block));
+        }
+        if self.blocks.len() >= MAX_BLOCKS_PER_LEVEL {
+            return Err(Error::TooManyBlocksInThisLevel);
         }
         if replace_tip {
             self.in_chain_index = self.blocks.len();
@@ -131,11 +138,12 @@ impl InMemoryShareChain {
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
-        let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
-        levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
+        let mut levels = AllocRingBuffer::new(MAX_BLOCKS_COUNT + 1);
+        levels.push(BlockLevel::new(vec![genesis_block()], 0));
         let block_levels = BlockLevels {
             cached_shares: None,
             levels,
+            tip_target_difficulty: Difficulty::min(),
         };
         Ok(Self {
             max_blocks_count,
@@ -291,6 +299,9 @@ impl InMemoryShareChain {
         block: &Block,
         params: &BlockValidationParams,
     ) -> ShareChainResult<()> {
+        let timer = Instant::now();
+
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         let height = block.height;
         if block.height == 0 {
             // TODO: Find out where this block 0 is coming from
@@ -304,6 +315,7 @@ impl InMemoryShareChain {
             block.original_block_header.height,
         );
         let pow_algo = block.original_block_header.pow.pow_algo;
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         let achieved_difficulty = match pow_algo {
             PowAlgorithm::RandomX => randomx_difficulty(
                 &block.original_block_header,
@@ -315,6 +327,7 @@ impl InMemoryShareChain {
             PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
         }?;
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         if achieved_difficulty < min_diff {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
             return Err(Error::BlockValidation("Block difficulty is too low".to_string()));
@@ -324,7 +337,8 @@ impl InMemoryShareChain {
             // TODO: Validate the block
             block_levels
                 .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+                .push(BlockLevel::new(vec![block.clone()], block.height));
+            block_levels.tip_target_difficulty = min_diff;
             return Ok(());
         }
 
@@ -333,26 +347,38 @@ impl InMemoryShareChain {
         let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
         let tip_height = tip_level.height;
 
+        warn!(target: LOG_TARGET, "dbg 3 orig, {}", timer.elapsed().as_millis());
         dbg!(block.height);
         dbg!(tip_height);
+        warn!(target: LOG_TARGET, "tip: {} {} {}", tip_height, block.height, self.max_blocks_count);
         // If we are syncing and we are very far behind, clear out the blocks we have and just add it
-        if tip_height < block.height.saturating_sub(self.max_blocks_count as u64) {
-            // TODO: Validate the block
+        if tip_height < block.height.checked_sub(2000).unwrap_or(0) {
+            warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
+
             block_levels.levels.clear();
+
+            warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
             block_levels
                 .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+                .push(BlockLevel::new(vec![block.clone()], block.height));
+            block_levels.tip_target_difficulty = min_diff;
+            warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
             return Ok(());
         }
+
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
 
         if tip_height == 0 {
             // TODO: Validate the block
             block_levels.levels.clear();
             block_levels
                 .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+                .push(BlockLevel::new(vec![block.clone()], block.height));
+            warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
+            block_levels.tip_target_difficulty = min_diff;
             return Ok(());
         }
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
 
         // Else if there is a gap in the chain, snooze it in the hopes that we will catch up
         if tip_height < block.height.saturating_sub(1) {
@@ -362,6 +388,7 @@ impl InMemoryShareChain {
             });
         }
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // Check if already added.
         if let Some(level) = block_levels.get_at_height(height) {
             if level.blocks.iter().any(|b| b.hash == block.hash) {
@@ -370,6 +397,7 @@ impl InMemoryShareChain {
             }
         }
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // Find the parent.
         let parent_height = height
             .checked_sub(1)
@@ -388,6 +416,7 @@ impl InMemoryShareChain {
             ))
         })?;
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         let parent = parent_level
             .blocks
             .iter()
@@ -400,29 +429,48 @@ impl InMemoryShareChain {
                 ))
             })?;
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // note: this is an approximation, wait for actual implementation to be accurate.
         let mut lwma = LinearWeightedMovingAverage::new(90, 10).expect("Failed to create LWMA");
-        for level in block_levels.levels.iter().rev() {
+        for level in block_levels.levels.iter() {
             let main_block = level
                 .block_in_main_chain()
                 .ok_or_else(|| Error::BlockValidation(format!("No main block in level: {:?}", level.height)))?;
             let target = lwma.get_difficulty().unwrap_or(min_diff);
-            lwma.add(main_block.timestamp, target);
+            warn!(target: LOG_TARGET, "LWMA difficulty, {}: {}", target, main_block.timestamp);
+            match lwma.add(main_block.timestamp, target) {
+                Ok(_) => {},
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "[{:?}] Failed to add block to LWMA: {:?}", self.pow_algo, e);
+                },
+            }
         }
         let target_difficulty = lwma.get_difficulty().unwrap_or_else(|| {
             warn!(target: LOG_TARGET, "[{:?}] Failed to calculate target difficulty", self.pow_algo);
             min_diff
         });
+
+        lwma.add(block.timestamp, target_difficulty).map_err(|e| {
+            warn!(target: LOG_TARGET, "[{:?}] Failed to add block to LWMA: {:?}", self.pow_algo, e);
+            Error::BlockValidation("Failed to add block to LWMA".to_string())
+        })?;
+        let next_target_difficulty = lwma.get_difficulty().unwrap_or_else(|| {
+            warn!(target: LOG_TARGET, "[{:?}] Failed to calculate target difficulty", self.pow_algo);
+            min_diff
+        });
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // todo!("Save difficulty");
         // validate
         self.validate_block(Some(parent), block, achieved_difficulty, target_difficulty)
             .await?;
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         let mut num_reorged = 0;
         // debug!(target: LOG_TARGET, "Reorging to main chain");
         // parent_level.in_chain_index = parent_index;
         let mut current_block_hash = block.prev_hash;
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // recalculate levels.
         for p_i in (level_index)..block_levels.levels.len() {
             let curr_level = block_levels.levels.get_mut(p_i).ok_or_else(|| {
@@ -451,28 +499,31 @@ impl InMemoryShareChain {
             curr_level.in_chain_index = new_index;
             current_block_hash = new_parent.prev_hash;
         }
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
 
         if num_reorged > 0 {
             info!(target: LOG_TARGET, "[{:?}] 🔄 Reorged {} blocks", self.pow_algo, num_reorged);
         }
         block_levels.cached_shares = None;
         // remove the first couple of block levels if needed
-        if block_levels.levels.len() >= self.max_blocks_count {
-            let diff = block_levels.levels.len() - self.max_blocks_count;
-            for _ in 0..diff {
-                if let Some(level) = block_levels.levels.pop_back() {
-                    debug!(target: LOG_TARGET, "[{:?}] 🗑️ Removed block level: {:?}", self.pow_algo, level.height);
-                } else {
-                    error!(target: LOG_TARGET, "[{:?}] Failed to remove block level!", self.pow_algo);
-                }
-            }
-        }
+        // if block_levels.levels.len() >= self.max_blocks_count {
+        //     let diff = block_levels.levels.len() - self.max_blocks_count;
+        //     for _ in 0..diff {
+        //         if let Some(level) = block_levels.levels.back() {
+        //             debug!(target: LOG_TARGET, "[{:?}] 🗑️ Removed block level: {:?}", self.pow_algo, level.height);
+        //         } else {
+        //             error!(target: LOG_TARGET, "[{:?}] Failed to remove block level!", self.pow_algo);
+        //         }
+        //     }
+        // }
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // Add the block.
         if level_index == 0 {
             block_levels
                 .levels
-                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+                .push(BlockLevel::new(vec![block.clone()], block.height));
+            block_levels.tip_target_difficulty = next_target_difficulty;
         } else {
             block_levels
                 .levels
@@ -481,6 +532,7 @@ impl InMemoryShareChain {
                 .add_block(block.clone(), true)?;
         }
 
+        warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // update coinbase extra cache
         let mut coinbase_extras_lock = self.coinbase_extras.write().await;
         if let Some(miner_wallet_address) = &block.miner_wallet_address {
@@ -504,6 +556,11 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
+    async fn get_target_difficulty(&self) -> ShareChainResult<Difficulty> {
+        let block_levels_read_lock = self.block_levels.read().await;
+        Ok(block_levels_read_lock.tip_target_difficulty)
+    }
+
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
         self.submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)

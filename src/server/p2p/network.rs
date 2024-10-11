@@ -655,6 +655,7 @@ where S: ShareChain
     }
 
     async fn add_peer_and_try_sync(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
+        dbg!("Try to sync");
         let current_randomx_height = payload.current_random_x_height;
         let current_sha3x_height = payload.current_sha3x_height;
         for addr in &payload.public_addresses {
@@ -722,6 +723,7 @@ where S: ShareChain
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
+        dbg!("Trying to sync from user request");
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync request: {request:?}");
 
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
@@ -1118,6 +1120,7 @@ where S: ShareChain
                 }
                 _ = publish_peer_info_interval.tick() => {
                     dbg!("pub peer");
+                    info!(target: LOG_TARGET, "pub peer info");
                     // handle case when we have some peers removed
                     let expired_peers = self.network_peer_store.cleanup().await;
                     for exp_peer in expired_peers {
@@ -1140,6 +1143,7 @@ where S: ShareChain
                     }
                 },
                 res = self.snooze_block_rx.recv() => {
+                    info!(target: LOG_TARGET, "snooze block");
                          dbg!("snooze");
                          if let Some((snoozes_left, block)) = res {
                             let snooze_sender = self.snooze_block_tx.clone();
@@ -1182,6 +1186,7 @@ where S: ShareChain
                 // },
                 _ = kademlia_bootstrap_interval.tick() => {
                     dbg!("kad boot");
+                    info!(target: LOG_TARGET, "kad bootstrap event");
                     if let Err(error) = self.bootstrap_kademlia() {
                         warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to do kademlia bootstrap: {error:?}");
                     }

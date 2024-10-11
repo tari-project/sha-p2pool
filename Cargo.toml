@@ -50,6 +50,7 @@ moka = {version = "0.12.7", features = ["future"]}
 num = {version = "0.4.3", features = ["default", "num-bigint", "serde"]}
 num-format = "*"
 rand = "0.8.0"
+ringbuffer = "0.15.0"
 serde = "1.0.203"
 serde_cbor = "0.11.2"
 serde_json = "1.0.122"

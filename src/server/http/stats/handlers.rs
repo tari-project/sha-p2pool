@@ -4,7 +4,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, Json};
-use log::error;
+use log::{error, info};
 use serde::Serialize;
 use tari_core::{proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMinotari};
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
@@ -137,6 +137,7 @@ pub(crate) async fn handle_miners_with_shares(
 
 pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stats>, StatusCode> {
     let timer = std::time::Instant::now();
+    info!(target: LOG_TARGET, "handle_get_stats");
 
     let sha3x_stats = get_chain_stats(state.clone(), PowAlgorithm::Sha3x).await?;
     let randomx_stats = get_chain_stats(state.clone(), PowAlgorithm::RandomX).await?;
