@@ -106,6 +106,7 @@ where S: ShareChain
             .route("/health", get(health::handle_health))
             .route("/version", get(version::handle_version))
             .route("/chain", get(handlers::handle_chain))
+            .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
                 share_chain_sha3x: self.share_chain_sha3x.clone(),
                 share_chain_random_x: self.share_chain_random_x.clone(),

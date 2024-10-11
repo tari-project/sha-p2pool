@@ -107,6 +107,9 @@ pub struct StartArgs {
     /// If set, local HTTP server (stats, health-check, status etc...) is disabled.
     #[arg(long, value_name = "http-server-disabled", default_value_t = false)]
     pub http_server_disabled: bool,
+
+    #[arg(long, value_name = "user-agent")]
+    pub user_agent: Option<String>,
 }
 
 #[derive(Clone, Parser, Debug)]

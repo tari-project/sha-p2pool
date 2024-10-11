@@ -22,3 +22,5 @@ pub mod util;
 pub const MAX_MISSING_PARENTS_TO_SNOOZE: u64 = 10;
 pub const MAX_SNOOZES: usize = 5;
 pub const MAX_SNOOZE_DURATION: Duration = Duration::from_secs(2); // 2 seconds, max 10 seconds of snoozing
+pub const MIN_PEER_INFO_VERSION: u64 = 2;
+pub const MIN_BLOCK_VERSION: u32 = 2;

@@ -10,7 +10,7 @@ use tari_core::{proof_of_work::PowAlgorithm, transactions::tari_amount::MicroMin
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::oneshot;
 
-use super::MAX_ACCEPTABLE_HTTP_TIMEOUT;
+use super::{models::ChainStats, MAX_ACCEPTABLE_HTTP_TIMEOUT};
 use crate::server::{
     http::{
         server::AppState,
@@ -23,7 +23,7 @@ use crate::server::{
             P2POOL_STAT_REJECTED_BLOCKS_COUNT,
         },
     },
-    p2p::P2pServiceQuery,
+    p2p::{ConnectedPeerInfo, P2pServiceQuery},
     stats_store::StatsStore,
 };
 
@@ -43,6 +43,30 @@ pub(crate) struct BlockResult {
     candidate_block_height: u64,
     candidate_block_prev_hash: String,
     algo: String,
+}
+pub(crate) async fn handle_connections(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ConnectedPeerInfo>>, StatusCode> {
+    let timer = std::time::Instant::now();
+    let (tx, rx) = oneshot::channel();
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetConnectedPeers(tx))
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let res = rx.await.map_err(|e| {
+        error!(target: LOG_TARGET, "Failed to receive from oneshot: {e:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_connections took too long: {}ms", timer.elapsed().as_millis());
+    }
+    Ok(Json(res))
 }
 
 pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
@@ -111,153 +135,15 @@ pub(crate) async fn handle_miners_with_shares(
     Ok(Json(result))
 }
 
-pub(crate) async fn handle_get_stats(
-    State(state): State<AppState>,
-) -> Result<Json<HashMap<String, Stats>>, StatusCode> {
+pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Json<Stats>, StatusCode> {
     let timer = std::time::Instant::now();
-    let mut result = HashMap::with_capacity(2);
-    result.insert(
-        PowAlgorithm::Sha3x.to_string().to_lowercase(),
-        get_stats(state.clone(), PowAlgorithm::Sha3x).await?,
-    );
-    result.insert(
-        PowAlgorithm::RandomX.to_string().to_lowercase(),
-        get_stats(state.clone(), PowAlgorithm::RandomX).await?,
-    );
-    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
-        error!(target: LOG_TARGET, "handle_get_stats took too long: {}ms", timer.elapsed().as_millis());
-    }
-    Ok(Json(result))
-}
 
-#[allow(clippy::too_many_lines)]
-async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusCode> {
-    // return from cache if possible
-    let stats_cache = state.stats_cache.clone();
-    if let Some(stats) = stats_cache.stats(algo).await {
-        return Ok(stats);
-    }
-
-    let share_chain = match algo {
-        PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
-        PowAlgorithm::Sha3x => state.share_chain_sha3x.clone(),
-    };
-    // let chain = share_chain.blocks(0).await.map_err(|error| {
-    // error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
-    // StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
-
-    // connected
+    let sha3x_stats = get_chain_stats(state.clone(), PowAlgorithm::Sha3x).await?;
+    let randomx_stats = get_chain_stats(state.clone(), PowAlgorithm::RandomX).await?;
     let peer_count = state.peer_store.peer_count().await;
     let connected = peer_count > 0;
-
-    let shares = share_chain
-        .miners_with_shares(state.squad.clone())
-        .await
-        .map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    // collect number of miners
-    // let num_of_miners = chain
-    // .iter()
-    // .map(|block| block.miner_wallet_address.clone())
-    // .filter(|addr_opt| addr_opt.is_some())
-    // .map(|addr| addr.as_ref().unwrap().to_base58())
-    // .unique()
-    // .count();
-
-    // last won block
-    // let last_block_won = chain
-    // .iter()
-    // .filter(|block| block.sent_to_main_chain)
-    // .last()
-    // .cloned()
-    // .map(|block| block.into());
-
-    // TODO: Remove this field
-    let last_block_won = None;
-
-    let share_chain_height = share_chain.tip_height().await.map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to get tip height of share chain: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // hash rate
-    let pool_hash_rate = share_chain.hash_rate().await.map_err(|error| {
-        error!(target: LOG_TARGET, "Failed to get hash rate of share chain: {error:?}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // connected since
     let connected_since = state.peer_store.last_connected();
-
-    // consensus manager
-    // let network = Network::get_current_or_user_setting_or_default();
-    // let consensus_manager = ConsensusManager::builder(network).build().map_err(|error| {
-    // error!(target: LOG_TARGET, "Failed to build consensus manager: {error:?}");
-    // StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
-
-    // calculate estimated earnings for all wallet addresses
-    // let blocks = share_chain.blocks(0).await.map_err(|error| {
-    // error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
-    // StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
-    // let pool_total_rewards: u64 = blocks
-    // .iter()
-    // .filter(|block| block.sent_to_main_chain)
-    // .map(|block| {
-    // consensus_manager
-    // .get_block_reward_at(block.original_block_header.height)
-    // .as_u64()
-    // })
-    // .sum();
-
-    // calculate all possibly earned rewards for all the miners until latest point
-    // let mut miners_with_shares = HashMap::<String, u64>::new();
-    // let mut miners_with_rewards = HashMap::<String, u64>::new();
-    // blocks.iter().for_each(|block| {
-    // if let Some(miner_wallet_address) = &block.miner_wallet_address {
-    // let miner = miner_wallet_address.to_base58();
-    // let reward = consensus_manager.get_block_reward_at(block.original_block_header.height);
-
-    // collect share count for miners
-    // if let Some(shares) = miners_with_shares.get(&miner) {
-    // miners_with_shares.insert(miner, shares + 1);
-    // } else {
-    // miners_with_shares.insert(miner, 1);
-    // }
-
-    // calculate rewards for miners
-    // if block.sent_to_main_chain {
-    // miners_with_shares.iter().for_each(|(addr, share_count)| {
-    // let miner_reward = (reward.as_u64() / SHARE_COUNT) * share_count;
-    // if let Some(earned_rewards) = miners_with_rewards.get(addr) {
-    // miners_with_rewards.insert(addr.clone(), earned_rewards + miner_reward);
-    // } else {
-    // miners_with_rewards.insert(addr.clone(), miner_reward);
-    // }
-    // });
-    // }
-    // }
-    // });
-
-    // let mut estimated_earnings = HashMap::new();
-    // let mut pool_total_estimated_earnings_1m = 0u64;
-    // if !blocks.is_empty() {
-    // calculate "earning / minute" for all miners
-    //     // let first_block_time = blocks.first().unwrap().timestamp;
-    //     let full_interval = EpochTime::now().as_u64() - first_block_time.as_u64();
-    //     miners_with_rewards.iter().for_each(|(addr, total_earn)| {
-    //         pool_total_estimated_earnings_1m += total_earn;
-    //         let reward_per_1m = (total_earn / full_interval) * 60;
-    //         estimated_earnings.insert(addr.clone(), EstimatedEarnings::new(MicroMinotari::from(reward_per_1m)));
-    //     });
-    //     pool_total_estimated_earnings_1m = (pool_total_estimated_earnings_1m / full_interval) * 60;
-    // }
     let (tx, rx) = oneshot::channel();
-
     state
         .p2p_service_client
         .send(P2pServiceQuery::GetConnectionInfo(tx))
@@ -272,21 +158,64 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let listener_addresses = connection_info
-        .listener_addresses
-        .iter()
-        .map(|addr| addr.to_string())
-        .collect();
-
-    let result = Stats {
+    let stats = Stats {
         connected,
         peer_count,
-        listener_addresses,
+        connection_info,
+        connected_since,
+        randomx_stats,
+        sha3x_stats,
+    };
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_get_stats took too long: {}ms", timer.elapsed().as_millis());
+    }
+    Ok(Json(stats))
+}
+
+#[allow(clippy::too_many_lines)]
+async fn get_chain_stats(state: AppState, algo: PowAlgorithm) -> Result<ChainStats, StatusCode> {
+    // return from cache if possible
+    // let stats_cache = state.stats_cache.clone();
+    // if let Some(stats) = stats_cache.stats(algo).await {
+    // return Ok(stats);
+    // }
+
+    let share_chain = match algo {
+        PowAlgorithm::RandomX => state.share_chain_random_x.clone(),
+        PowAlgorithm::Sha3x => state.share_chain_sha3x.clone(),
+    };
+    // let chain = share_chain.blocks(0).await.map_err(|error| {
+    // error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
+    // StatusCode::INTERNAL_SERVER_ERROR
+    // })?;
+
+    // connected
+
+    let shares = share_chain
+        .miners_with_shares(state.squad.clone())
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // TODO: Remove this field
+
+    let share_chain_height = share_chain.tip_height().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get tip height of share chain: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // hash rate
+    let pool_hash_rate = share_chain.hash_rate().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get hash rate of share chain: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let result = ChainStats {
         num_of_miners: shares.keys().len(),
-        last_block_won,
         share_chain_height,
         pool_hash_rate: pool_hash_rate.to_string(),
-        connected_since,
         pool_total_earnings: MicroMinotari::from(0),
         pool_total_estimated_earnings: EstimatedEarnings::new(MicroMinotari::from(0)),
         total_earnings: Default::default(),
@@ -296,7 +225,7 @@ async fn get_stats(state: AppState, algo: PowAlgorithm) -> Result<Stats, StatusC
         squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
     };
 
-    stats_cache.update(result.clone(), algo).await;
+    // stats_cache.update(result.clone(), algo).await;
 
     Ok(result)
 }

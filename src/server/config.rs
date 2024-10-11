@@ -138,6 +138,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_user_agent(&mut self, config: String) -> &mut Self {
+        self.config.p2p_service.user_agent = config;
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }

@@ -68,7 +68,6 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let squad_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
         let stats_store = Arc::new(StatsStore::new());
 
@@ -76,7 +75,6 @@ where S: ShareChain
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
-            squad_peer_store.clone(),
             network_peer_store.clone(),
             shutdown_signal.clone(),
         )
@@ -121,7 +119,7 @@ where S: ShareChain
             Some(Arc::new(HttpServer::new(
                 share_chain_sha3x.clone(),
                 share_chain_random_x.clone(),
-                squad_peer_store.clone(),
+                network_peer_store.clone(),
                 stats_store.clone(),
                 config.http_server.port,
                 config.p2p_service.squad.clone(),

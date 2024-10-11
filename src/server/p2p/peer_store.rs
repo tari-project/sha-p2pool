@@ -97,18 +97,19 @@ impl PeerStore {
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
     pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
-        if self.banned_peers.contains_key(&peer_id) {
-            return;
-        }
-        let removal_count = self.peer_removals.get(&peer_id).await.unwrap_or(0);
-        if removal_count >= self.peers_max_fail {
-            warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
-            self.peer_removals.remove(&peer_id).await;
-            self.banned_peers.insert(peer_id, ()).await;
-        } else {
-            self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
-            self.peer_removals.insert(peer_id, removal_count).await;
-        }
+        dbg!("Add peer store", &peer_id, &peer_info);
+        // if self.banned_peers.contains_key(&peer_id) {
+        // return;
+        // }
+        // let removal_count = self.peer_removals.get(&peer_id).await.unwrap_or(0);
+        // if removal_count >= self.peers_max_fail {
+        // warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
+        // self.peer_removals.remove(&peer_id).await;
+        // self.banned_peers.insert(peer_id, ()).await;
+        // } else {
+        self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+        // self.peer_removals.insert(peer_id, removal_count).await;
+        // }
 
         self.set_tip_of_block_heights().await;
         self.set_last_connected().await;
@@ -116,28 +117,28 @@ impl PeerStore {
 
     /// Removes a peer from store.
     pub async fn remove(&self, peer_id: &PeerId) {
-        if self.banned_peers.contains_key(peer_id) {
-            return;
-        }
+        // if self.banned_peers.contains_key(peer_id) {
+        // return;
+        // }
         self.peers.remove(peer_id).await;
 
         // counting peer removals
-        let removal_count = match self.peer_removals.get(peer_id).await {
-            Some(value) => {
-                let removals = value + 1;
-                self.peer_removals.insert(*peer_id, removals).await;
-                removals
-            },
-            None => {
-                self.peer_removals.insert(*peer_id, 1).await;
-                1
-            },
-        };
-        if removal_count >= self.peers_max_fail {
-            warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
-            self.peer_removals.remove(peer_id).await;
-            self.banned_peers.insert(*peer_id, ()).await;
-        }
+        // let removal_count = match self.peer_removals.get(peer_id).await {
+        //     Some(value) => {
+        //         let removals = value + 1;
+        //         self.peer_removals.insert(*peer_id, removals).await;
+        //         removals
+        //     },
+        //     None => {
+        //         self.peer_removals.insert(*peer_id, 1).await;
+        //         1
+        //     },
+        // };
+        // if removal_count >= self.peers_max_fail {
+        //     warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
+        //     self.peer_removals.remove(peer_id).await;
+        //     self.banned_peers.insert(*peer_id, ()).await;
+        // }
 
         self.set_tip_of_block_heights().await;
         self.set_last_connected().await;

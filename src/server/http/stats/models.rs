@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::sharechain::block::Block;
+use crate::{server::p2p::ConnectionInfo, sharechain::block::Block};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StatsBlock {
@@ -86,11 +86,16 @@ impl SquadDetails {
 pub struct Stats {
     pub connected: bool,
     pub peer_count: u64,
-    pub listener_addresses: Vec<String>,
+    pub connection_info: ConnectionInfo,
     pub connected_since: Option<EpochTime>,
+    pub randomx_stats: ChainStats,
+    pub sha3x_stats: ChainStats,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ChainStats {
     pub squad: SquadDetails,
     pub num_of_miners: usize,
-    pub last_block_won: Option<StatsBlock>,
     pub share_chain_height: u64,
     pub pool_hash_rate: String,
     pub pool_total_earnings: MicroMinotari,

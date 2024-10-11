@@ -3,7 +3,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
 
@@ -52,19 +52,28 @@ pub struct PeerInfo {
     pub timestamp: u128,
     pub user_agent: Option<String>,
     pub user_agent_version: Option<String>,
+    #[serde(default)]
+    pub public_addresses: Vec<Multiaddr>,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
-    pub fn new(current_sha3x_height: u64, current_random_x_height: u64, squad: Squad) -> Self {
+    pub fn new(
+        current_sha3x_height: u64,
+        current_random_x_height: u64,
+        squad: Squad,
+        public_addresses: Vec<Multiaddr>,
+        user_agent: Option<String>,
+    ) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
-            version: 1,
+            version: 2,
             current_sha3x_height,
             current_random_x_height,
             squad,
             timestamp,
-            user_agent: Some("tari-p2pool".to_string()),
+            user_agent,
             user_agent_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            public_addresses,
         }
     }
 }
