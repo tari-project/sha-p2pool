@@ -402,11 +402,12 @@ impl InMemoryShareChain {
 
         // note: this is an approximation, wait for actual implementation to be accurate.
         let mut lwma = LinearWeightedMovingAverage::new(90, 10).expect("Failed to create LWMA");
-        for level in block_levels.levels.iter().skip(20) {
+        for level in block_levels.levels.iter().rev() {
             let main_block = level
                 .block_in_main_chain()
                 .ok_or_else(|| Error::BlockValidation(format!("No main block in level: {:?}", level.height)))?;
-            lwma.add_front(main_block.timestamp, main_block.target_difficulty);
+            let target = lwma.get_difficulty().unwrap_or(min_diff);
+            lwma.add(main_block.timestamp, target);
         }
         let target_difficulty = lwma.get_difficulty().unwrap_or_else(|| {
             warn!(target: LOG_TARGET, "[{:?}] Failed to calculate target difficulty", self.pow_algo);
