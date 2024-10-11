@@ -1168,18 +1168,18 @@ where S: ShareChain
                             error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
                         }
                 },
-                req = self.share_chain_sync_rx.recv() => {
-                    dbg!("share chain sync rx");
-                    match req {
-                        Ok(request) => {
-                            self.swarm.behaviour_mut().share_chain_sync
-                                .send_request(&request.peer_id, request.request);
-                        }
-                        Err(error) => {
-                            error!("Failed to receive share chain sync request from channel: {error:?}");
-                        }
-                    }
-                },
+                // req = self.share_chain_sync_rx.recv() => {
+                //     dbg!("share chain sync rx");
+                //     match req {
+                //         Ok(request) => {
+                //             self.swarm.behaviour_mut().share_chain_sync
+                //                 .send_request(&request.peer_id, request.request);
+                //         }
+                //         Err(error) => {
+                //             error!("Failed to receive share chain sync request from channel: {error:?}");
+                //         }
+                //     }
+                // },
                 _ = kademlia_bootstrap_interval.tick() => {
                     dbg!("kad boot");
                     if let Err(error) = self.bootstrap_kademlia() {
