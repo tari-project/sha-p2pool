@@ -1,62 +1,61 @@
 [package]
-name = "sha_p2pool"
-version = "0.1.9"
 edition = "2021"
+name = "sha_p2pool"
+version = "0.2.0"
 
 [dependencies]
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git" }
-tari_common = { git = "https://github.com/tari-project/tari.git" }
-tari_core = { git = "https://github.com/tari-project/tari.git" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git" }
+minotari_app_grpc = {git = "https://github.com/tari-project/tari.git"}
+minotari_node_grpc_client = {git = "https://github.com/tari-project/tari.git"}
+tari_common = {git = "https://github.com/tari-project/tari.git"}
+tari_common_types = {git = "https://github.com/tari-project/tari.git"}
+tari_core = {git = "https://github.com/tari-project/tari.git"}
 tari_crypto = "0.20.1"
-tari_utilities = { version = "0.7", features = ["borsh"] }
+tari_shutdown = {git = "https://github.com/tari-project/tari.git"}
+tari_utilities = {version = "0.7", features = ["borsh"]}
 
-libp2p = { version = "0.54.0", features = [
-    "dns",
-    "identify",
-    "macros",
-    "tokio",
-    "serde",
-    "noise",
-    "tcp",
-    "yamux",
-    "mdns",
-    "gossipsub",
-    "request-response",
-    "json",
-    "cbor",
-    "kad",
-    "relay",
-    "dcutr",
-    "autonat",
-] }
-tokio = { version = "1.38.0", features = ["full"] }
-thiserror = "1.0"
-serde = "1.0.203"
 anyhow = "1.0"
-log = { version = "0.4.21", features = ["kv"] }
-tonic = "0.8.3"
 async-trait = "0.1.80"
-serde_cbor = "0.11.2"
-blake2 = "0.10.6"
-digest = "0.10.7"
-clap = { version = "4.5.7", features = ["derive"] }
-moka = { version = "0.12.7", features = ["future"] }
-rand = "0.8.0"
-dirs = "4.0.0"
-log4rs = "1.3.0"
 axum = "0.7.5"
-itertools = "0.13.0"
-num = { version = "0.4.3", features = ["default", "num-bigint", "serde"] }
-hex = "0.4.3"
-serde_json = "1.0.122"
-hickory-resolver = { version = "*", features = ["dns-over-rustls"] }
+blake2 = "0.10.6"
+clap = {version = "4.5.7", features = ["derive"]}
 convert_case = "0.6.0"
+digest = "0.10.7"
+dirs = "4.0.0"
+hex = "0.4.3"
+hickory-resolver = {version = "*", features = ["dns-over-rustls"]}
+itertools = "0.13.0"
 lazy_static = "1.5.0"
+libp2p = {version = "0.54.0", features = [
+  "dns",
+  "identify",
+  "macros",
+  "tokio",
+  "serde",
+  "noise",
+  "tcp",
+  "yamux",
+  "mdns",
+  "gossipsub",
+  "request-response",
+  "json",
+  "cbor",
+  "kad",
+  "relay",
+  "dcutr",
+  "autonat",
+]}
+log = {version = "0.4.21", features = ["kv"]}
+log4rs = "1.3.0"
+moka = {version = "0.12.7", features = ["future"]}
+num = {version = "0.4.3", features = ["default", "num-bigint", "serde"]}
 num-format = "*"
-
+rand = "0.8.0"
+serde = "1.0.203"
+serde_cbor = "0.11.2"
+serde_json = "1.0.122"
+thiserror = "1.0"
+tokio = {version = "1.38.0", features = ["full"]}
+tonic = "0.8.3"
 
 [package.metadata.cargo-machete]
 ignored = ["log4rs"]
