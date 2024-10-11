@@ -110,7 +110,7 @@ genesis_block_hash.to_hex());
     let share_chain_sha3x = InMemoryShareChain::new(
         MAX_BLOCKS_COUNT,
         PowAlgorithm::Sha3x,
-        None,
+        block_validation_params.clone(),
         consensus_manager.clone(),
         coinbase_extras_sha3x.clone(),
     )?;
@@ -118,7 +118,7 @@ genesis_block_hash.to_hex());
     let share_chain_random_x = InMemoryShareChain::new(
         MAX_BLOCKS_COUNT,
         PowAlgorithm::RandomX,
-        Some(block_validation_params.clone()),
+        block_validation_params.clone(),
         consensus_manager,
         coinbase_extras_random_x.clone(),
     )?;

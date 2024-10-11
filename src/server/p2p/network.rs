@@ -814,94 +814,6 @@ where S: ShareChain
         // }
     }
 
-    /// Starts an initial share chain synchronization.
-    /// This can be called with [`tokio::spawn`].
-    /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn initial_share_chain_sync(
-        in_progress: Arc<AtomicBool>,
-        peer_store: Arc<PeerStore>,
-        share_chain_sha3x: Arc<S>,
-        share_chain_random_x: Arc<S>,
-        share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
-        timeout: Duration,
-        squad: Squad,
-        shutdown_signal: ShutdownSignal,
-    ) {
-        warn!(target: LOG_TARGET, squad = &squad; "Initially syncing share chain (timeout: {timeout:?})...");
-        in_progress.store(true, Ordering::SeqCst);
-        let sleep = time::sleep(timeout);
-        tokio::pin!(sleep);
-        tokio::pin!(shutdown_signal);
-        loop {
-            select! {
-                () = &mut sleep => {
-                    break;
-                }
-                _ = &mut shutdown_signal => {
-                    info!(target: LOG_TARGET, squad = &squad; "Stopped initial syncing...");
-                    return;
-                }
-                else => {
-                    let mut sha3_ready = false;
-                    if let Some(result) = peer_store.tip_of_block_height(PowAlgorithm::Sha3x).await {
-                        if let Ok(tip) = share_chain_sha3x.tip_height().await {
-                            if tip < result.height {
-                                sha3_ready = true;
-                            }
-                        }
-                    }
-
-                    let mut randomx_ready = false;
-                    if let Some(result) = peer_store.tip_of_block_height(PowAlgorithm::RandomX).await {
-                        if let Ok(tip) = share_chain_random_x.tip_height().await {
-                            if tip < result.height {
-                                randomx_ready = true;
-                            }
-                        }
-                    }
-
-                    if sha3_ready && randomx_ready {
-                        break;
-                    }
-                }
-            }
-        } // wait for the first height
-
-        let to_sync = vec![
-            (PowAlgorithm::Sha3x, share_chain_sha3x.clone()),
-            (PowAlgorithm::RandomX, share_chain_random_x.clone()),
-        ];
-        for (algo, share_chain) in to_sync {
-            match peer_store.tip_of_block_height(algo).await {
-                Some(result) => {
-                    debug!(target: LOG_TARGET, squad = &squad; "Found highest block height: {result:?}");
-                    match share_chain.tip_height().await {
-                        Ok(tip) => {
-                            if tip < result.height {
-                                if let Err(error) = share_chain_sync_tx.send(LocalShareChainSyncRequest::new(
-                                    result.peer_id,
-                                    ShareChainSyncRequest::new(algo, 0),
-                                )) {
-                                    error!(target: LOG_TARGET, squad = &squad; "Failed to send share chain sync request: {error:?}");
-                                }
-                            } else {
-                                in_progress.store(false, Ordering::SeqCst);
-                            }
-                        },
-                        Err(error) => {
-                            in_progress.store(false, Ordering::SeqCst);
-                            error!(target: LOG_TARGET, squad = &squad; "Failed to get latest height of share chain: {error:?}")
-                        },
-                    }
-                },
-                None => {
-                    in_progress.store(false, Ordering::SeqCst);
-                    error!(target: LOG_TARGET, squad = &squad; "Failed to get peer with highest share chain height!")
-                },
-            }
-        }
-    }
-
     /// Main method to handle libp2p events.
     #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
@@ -991,9 +903,9 @@ where S: ShareChain
                         // addresses.iter().for_each(|addr| {
                         //     self.swarm.add_peer_address(peer, addr.clone());
                         // });
-                        dbg!(peer);
-                        dbg!(old_peer);
-                        dbg!(addresses);
+                        // dbg!(peer);
+                        // dbg!(old_peer);
+                        // dbg!(addresses);
                         // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         // if let Some(old_peer) = old_peer {
                         // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
@@ -1098,7 +1010,7 @@ where S: ShareChain
         dbg!("Attempt relay reservation");
         let mut lock = self.relay_store.write().await;
         if lock.has_active_relay() {
-            dbg!("Already have an active relay");
+            // dbg!("Already have an active relay");
             return;
         }
         // Can happen that a previous lock already set the relaty
@@ -1106,7 +1018,7 @@ where S: ShareChain
             warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
             return;
         }
-        dbg!("No, select a relay");
+        // dbg!("No, select a relay");
         lock.select_random_relay();
         if let Some(relay) = lock.selected_relay_mut() {
             let addresses = relay.addresses.clone();

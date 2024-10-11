@@ -90,7 +90,7 @@ root:
 
 loggers:
   tari::p2pool:
-    level: debug
+    level: info
     appenders:
       - p2pool
       - stdout
@@ -102,8 +102,8 @@ loggers:
       - stdout
     additive: false
   # For debugging only
-  tari::p2pool::message_logging:
-    level: debug
-    appenders:
-      - message_logging
-    additive: false
+  # tari::p2pool::message_logging:
+  #   level: debug
+  #   appenders:
+  #     - message_logging
+  #   additive: false

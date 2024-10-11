@@ -10,19 +10,27 @@ use std::{
 
 use async_trait::async_trait;
 use log::*;
-use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
+use minotari_app_grpc::tari_rpc::{pow_algo, NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
     consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, PowAlgorithm},
+    proof_of_work::{
+        lwma_diff::LinearWeightedMovingAverage,
+        randomx_difficulty,
+        sha3x_difficulty,
+        Difficulty,
+        DifficultyAdjustment,
+        PowAlgorithm,
+    },
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use super::MAX_BLOCKS_COUNT;
 use crate::{
+    main,
     server::{
         grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
         p2p::Squad,
@@ -64,7 +72,7 @@ pub(crate) struct InMemoryShareChain {
     max_blocks_count: usize,
     block_levels: Arc<RwLock<BlockLevels>>,
     pow_algo: PowAlgorithm,
-    block_validation_params: Option<Arc<BlockValidationParams>>,
+    block_validation_params: Arc<BlockValidationParams>,
     consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
@@ -119,13 +127,10 @@ impl InMemoryShareChain {
     pub fn new(
         max_blocks_count: usize,
         pow_algo: PowAlgorithm,
-        block_validation_params: Option<Arc<BlockValidationParams>>,
+        block_validation_params: Arc<BlockValidationParams>,
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
-        if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
-            return Err(Error::MissingBlockValidationParams);
-        }
         let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
         levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
         let block_levels = BlockLevels {
@@ -146,19 +151,15 @@ impl InMemoryShareChain {
     fn block_difficulty(&self, block: &Block) -> Result<u64, Error> {
         match block.original_block_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
-                if let Some(params) = &self.block_validation_params {
-                    let difficulty = randomx_difficulty(
-                        &block.original_block_header,
-                        params.random_x_factory(),
-                        params.genesis_block_hash(),
-                        params.consensus_manager(),
-                    )
-                    .map_err(Error::RandomXDifficulty)?;
-                    Ok(difficulty.as_u64())
-                } else {
-                    panic!("No params provided for RandomX difficulty calculation!");
-                    // Ok(0)
-                }
+                let params = &self.block_validation_params;
+                let difficulty = randomx_difficulty(
+                    &block.original_block_header,
+                    params.random_x_factory(),
+                    params.genesis_block_hash(),
+                    params.consensus_manager(),
+                )
+                .map_err(Error::RandomXDifficulty)?;
+                Ok(difficulty.as_u64())
             },
             PowAlgorithm::Sha3x => {
                 let difficulty = sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty)?;
@@ -248,8 +249,8 @@ impl InMemoryShareChain {
         last_block: Option<&Block>,
         block: &Block,
         params: &BlockValidationParams,
+        achieved_difficulty: Difficulty,
         target_difficulty: Difficulty,
-        sync: bool,
     ) -> ShareChainResult<()> {
         if block.original_block_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
@@ -267,41 +268,17 @@ impl InMemoryShareChain {
         }
 
         // validate PoW
+
         let pow_algo = block.original_block_header.pow.pow_algo;
-        let curr_difficulty = match pow_algo {
-            PowAlgorithm::RandomX => {
-                let random_x_params = params;
-                randomx_difficulty(
-                    &block.original_block_header,
-                    random_x_params.random_x_factory(),
-                    random_x_params.genesis_block_hash(),
-                    random_x_params.consensus_manager(),
-                )
-                .map_err(Error::RandomXDifficulty)
-            },
-            PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
-        };
-        match curr_difficulty {
-            Ok(curr_difficulty) => {
-                let result =
-                    self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block_header.height)?;
-                if !result {
-                    return Err(Error::BlockValidation(
-                        "Difficulty lower than minimum difficulty".to_string(),
-                    ));
-                }
-                if curr_difficulty < target_difficulty {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Difficulty too low!", pow_algo);
-                    return Err(Error::BlockValidation("Difficulty too low".to_string()));
-                }
-            },
-            Err(error) => {
-                warn!(target: LOG_TARGET, "[{:?}] ❌ Invalid PoW!", pow_algo);
-                debug!(target: LOG_TARGET, "[{:?}] Failed to calculate {} difficulty: {error:?}", pow_algo,pow_algo);
-                return Err(Error::BlockValidation(
-                    "Invalid PoW. Could not calculate difficulty".to_string(),
-                ));
-            },
+        let result = self.validate_min_difficulty(pow_algo, achieved_difficulty, block.original_block_header.height)?;
+        if !result {
+            return Err(Error::BlockValidation(
+                "Difficulty lower than minimum difficulty".to_string(),
+            ));
+        }
+        if achieved_difficulty < target_difficulty {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Difficulty too low!", pow_algo);
+            return Err(Error::BlockValidation("Difficulty too low".to_string()));
         }
 
         Ok(())
@@ -313,7 +290,7 @@ impl InMemoryShareChain {
         &self,
         block_levels: &mut RwLockWriteGuard<'_, BlockLevels>,
         block: &Block,
-        params: Option<Arc<BlockValidationParams>>,
+        params: &BlockValidationParams,
         sync: bool,
     ) -> ShareChainResult<()> {
         let height = block.height;
@@ -321,6 +298,31 @@ impl InMemoryShareChain {
             // TODO: Find out where this block 0 is coming from
             return Ok(());
             // return Err(Error::BlockValidation("Block height is 0".to_string()));
+        }
+
+        let min_diff = min_difficulty(
+            &self.consensus_manager,
+            block.original_block_header.pow.pow_algo,
+            block.original_block_header.height,
+        );
+        let pow_algo = block.original_block_header.pow.pow_algo;
+        let achieved_difficulty = match pow_algo {
+            PowAlgorithm::RandomX => {
+                let random_x_params = params;
+                randomx_difficulty(
+                    &block.original_block_header,
+                    params.random_x_factory(),
+                    params.genesis_block_hash(),
+                    params.consensus_manager(),
+                )
+                .map_err(Error::RandomXDifficulty)
+            },
+            PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_block_header).map_err(Error::Difficulty),
+        }?;
+
+        if achieved_difficulty < min_diff {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
+            return Err(Error::BlockValidation("Block difficulty is too low".to_string()));
         }
 
         if block_levels.levels.is_empty() {
@@ -403,11 +405,23 @@ impl InMemoryShareChain {
                 ))
             })?;
 
-        if let Some(params) = &params {
-            // todo!("Save difficulty");
-            // validate
-            // self.validate_block(Some(parent), block, params, sync).await?;
+        // note: this is an approximation, wait for actual implementation to be accurate.
+        let mut lwma = LinearWeightedMovingAverage::new(90, 10).expect("Failed to create LWMA");
+        for level in block_levels.levels.iter().skip(20) {
+            let main_block = level
+                .block_in_main_chain()
+                .ok_or_else(|| Error::BlockValidation(format!("No main block in level: {:?}", level.height)))?;
+            lwma.add_front(main_block.timestamp, main_block.target_difficulty);
         }
+        let target_difficulty = lwma.get_difficulty().unwrap_or_else(|| {
+            warn!(target: LOG_TARGET, "[{:?}] Failed to calculate target difficulty", self.pow_algo);
+            min_diff
+        });
+        // todo!("Save difficulty");
+        // validate
+        self.validate_block(Some(parent), block, params, achieved_difficulty, target_difficulty)
+            .await?;
+
         let mut num_reorged = 0;
         // debug!(target: LOG_TARGET, "Reorging to main chain");
         // parent_level.in_chain_index = parent_index;
@@ -499,7 +513,7 @@ impl ShareChain for InMemoryShareChain {
         self.submit_block_with_lock(
             &mut block_levels_write_lock,
             block,
-            self.block_validation_params.clone(),
+            &self.block_validation_params,
             false,
         )
         .await
@@ -516,7 +530,7 @@ impl ShareChain for InMemoryShareChain {
             self.submit_block_with_lock(
                 &mut block_levels_write_lock,
                 &block,
-                self.block_validation_params.clone(),
+                &self.block_validation_params,
                 true,
             )
             .await?;
