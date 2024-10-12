@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     net::{AddrParseError, SocketAddr},
     str::FromStr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
 };
 
 use log::{error, info};
@@ -21,7 +21,7 @@ use crate::{
         config,
         grpc,
         grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
-        http::{server::HttpServer, stats::cache::StatsCache},
+        http::server::HttpServer,
         p2p,
         p2p::peer_store::PeerStore,
         stats_store::StatsStore,
@@ -112,8 +112,6 @@ where S: ShareChain
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
-        let http_stats_cache = Arc::new(StatsCache::default());
-
         let query_client = p2p_service.create_query_client();
         let stats_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
@@ -123,7 +121,6 @@ where S: ShareChain
                 stats_store.clone(),
                 config.http_server.port,
                 config.p2p_service.squad.clone(),
-                http_stats_cache.clone(),
                 query_client,
                 shutdown_signal.clone(),
             )))

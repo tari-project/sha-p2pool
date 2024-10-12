@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use axum::{routing::get, Router};
-use digest::consts::P2;
 use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
@@ -12,11 +11,7 @@ use tokio::{io, sync::mpsc::Sender};
 
 use crate::{
     server::{
-        http::{
-            health,
-            stats::{cache::StatsCache, handlers},
-            version,
-        },
+        http::{health, stats::handlers, version},
         p2p::{peer_store::PeerStore, P2pServiceQuery, Squad},
         stats_store::StatsStore,
     },
@@ -55,7 +50,6 @@ where S: ShareChain
     stats_store: Arc<StatsStore>,
     port: u16,
     squad: Squad,
-    stats_cache: Arc<StatsCache>,
     p2p_service_client: Sender<P2pServiceQuery>,
     shutdown_signal: ShutdownSignal,
 }
@@ -68,7 +62,6 @@ pub struct AppState {
     pub stats_store: Arc<StatsStore>,
     pub squad: Squad,
     pub p2p_service_client: Sender<P2pServiceQuery>,
-    pub stats_cache: Arc<StatsCache>,
 }
 
 impl<S> HttpServer<S>
@@ -81,7 +74,6 @@ where S: ShareChain
         stats_store: Arc<StatsStore>,
         port: u16,
         squad: Squad,
-        stats_cache: Arc<StatsCache>,
         p2p_service_client: Sender<P2pServiceQuery>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
@@ -92,7 +84,6 @@ where S: ShareChain
             stats_store,
             port,
             squad,
-            stats_cache,
             p2p_service_client,
             shutdown_signal,
         }
@@ -114,7 +105,6 @@ where S: ShareChain
                 stats_store: self.stats_store.clone(),
                 squad: self.squad.clone(),
                 p2p_service_client: self.p2p_service_client.clone(),
-                stats_cache: self.stats_cache.clone(),
             })
     }
 
