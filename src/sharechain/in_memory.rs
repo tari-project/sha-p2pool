@@ -60,7 +60,7 @@ pub(crate) struct BlockLevels {
 
 impl BlockLevels {
     pub fn get_at_height(&self, height: u64) -> Option<&BlockLevel> {
-        let tip = self.levels.front()?.height;
+        let tip = self.levels.back()?.height;
         if height > tip {
             return None;
         }
@@ -344,7 +344,7 @@ impl InMemoryShareChain {
 
         let block_levels_len = block_levels.levels.len();
 
-        let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
+        let tip_level = block_levels.levels.back().ok_or_else(|| Error::Empty)?;
         let tip_height = tip_level.height;
 
         warn!(target: LOG_TARGET, "dbg 3 orig, {}", timer.elapsed().as_millis());
@@ -539,7 +539,7 @@ impl InMemoryShareChain {
             coinbase_extras_lock.insert(miner_wallet_address.to_base58(), block.miner_coinbase_extra.clone());
         }
 
-        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.front().map(|b| b.height).unwrap_or_default());
+        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.back().map(|b| b.height).unwrap_or_default());
 
         Ok(())
     }
@@ -583,7 +583,7 @@ impl ShareChain for InMemoryShareChain {
 
     async fn tip_height(&self) -> ShareChainResult<u64> {
         let bl = self.block_levels.read().await;
-        let tip_level = bl.levels.front().map(|b| b.height).unwrap_or_default();
+        let tip_level = bl.levels.back().map(|b| b.height).unwrap_or_default();
         Ok(tip_level)
     }
 
@@ -692,7 +692,7 @@ impl ShareChain for InMemoryShareChain {
         let block_levels_read_lock = self.block_levels.read().await;
         let last_block = block_levels_read_lock
             .levels
-            .front()
+            .back()
             .ok_or_else(|| Error::Empty)?
             .block_in_main_chain()
             .ok_or_else(|| Error::Empty)?;
@@ -726,7 +726,7 @@ impl ShareChain for InMemoryShareChain {
             return Ok(res);
         }
 
-        if block_levels_read_lock.levels.front().unwrap().height < from_height {
+        if block_levels_read_lock.levels.back().unwrap().height < from_height {
             return Ok(res);
         }
 

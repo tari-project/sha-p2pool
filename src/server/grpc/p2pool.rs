@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use digest::typenum::Diff;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
