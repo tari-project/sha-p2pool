@@ -22,6 +22,8 @@ pub enum Error {
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {0:?}")]
     InvalidBlock(Block),
+    #[error("Too many blocks in this level")]
+    TooManyBlocksInThisLevel,
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
     #[error("Difficulty calculation error: {0}")]

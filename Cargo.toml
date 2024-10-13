@@ -9,7 +9,7 @@ minotari_node_grpc_client = {git = "https://github.com/tari-project/tari.git"}
 tari_common = {git = "https://github.com/tari-project/tari.git"}
 tari_common_types = {git = "https://github.com/tari-project/tari.git"}
 tari_core = {git = "https://github.com/tari-project/tari.git"}
-tari_crypto = "0.20.1"
+# tari_crypto = "0.20.1"
 tari_shutdown = {git = "https://github.com/tari-project/tari.git"}
 tari_utilities = {version = "0.7", features = ["borsh"]}
 

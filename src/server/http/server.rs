@@ -4,21 +4,16 @@
 use std::sync::Arc;
 
 use axum::{routing::get, Router};
-use digest::consts::P2;
 use log::info;
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 use tokio::{io, sync::mpsc::Sender};
 
+use super::stats_collector::StatsClient;
 use crate::{
     server::{
-        http::{
-            health,
-            stats::{cache::StatsCache, handlers},
-            version,
-        },
+        http::{health, stats::handlers, version},
         p2p::{peer_store::PeerStore, P2pServiceQuery, Squad},
-        stats_store::StatsStore,
     },
     sharechain::ShareChain,
 };
@@ -46,53 +41,37 @@ pub enum Error {
     IO(#[from] io::Error),
 }
 
-pub struct HttpServer<S>
-where S: ShareChain
-{
-    share_chain_sha3x: Arc<S>,
-    share_chain_random_x: Arc<S>,
+pub struct HttpServer {
     peer_store: Arc<PeerStore>,
-    stats_store: Arc<StatsStore>,
+    stats_client: StatsClient,
     port: u16,
     squad: Squad,
-    stats_cache: Arc<StatsCache>,
     p2p_service_client: Sender<P2pServiceQuery>,
     shutdown_signal: ShutdownSignal,
 }
 
 #[derive(Clone)]
 pub struct AppState {
-    pub share_chain_sha3x: Arc<dyn ShareChain>,
-    pub share_chain_random_x: Arc<dyn ShareChain>,
     pub peer_store: Arc<PeerStore>,
-    pub stats_store: Arc<StatsStore>,
+    stats_client: StatsClient,
     pub squad: Squad,
     pub p2p_service_client: Sender<P2pServiceQuery>,
-    pub stats_cache: Arc<StatsCache>,
 }
 
-impl<S> HttpServer<S>
-where S: ShareChain
-{
+impl HttpServer {
     pub fn new(
-        share_chain_sha3x: Arc<S>,
-        share_chain_random_x: Arc<S>,
         peer_store: Arc<PeerStore>,
-        stats_store: Arc<StatsStore>,
+        stats_client: StatsClient,
         port: u16,
         squad: Squad,
-        stats_cache: Arc<StatsCache>,
         p2p_service_client: Sender<P2pServiceQuery>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
-            share_chain_sha3x,
-            share_chain_random_x,
             peer_store,
-            stats_store,
+            stats_client,
             port,
             squad,
-            stats_cache,
             p2p_service_client,
             shutdown_signal,
         }
@@ -108,13 +87,10 @@ where S: ShareChain
             .route("/chain", get(handlers::handle_chain))
             .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
-                share_chain_sha3x: self.share_chain_sha3x.clone(),
-                share_chain_random_x: self.share_chain_random_x.clone(),
                 peer_store: self.peer_store.clone(),
-                stats_store: self.stats_store.clone(),
+                stats_client: self.stats_client.clone(),
                 squad: self.squad.clone(),
                 p2p_service_client: self.p2p_service_client.clone(),
-                stats_cache: self.stats_cache.clone(),
             })
     }
 
