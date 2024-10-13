@@ -4405,7 +4405,6 @@ dependencies = [
  "tari_common",
  "tari_common_types",
  "tari_core",
- "tari_crypto",
  "tari_shutdown",
  "tari_utilities",
  "thiserror",
