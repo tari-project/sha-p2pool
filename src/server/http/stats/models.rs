@@ -95,13 +95,14 @@ pub struct Stats {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ChainStats {
     pub squad: SquadDetails,
-    pub num_of_miners: usize,
+    // pub num_of_miners: usize,
     pub share_chain_height: u64,
-    pub pool_hash_rate: String,
-    pub pool_total_earnings: MicroMinotari,
-    pub pool_total_estimated_earnings: EstimatedEarnings,
-    pub total_earnings: HashMap<String, u64>,
-    pub estimated_earnings: HashMap<String, EstimatedEarnings>,
-    pub miner_block_stats: BlockStats,
-    pub p2pool_block_stats: BlockStats,
+    pub share_chain_length: u64,
+    // pub pool_hash_rate: String,
+    // pub pool_total_earnings: MicroMinotari,
+    // pub pool_total_estimated_earnings: EstimatedEarnings,
+    // pub total_earnings: HashMap<String, u64>,
+    // pub estimated_earnings: HashMap<String, EstimatedEarnings>,
+    // pub miner_block_stats: BlockStats,
+    // pub p2pool_block_stats: BlockStats,
 }

@@ -38,16 +38,18 @@ use tonic::{Request, Response, Status};
 use crate::{
     server::{
         grpc::{error::Error, util, MAX_ACCEPTABLE_GRPC_TIMEOUT},
-        http::stats::{
-            algo_stat_key,
-            MINER_STAT_ACCEPTED_BLOCKS_COUNT,
-            MINER_STAT_REJECTED_BLOCKS_COUNT,
-            P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
-            P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+        http::{
+            stats::{
+                self,
+                algo_stat_key,
+                MINER_STAT_ACCEPTED_BLOCKS_COUNT,
+                MINER_STAT_REJECTED_BLOCKS_COUNT,
+                P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
+                P2POOL_STAT_REJECTED_BLOCKS_COUNT,
+            },
+            stats_collector::StatsBroadcastClient,
         },
-        p2p,
-        p2p::Squad,
-        stats_store::StatsStore,
+        p2p::{self, Squad},
     },
     sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
 };
@@ -78,8 +80,7 @@ where S: ShareChain
     share_chain_sha3x: Arc<S>,
     /// RandomX share chain
     share_chain_random_x: Arc<S>,
-    /// Stats store
-    stats_store: Arc<StatsStore>,
+    stats_broadcast: StatsBroadcastClient,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
     sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
@@ -100,11 +101,11 @@ where S: ShareChain
         p2p_client: p2p::ServiceClient,
         share_chain_sha3x: Arc<S>,
         share_chain_random_x: Arc<S>,
-        stats_store: Arc<StatsStore>,
         shutdown_signal: ShutdownSignal,
         random_x_factory: RandomXFactory,
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
+        stats_broadcast: StatsBroadcastClient,
         squad: Squad,
         coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
@@ -113,10 +114,10 @@ where S: ShareChain
             client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
+            stats_broadcast,
             p2p_client,
             share_chain_sha3x,
             share_chain_random_x,
-            stats_store,
             block_validation_params: BlockValidationParams::new(
                 random_x_factory,
                 consensus_manager.clone(),
@@ -145,9 +146,10 @@ where S: ShareChain
         match share_chain.submit_block(block).await {
             Ok(_) => {
                 warn!(target: LOG_TARGET, "dbg 2. {}", timer.elapsed().as_millis());
-                self.stats_store
-                    .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
-                    .await;
+                let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
+                // self.stats_store
+                // .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
+                // .await;
                 warn!(target: LOG_TARGET, "dbg 2. {}", timer.elapsed().as_millis());
                 let res = self
                     .p2p_client
@@ -162,9 +164,10 @@ where S: ShareChain
             },
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
-                self.stats_store
-                    .inc(&algo_stat_key(pow_algo, MINER_STAT_REJECTED_BLOCKS_COUNT), 1)
-                    .await;
+                let _ = self.stats_broadcast.send_miner_block_rejected(pow_algo);
+                // self.stats_store
+                // .inc(&algo_stat_key(pow_algo, MINER_STAT_REJECTED_BLOCKS_COUNT), 1)
+                // .await;
                 Ok(())
             },
         }
@@ -470,9 +473,10 @@ where S: ShareChain
                 Ok(_resp) => {
                     *max_difficulty = Difficulty::min();
                     warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
-                    self.stats_store
-                        .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
-                        .await;
+                    self.stats_broadcast.send_pool_block_accepted(pow_algo);
+                    // self.stats_store
+                        // .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
+                        // .await;
                     info!(
                         target: LOG_TARGET,
                         "💰 New matching block found and sent to network! Block hash: {}",
@@ -488,9 +492,10 @@ where S: ShareChain
                         origin_block_header.hash()
                     );
                     warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
-                    self.stats_store
-                        .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
-                        .await;
+                    // self.stats_store
+                    //     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
+                    //     .await;
+                    self.stats_broadcast.send_pool_block_rejected(pow_algo);
                     block.sent_to_main_chain = false;
                     self.submit_share_chain_block(&block).await?;
 
@@ -518,25 +523,16 @@ where S: ShareChain
 
         warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
         debug!(target: LOG_TARGET, "Trace - getting stats:{} ", timer.elapsed().as_millis());
-        let stats = self
-            .stats_store
-            .get_many(&[
-                algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT),
-                algo_stat_key(pow_algo, MINER_STAT_REJECTED_BLOCKS_COUNT),
-                algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT),
-                algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT),
-            ])
-            .await;
-        warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
-        info!(target: LOG_TARGET,
-            "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
-            max_difficulty.as_u64().to_formatted_string(&Locale::en),
-            network_difficulty.as_u64().to_formatted_string(&Locale::en),
-            stats[0],
-            stats[1],
-            stats[2],
-            stats[3]
-        );
+       warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
+        // info!(target: LOG_TARGET,
+        //     "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
+        //     max_difficulty.as_u64().to_formatted_string(&Locale::en),
+        //     network_difficulty.as_u64().to_formatted_string(&Locale::en),
+        //     stats[0],
+        //     stats[1],
+        //     stats[2],
+        //     stats[3]
+        // );
 
         warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
         if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
