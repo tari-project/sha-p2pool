@@ -150,7 +150,6 @@ where S: ShareChain
         info!(target: LOG_TARGET, "Starting gRPC server on port {}!", &grpc_port);
 
         tonic::transport::Server::builder()
-            .concurrency_limit_per_connection(1)
             .add_service(base_node_service)
             .add_service(p2pool_service)
             .serve_with_shutdown(

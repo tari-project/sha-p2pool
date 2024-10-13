@@ -54,7 +54,7 @@ const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 
 pub(crate) struct BlockLevels {
     cached_shares: Option<Vec<NewBlockCoinbase>>,
-    levels: AllocRingBuffer<BlockLevel>,
+    levels: VecDeque<BlockLevel>,
     tip_target_difficulty: Difficulty,
 }
 
@@ -67,6 +67,12 @@ impl BlockLevels {
         let index = tip.checked_sub(height);
         self.levels
             .get(usize::try_from(index?).expect("32 bit systems not supported"))
+    }
+
+    pub fn ensure_size(&mut self) {
+        while self.levels.len() > MAX_BLOCKS_COUNT {
+            self.levels.pop_back();
+        }
     }
 }
 
@@ -138,8 +144,8 @@ impl InMemoryShareChain {
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
-        let mut levels = AllocRingBuffer::new(MAX_BLOCKS_COUNT + 1);
-        levels.push(BlockLevel::new(vec![genesis_block()], 0));
+        let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
+        levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
         let block_levels = BlockLevels {
             cached_shares: None,
             levels,
@@ -337,14 +343,15 @@ impl InMemoryShareChain {
             // TODO: Validate the block
             block_levels
                 .levels
-                .push(BlockLevel::new(vec![block.clone()], block.height));
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
+            block_levels.ensure_size();
             block_levels.tip_target_difficulty = min_diff;
             return Ok(());
         }
 
         let block_levels_len = block_levels.levels.len();
 
-        let tip_level = block_levels.levels.back().ok_or_else(|| Error::Empty)?;
+        let tip_level = block_levels.levels.front().ok_or_else(|| Error::Empty)?;
         let tip_height = tip_level.height;
 
         warn!(target: LOG_TARGET, "dbg 3 orig, {}", timer.elapsed().as_millis());
@@ -360,8 +367,9 @@ impl InMemoryShareChain {
             warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
             block_levels
                 .levels
-                .push(BlockLevel::new(vec![block.clone()], block.height));
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
             block_levels.tip_target_difficulty = min_diff;
+            block_levels.ensure_size();
             warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
             return Ok(());
         }
@@ -373,9 +381,10 @@ impl InMemoryShareChain {
             block_levels.levels.clear();
             block_levels
                 .levels
-                .push(BlockLevel::new(vec![block.clone()], block.height));
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
             warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
             block_levels.tip_target_difficulty = min_diff;
+            block_levels.ensure_size();
             return Ok(());
         }
         warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
@@ -432,7 +441,7 @@ impl InMemoryShareChain {
         warn!(target: LOG_TARGET, "dbg 3, {}", timer.elapsed().as_millis());
         // note: this is an approximation, wait for actual implementation to be accurate.
         let mut lwma = LinearWeightedMovingAverage::new(90, 10).expect("Failed to create LWMA");
-        for level in block_levels.levels.iter() {
+        for level in block_levels.levels.iter().rev() {
             let main_block = level
                 .block_in_main_chain()
                 .ok_or_else(|| Error::BlockValidation(format!("No main block in level: {:?}", level.height)))?;
@@ -486,7 +495,7 @@ impl InMemoryShareChain {
                 .find(|(_i, b)| b.hash == current_block_hash)
                 .ok_or_else(|| {
                     Error::BlockValidation(format!(
-                        "Block parent is not found in levels. parent height: {}, parent hash: {}",
+                        "Block parent is not found in levels for reorg. parent height: {}, parent hash: {}",
                         parent_height,
                         block.prev_hash.to_hex()
                     ))
@@ -522,7 +531,7 @@ impl InMemoryShareChain {
         if level_index == 0 {
             block_levels
                 .levels
-                .push(BlockLevel::new(vec![block.clone()], block.height));
+                .push_front(BlockLevel::new(vec![block.clone()], block.height));
             block_levels.tip_target_difficulty = next_target_difficulty;
         } else {
             block_levels
@@ -539,7 +548,7 @@ impl InMemoryShareChain {
             coinbase_extras_lock.insert(miner_wallet_address.to_base58(), block.miner_coinbase_extra.clone());
         }
 
-        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.back().map(|b| b.height).unwrap_or_default());
+        info!(target: LOG_TARGET, "[{:?}] ✅ Block added: {:?} Tip is now {}", self.pow_algo, block.height, block_levels.levels.front().map(|b| b.height).unwrap_or_default());
 
         Ok(())
     }
@@ -583,7 +592,7 @@ impl ShareChain for InMemoryShareChain {
 
     async fn tip_height(&self) -> ShareChainResult<u64> {
         let bl = self.block_levels.read().await;
-        let tip_level = bl.levels.back().map(|b| b.height).unwrap_or_default();
+        let tip_level = bl.levels.front().map(|b| b.height).unwrap_or_default();
         Ok(tip_level)
     }
 
@@ -692,7 +701,7 @@ impl ShareChain for InMemoryShareChain {
         let block_levels_read_lock = self.block_levels.read().await;
         let last_block = block_levels_read_lock
             .levels
-            .back()
+            .front()
             .ok_or_else(|| Error::Empty)?
             .block_in_main_chain()
             .ok_or_else(|| Error::Empty)?;
