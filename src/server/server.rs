@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     net::{AddrParseError, SocketAddr},
     str::FromStr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
 };
 
 use log::{error, info};
@@ -16,15 +16,15 @@ use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
+use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
     server::{
         config,
         grpc,
         grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
-        http::{server::HttpServer, stats::cache::StatsCache},
+        http::server::HttpServer,
         p2p,
         p2p::peer_store::PeerStore,
-        stats_store::StatsStore,
     },
     sharechain::ShareChain,
 };
@@ -51,7 +51,8 @@ where S: ShareChain
     p2p_service: p2p::Service<S>,
     base_node_grpc_service: Option<BaseNodeServer<TariBaseNodeGrpc>>,
     p2pool_grpc_service: Option<ShaP2PoolServer<ShaP2PoolGrpc<S>>>,
-    stats_server: Option<Arc<HttpServer<S>>>,
+    http_server: Option<Arc<HttpServer>>,
+    stats_collector: Option<StatsCollector>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -69,7 +70,10 @@ where S: ShareChain
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
         let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
-        let stats_store = Arc::new(StatsStore::new());
+        let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
+        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+        let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
+        let stats_client = stats_collector.create_client();
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
@@ -98,11 +102,11 @@ where S: ShareChain
                 p2p_service.client(),
                 share_chain_sha3x.clone(),
                 share_chain_random_x.clone(),
-                stats_store.clone(),
                 shutdown_signal.clone(),
                 randomx_factory,
                 consensus_manager,
                 genesis_block_hash,
+                stats_broadcast_client,
                 config.p2p_service.squad.clone(),
                 coinbase_extras_sha3x.clone(),
                 coinbase_extras_random_x.clone(),
@@ -112,18 +116,13 @@ where S: ShareChain
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
-        let http_stats_cache = Arc::new(StatsCache::default());
-
         let query_client = p2p_service.create_query_client();
-        let stats_server = if config.http_server.enabled {
+        let http_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
-                share_chain_sha3x.clone(),
-                share_chain_random_x.clone(),
                 network_peer_store.clone(),
-                stats_store.clone(),
+                stats_client,
                 config.http_server.port,
                 config.p2p_service.squad.clone(),
-                http_stats_cache.clone(),
                 query_client,
                 shutdown_signal.clone(),
             )))
@@ -136,7 +135,8 @@ where S: ShareChain
             p2p_service,
             base_node_grpc_service: base_node_grpc_server,
             p2pool_grpc_service: p2pool_server,
-            stats_server,
+            http_server,
+            stats_collector: Some(stats_collector),
             shutdown_signal,
         })
     }
@@ -182,15 +182,28 @@ where S: ShareChain
                 {
                     error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
                 }
+                info!(target: LOG_TARGET, "GRPC Server stopped!");
             });
         }
 
-        if let Some(stats_server) = &self.stats_server {
-            let stats_server = stats_server.clone();
+        let stats_server = self.stats_collector.take();
+        if let Some(mut stats_server) = stats_server {
             tokio::spawn(async move {
-                if let Err(error) = stats_server.start().await {
+                if let Err(err) = stats_server.run().await {
+                    error!(target: LOG_TARGET, "Stats collector encountered an error: {:?}", err);
+                }
+
+                info!(target: LOG_TARGET, "Stats collector stopped!");
+            });
+        }
+
+        if let Some(http_server) = &self.http_server {
+            let http_server = http_server.clone();
+            tokio::spawn(async move {
+                if let Err(error) = http_server.start().await {
                     error!(target: LOG_TARGET, "Stats HTTP server encountered an error: {:?}", error);
                 }
+                info!(target: LOG_TARGET, "Stats HTTP server stopped!");
             });
         }
 

@@ -4,4 +4,5 @@
 mod health;
 pub mod server;
 pub mod stats;
+pub mod stats_collector;
 mod version;
