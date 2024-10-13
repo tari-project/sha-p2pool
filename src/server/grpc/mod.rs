@@ -8,4 +8,4 @@ pub mod error;
 pub mod p2pool;
 pub mod util;
 
-pub(crate) const MAX_ACCEPTABLE_GRPC_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20000);
+pub(crate) const MAX_ACCEPTABLE_GRPC_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);

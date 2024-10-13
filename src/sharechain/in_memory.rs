@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::{pow_algo, NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
-use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,

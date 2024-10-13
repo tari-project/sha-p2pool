@@ -1088,13 +1088,14 @@ where S: ShareChain
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         // TODO: Not sure why this is done on a loop instead of just once....
-        let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
-        kademlia_bootstrap_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        // let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
+        // kademlia_bootstrap_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let shutdown_signal = self.shutdown_signal.clone();
         tokio::pin!(shutdown_signal);
 
         loop {
             select! {
+                biased;
                 _ = &mut shutdown_signal => {
                     info!(target: LOG_TARGET,"Shutting down p2p service...");
                     return Ok(());
@@ -1111,13 +1112,14 @@ where S: ShareChain
                     }
                 }
                 },
-                event = self.swarm.select_next_some() => {
-                   self.handle_event(event).await;
-                }
+
                 block = self.client_broadcast_block_rx.recv() => {
                     dbg!("client broadcast");
                     self.broadcast_block(block).await;
-                }
+                },
+                event = self.swarm.select_next_some() => {
+                    self.handle_event(event).await;
+                 },
                 _ = publish_peer_info_interval.tick() => {
                     dbg!("pub peer");
                     info!(target: LOG_TARGET, "pub peer info");
@@ -1142,35 +1144,36 @@ where S: ShareChain
                         }
                     }
                 },
+
                 res = self.snooze_block_rx.recv() => {
                     info!(target: LOG_TARGET, "snooze block");
                          dbg!("snooze");
-                         if let Some((snoozes_left, block)) = res {
-                            let snooze_sender = self.snooze_block_tx.clone();
-                            let share_chain = match block.original_block_header.pow.pow_algo {
-                                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-                                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-                            };
-                         tokio::spawn(async move {
-                            warn!(target: LOG_TARGET, "Trying snoozed block again after {snoozes_left} snoozes left...");
-                            tokio::time::sleep(MAX_SNOOZE_DURATION).await;
-                            // self.sync_share_chain(
-                                // payload.original_block_header.pow.pow_algo,
-                                // Some(peer),
-                                // Some(payload.height.saturating_sub(num_missing_parents)),
-                            // )
-                            // .await;
-                            if let Ok((snoozed, _num_missing_parents)) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
-                                if snoozed && snoozes_left > 1 {
-                                    let _ = snooze_sender.send((snoozes_left - 1, block)).await;
-                                }
-                            } else {
-                                error!(target: LOG_TARGET, "Failed to add snoozed block to share chain");
-                            }
-                         });
-                        } else {
-                            error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
-                        }
+                        //  if let Some((snoozes_left, block)) = res {
+                        //     let snooze_sender = self.snooze_block_tx.clone();
+                        //     let share_chain = match block.original_block_header.pow.pow_algo {
+                        //         PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                        //         PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+                        //     };
+                        //  tokio::spawn(async move {
+                        //     warn!(target: LOG_TARGET, "Trying snoozed block again after {snoozes_left} snoozes left...");
+                        //     tokio::time::sleep(MAX_SNOOZE_DURATION).await;
+                        //     // self.sync_share_chain(
+                        //         // payload.original_block_header.pow.pow_algo,
+                        //         // Some(peer),
+                        //         // Some(payload.height.saturating_sub(num_missing_parents)),
+                        //     // )
+                        //     // .await;
+                        //     if let Ok((snoozed, _num_missing_parents)) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
+                        //         if snoozed && snoozes_left > 1 {
+                        //             let _ = snooze_sender.send((snoozes_left - 1, block)).await;
+                        //         }
+                        //     } else {
+                        //         error!(target: LOG_TARGET, "Failed to add snoozed block to share chain");
+                        //     }
+                        //  });
+                        // } else {
+                        //     error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
+                        // }
                 },
                 // req = self.share_chain_sync_rx.recv() => {
                 //     dbg!("share chain sync rx");
@@ -1184,13 +1187,6 @@ where S: ShareChain
                 //         }
                 //     }
                 // },
-                _ = kademlia_bootstrap_interval.tick() => {
-                    dbg!("kad boot");
-                    info!(target: LOG_TARGET, "kad bootstrap event");
-                    if let Err(error) = self.bootstrap_kademlia() {
-                        warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to do kademlia bootstrap: {error:?}");
-                    }
-                }
             }
         }
     }
