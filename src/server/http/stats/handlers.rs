@@ -192,13 +192,13 @@ async fn get_chain_stats(state: AppState, algo: PowAlgorithm) -> Result<ChainSta
 
     // connected
 
-    let shares = share_chain
-        .miners_with_shares(state.squad.clone())
-        .await
-        .map_err(|error| {
-            error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // let shares = share_chain
+    //     .miners_with_shares(state.squad.clone())
+    //     .await
+    //     .map_err(|error| {
+    //         error!(target: LOG_TARGET, "Failed to get miners with shares: {error:?}");
+    //         StatusCode::INTERNAL_SERVER_ERROR
+    //     })?;
 
     // TODO: Remove this field
 
@@ -214,7 +214,8 @@ async fn get_chain_stats(state: AppState, algo: PowAlgorithm) -> Result<ChainSta
     })?;
 
     let result = ChainStats {
-        num_of_miners: shares.keys().len(),
+        // num_of_miners: shares.keys().len(),
+        num_of_miners: 0,
         share_chain_height,
         pool_hash_rate: pool_hash_rate.to_string(),
         pool_total_earnings: MicroMinotari::from(0),

@@ -301,6 +301,7 @@ where S: ShareChain
                 // Never go higher than the network.
                 target_difficulty = actual_diff;
             }
+            dbg!(target_difficulty);
             if let Some(miner_data) = response.miner_data.as_mut() {
                 miner_data.target_difficulty = target_difficulty.as_u64();
             }
