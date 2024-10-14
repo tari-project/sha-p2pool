@@ -42,7 +42,6 @@ pub enum Error {
 }
 
 pub struct HttpServer {
-    peer_store: Arc<PeerStore>,
     stats_client: StatsClient,
     port: u16,
     squad: Squad,
@@ -52,7 +51,6 @@ pub struct HttpServer {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub peer_store: Arc<PeerStore>,
     stats_client: StatsClient,
     pub squad: Squad,
     pub p2p_service_client: Sender<P2pServiceQuery>,
@@ -60,7 +58,6 @@ pub struct AppState {
 
 impl HttpServer {
     pub fn new(
-        peer_store: Arc<PeerStore>,
         stats_client: StatsClient,
         port: u16,
         squad: Squad,
@@ -68,7 +65,6 @@ impl HttpServer {
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
-            peer_store,
             stats_client,
             port,
             squad,
@@ -87,7 +83,6 @@ impl HttpServer {
             .route("/chain", get(handlers::handle_chain))
             .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
-                peer_store: self.peer_store.clone(),
                 stats_client: self.stats_client.clone(),
                 squad: self.squad.clone(),
                 p2p_service_client: self.p2p_service_client.clone(),

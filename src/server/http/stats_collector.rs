@@ -19,8 +19,9 @@ pub(crate) struct StatsCollector {
     miner_rejected: u64,
     pool_accepted: u64,
     pool_rejected: u64,
-    max_difficulty: Difficulty,
     network_difficulty: Difficulty,
+    chain_height: u64,
+    chain_length: u64,
 }
 
 impl StatsCollector {
@@ -36,7 +37,8 @@ impl StatsCollector {
             miner_rejected: 0,
             pool_accepted: 0,
             pool_rejected: 0,
-            max_difficulty: Difficulty::min(),
+            chain_height: 0,
+            chain_length: 0,
             network_difficulty: Difficulty::min(),
         }
     }
@@ -62,6 +64,10 @@ impl StatsCollector {
             StatData::PoolBlockRejected { pow_algo, .. } => {
                 self.pool_rejected += 1;
             },
+            StatData::ChainChanged { height, length, .. } => {
+                self.chain_height = height;
+                self.chain_length = length;
+            },
         }
     }
 
@@ -76,8 +82,9 @@ impl StatsCollector {
                 },
                 _ = stats_report_timer.tick() => {
                     info!(target: LOG_TARGET,
-                            "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
-                            self.max_difficulty.as_u64().to_formatted_string(&Locale::en),
+                            "========= Chain Height {}. Chain Length {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
+                            self.chain_height,
+                            self.chain_length,
                             self.network_difficulty.as_u64().to_formatted_string(&Locale::en),
                             self.miner_accepted,
                             self.miner_rejected,
@@ -158,6 +165,11 @@ pub(crate) enum StatData {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
+    ChainChanged {
+        height: u64,
+        length: u64,
+        timestamp: EpochTime,
+    },
 }
 
 impl StatData {
@@ -168,6 +180,7 @@ impl StatData {
             StatData::MinerBlockRejected { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
             StatData::PoolBlockRejected { timestamp, .. } => *timestamp,
+            StatData::ChainChanged { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -230,6 +243,15 @@ impl StatsBroadcastClient {
     pub fn send_pool_block_rejected(&self, pow_algo: PowAlgorithm) -> Result<(), anyhow::Error> {
         let data = StatData::PoolBlockAccepted {
             pow_algo,
+            timestamp: EpochTime::now(),
+        };
+        self.broadcast(data)
+    }
+
+    pub fn send_chain_changed(&self, height: u64, length: u64) -> Result<(), anyhow::Error> {
+        let data = StatData::ChainChanged {
+            height,
+            length,
             timestamp: EpochTime::now(),
         };
         self.broadcast(data)

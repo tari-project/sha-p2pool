@@ -16,8 +16,12 @@ use tokio::sync::RwLock;
 
 use crate::{
     cli::args::{Cli, StartArgs},
-    server as main_server,
-    server::{p2p::Squad, Server},
+    server::{
+        self as main_server,
+        http::stats_collector::{StatsBroadcastClient, StatsCollector},
+        p2p::Squad,
+        Server,
+    },
     sharechain::{in_memory::InMemoryShareChain, BlockValidationParams, MAX_BLOCKS_COUNT},
 };
 
@@ -107,12 +111,18 @@ genesis_block_hash.to_hex());
         genesis_block_hash,
     ));
     let coinbase_extras_sha3x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+
+    let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
+    let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
+
     let share_chain_sha3x = InMemoryShareChain::new(
         MAX_BLOCKS_COUNT,
         PowAlgorithm::Sha3x,
         block_validation_params.clone(),
         consensus_manager.clone(),
         coinbase_extras_sha3x.clone(),
+        stats_broadcast_client.clone(),
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
@@ -121,6 +131,7 @@ genesis_block_hash.to_hex());
         block_validation_params.clone(),
         consensus_manager,
         coinbase_extras_random_x.clone(),
+        stats_broadcast_client.clone(),
     )?;
 
     Ok(Server::new(
@@ -129,6 +140,8 @@ genesis_block_hash.to_hex());
         share_chain_random_x,
         coinbase_extras_sha3x.clone(),
         coinbase_extras_random_x.clone(),
+        stats_collector,
+        stats_broadcast_client,
         shutdown_signal,
     )
     .await?)

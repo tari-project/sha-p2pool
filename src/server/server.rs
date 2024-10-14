@@ -54,6 +54,7 @@ where S: ShareChain
     http_server: Option<Arc<HttpServer>>,
     stats_collector: Option<StatsCollector>,
     shutdown_signal: ShutdownSignal,
+    stats_broadcast_client: StatsBroadcastClient,
 }
 
 impl<S> Server<S>
@@ -65,21 +66,21 @@ where S: ShareChain
         share_chain_random_x: S,
         coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        stats_collector: StatsCollector,
+        stats_broadcast_client: StatsBroadcastClient,
         shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let network_peer_store = Arc::new(PeerStore::new(&config.peer_store));
-        let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
+        let network_peer_store = PeerStore::new(&config.peer_store);
+
         let stats_client = stats_collector.create_client();
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
-            network_peer_store.clone(),
+            network_peer_store,
             shutdown_signal.clone(),
         )
         .await
@@ -106,7 +107,7 @@ where S: ShareChain
                 randomx_factory,
                 consensus_manager,
                 genesis_block_hash,
-                stats_broadcast_client,
+                stats_broadcast_client.clone(),
                 config.p2p_service.squad.clone(),
                 coinbase_extras_sha3x.clone(),
                 coinbase_extras_random_x.clone(),
@@ -119,7 +120,6 @@ where S: ShareChain
         let query_client = p2p_service.create_query_client();
         let http_server = if config.http_server.enabled {
             Some(Arc::new(HttpServer::new(
-                network_peer_store.clone(),
                 stats_client,
                 config.http_server.port,
                 config.p2p_service.squad.clone(),
@@ -138,6 +138,7 @@ where S: ShareChain
             http_server,
             stats_collector: Some(stats_collector),
             shutdown_signal,
+            stats_broadcast_client,
         })
     }
 

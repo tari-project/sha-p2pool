@@ -73,7 +73,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: Block {
-                version: 2,
+                version: 3,
                 chain_id: CURRENT_CHAIN_ID.clone(),
                 hash: Default::default(),
                 timestamp: EpochTime::now(),

@@ -66,7 +66,7 @@ impl PeerInfo {
     ) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         Self {
-            version: 2,
+            version: 3,
             current_sha3x_height,
             current_random_x_height,
             squad,

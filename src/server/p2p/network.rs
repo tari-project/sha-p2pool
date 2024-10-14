@@ -80,7 +80,7 @@ use crate::{
         p2p::{
             global_ip::GlobalIp,
             messages::{self, LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
-            peer_store::PeerStore,
+            peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
             Error,
             LibP2PError,
@@ -162,14 +162,14 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(30),
+            peer_info_publish_interval: Duration::from_secs(60), // 1 minute should maybe even be longer
             stable_peer: true,
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
             relay_server_enabled: false,
             squad: Squad::from("default".to_string()),
-            max_in_progress_sync_requests: 10,
+            max_in_progress_sync_requests: 5,
             user_agent: "tari-p2pool".to_string(),
         }
     }
@@ -236,7 +236,7 @@ where S: ShareChain
     port: u16,
     share_chain_sha3x: Arc<S>,
     share_chain_random_x: Arc<S>,
-    network_peer_store: Arc<PeerStore>,
+    network_peer_store: PeerStore,
     config: Config,
     sync_permits: Arc<AtomicU32>,
     shutdown_signal: ShutdownSignal,
@@ -264,7 +264,7 @@ where S: ShareChain
         config: &config::Config,
         share_chain_sha3x: Arc<S>,
         share_chain_random_x: Arc<S>,
-        network_peer_store: Arc<PeerStore>,
+        network_peer_store: PeerStore,
         shutdown_signal: ShutdownSignal,
     ) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config).await?;
@@ -350,19 +350,10 @@ where S: ShareChain
             .with_behaviour(|key_pair, relay_client| {
                 // .with_behaviour(move |key_pair, relay_client| {
                 // gossipsub
-                let message_id_fn = |message: &gossipsub::Message| {
-                    let mut s = DefaultHasher::new();
-                    if let Some(soure_peer) = message.source {
-                        soure_peer.to_bytes().hash(&mut s);
-                    }
-                    message.data.hash(&mut s);
-                    gossipsub::MessageId::from(s.finish().to_string())
-                };
+
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     // TODO: Reduce to 1 in future versions. This has to remain what is currently out there now
-                    .heartbeat_interval(Duration::from_secs(10))
                     // .validation_mode(gossipsub::ValidationMode::Strict)
-                     .message_id_fn(message_id_fn)
                     // .max_transmit_size(8192)
                     .build()
                     .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
@@ -628,14 +619,19 @@ where S: ShareChain
                         if let Ok((snoozed, num_missing_parents)) =
                             Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
                         {
-                            self.sync_share_chain(
-                                payload.original_block_header.pow.pow_algo,
-                                Some(peer),
-                                Some(payload.height.saturating_sub(num_missing_parents)),
-                            )
-                            .await;
-                            if snoozed {
-                                let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
+                            if self.sync_permits.load(Ordering::SeqCst) > 0 {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Max sync permits reached, skipping peer info sync");
+                            } else {
+                                self.sync_permits.fetch_sub(1, Ordering::SeqCst);
+                                self.sync_share_chain(
+                                    payload.original_block_header.pow.pow_algo,
+                                    peer,
+                                    Some(payload.height.saturating_sub(num_missing_parents)),
+                                )
+                                .await;
+                                if snoozed {
+                                    let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
+                                }
                             }
                         } else {
                             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add new block to share chain");
@@ -661,7 +657,20 @@ where S: ShareChain
         for addr in &payload.public_addresses {
             self.swarm.add_peer_address(peer, addr.clone());
         }
-        self.network_peer_store.add(peer, payload).await;
+        let add_status = self.network_peer_store.add(peer, payload).await;
+
+        match add_status {
+            AddPeerStatus::NewPeer | AddPeerStatus::Existing => {},
+            AddPeerStatus::Greylisted => {
+                info!(target: LOG_TARGET, "Added peer but it was grey listed");
+                return ControlFlow::Continue(());
+            },
+            AddPeerStatus::Blacklisted => {
+                info!(target: LOG_TARGET, "Added peer but it was black listed");
+                return ControlFlow::Continue(());
+            },
+        }
+
         if self.sync_permits.load(Ordering::SeqCst) == 0 {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Max sync permits reached, skipping peer info sync");
             return ControlFlow::Break(());
@@ -669,12 +678,6 @@ where S: ShareChain
 
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing peer info from {peer:?} with heights: RandomX: {current_randomx_height}, Sha3x: {current_sha3x_height}");
         self.sync_permits.fetch_sub(1, Ordering::SeqCst);
-        if let Ok(curr_height) = self.share_chain_sha3x.tip_height().await {
-            if curr_height < current_sha3x_height {
-                self.sync_share_chain(PowAlgorithm::Sha3x, Some(peer), Some(curr_height.saturating_sub(100)))
-                    .await;
-            }
-        }
 
         if self.sync_permits.load(Ordering::SeqCst) == 0 {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Max sync permits reached, skipping peer info sync");
@@ -684,7 +687,7 @@ where S: ShareChain
         self.sync_permits.fetch_sub(1, Ordering::SeqCst);
         if let Ok(curr_height) = self.share_chain_random_x.tip_height().await {
             if curr_height < current_randomx_height {
-                self.sync_share_chain(PowAlgorithm::RandomX, Some(peer), Some(curr_height.saturating_sub(100)))
+                self.sync_share_chain(PowAlgorithm::RandomX, peer, Some(curr_height.saturating_sub(100)))
                     .await;
             }
         }
@@ -780,7 +783,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: Option<PeerId>, from_tip: Option<u64>) {
+    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, from_tip: Option<u64>) {
         // if self.sync_in_progress.load(Ordering::SeqCst) {
         //     warn!(target: LOG_TARGET, "Sync already in progress...");
         //     return;
@@ -789,14 +792,17 @@ where S: ShareChain
 
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
-        if let Some(peer_id) = peer {
-            info!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer_id:?}");
-            self.swarm
-                .behaviour_mut()
-                .share_chain_sync
-                .send_request(&peer_id, ShareChainSyncRequest::new(algo, from_tip.unwrap_or(0)));
+        if !self.network_peer_store.is_whitelisted(&peer) {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, skipping sync");
             return;
         }
+
+        info!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer:?}");
+        self.swarm
+            .behaviour_mut()
+            .share_chain_sync
+            .send_request(&peer, ShareChainSyncRequest::new(algo, from_tip.unwrap_or(0)));
+        return;
 
         // match self.squad_peer_store.tip_of_block_height(algo).await {
         //     Some(result) => {
@@ -884,6 +890,8 @@ where S: ShareChain
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                         // Unlock the permit
                         self.sync_permits.fetch_add(1, Ordering::SeqCst);
+                        self.network_peer_store.move_to_grey_list(peer).await;
+
                         // Remove peer from peer store to try to sync from another peer,
                         // if the peer goes online/accessible again, the peer store will have it again.
                         // self.network_peer_store.remove(&peer).await;
@@ -1123,12 +1131,6 @@ where S: ShareChain
                 _ = publish_peer_info_interval.tick() => {
                     dbg!("pub peer");
                     info!(target: LOG_TARGET, "pub peer info");
-                    // handle case when we have some peers removed
-                    let expired_peers = self.network_peer_store.cleanup().await;
-                    for exp_peer in expired_peers {
-                        self.swarm.behaviour_mut().kademlia.remove_peer(&exp_peer);
-                     //   self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&exp_peer);
-                    }
 
                     // broadcast peer info
                     info!(target: LOG_TARGET, squad = &self.config.squad; "Peer count: {:?}", self.network_peer_store.peer_count().await);
@@ -1343,10 +1345,6 @@ where S: ShareChain
         self.main_loop().await?;
         info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())
-    }
-
-    pub fn network_peer_store(&self) -> Arc<PeerStore> {
-        self.network_peer_store.clone()
     }
 }
 

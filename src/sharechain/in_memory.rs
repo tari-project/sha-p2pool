@@ -33,6 +33,7 @@ use crate::{
     main,
     server::{
         grpc::{p2pool::min_difficulty, util::convert_coinbase_extra},
+        http::stats_collector::StatsBroadcastClient,
         p2p::Squad,
     },
     sharechain::{
@@ -82,6 +83,7 @@ pub(crate) struct InMemoryShareChain {
     block_validation_params: Arc<BlockValidationParams>,
     consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    stat_client: StatsBroadcastClient,
 }
 
 const MAX_BLOCKS_PER_LEVEL: usize = 10;
@@ -142,6 +144,7 @@ impl InMemoryShareChain {
         block_validation_params: Arc<BlockValidationParams>,
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        stat_client: StatsBroadcastClient,
     ) -> Result<Self, Error> {
         let mut levels = VecDeque::with_capacity(MAX_BLOCKS_COUNT + 1);
         levels.push_front(BlockLevel::new(vec![genesis_block()], 0));
@@ -157,6 +160,7 @@ impl InMemoryShareChain {
             block_validation_params,
             consensus_manager,
             coinbase_extras,
+            stat_client,
         })
     }
 
@@ -546,9 +550,19 @@ impl ShareChain for InMemoryShareChain {
 
     async fn submit_block(&self, block: &Block) -> ShareChainResult<()> {
         let mut block_levels_write_lock = self.block_levels.write().await;
-        self.submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)
-            .await
+        let res = self
+            .submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)
+            .await;
+        let _ = self.stat_client.send_chain_changed(
+            block_levels_write_lock
+                .levels
+                .front()
+                .map(|b| b.height)
+                .unwrap_or_default(),
+            block_levels_write_lock.levels.len() as u64,
+        );
 
+        res
         // let chain = self.chain(block_levels_write_lock.iter());
         // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
         // info!(target: LOG_TARGET, "[{:?}] ⬆️ Current height: {:?}", self.pow_algo, last_block.height);
@@ -561,6 +575,15 @@ impl ShareChain for InMemoryShareChain {
             self.submit_block_with_lock(&mut block_levels_write_lock, &block, &self.block_validation_params)
                 .await?;
         }
+
+        let _ = self.stat_client.send_chain_changed(
+            block_levels_write_lock
+                .levels
+                .front()
+                .map(|b| b.height)
+                .unwrap_or_default(),
+            block_levels_write_lock.levels.len() as u64,
+        );
         Ok(())
     }
 

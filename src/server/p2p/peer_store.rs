@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     sync::RwLock,
     time::{Duration, Instant},
 };
@@ -27,8 +28,7 @@ pub struct PeerStoreConfig {
 impl Default for PeerStoreConfig {
     fn default() -> Self {
         Self {
-            peer_record_ttl: Duration::from_secs(10),
-            // peers_max_fail: 2,
+            peer_record_ttl: Duration::from_secs(60 * 60),
         }
     }
 }
@@ -62,33 +62,31 @@ impl PeerStoreRecord {
 //     }
 // }
 
+pub enum AddPeerStatus {
+    NewPeer,
+    Existing,
+    Blacklisted,
+    Greylisted,
+}
+
 /// A peer store, which stores all the known peers (from broadcasted [`PeerInfo`] messages) in-memory.
 /// This implementation is thread safe and async, so an [`Arc<PeerStore>`] is enough to be used to share.
 pub struct PeerStore {
-    peers: Cache<PeerId, PeerStoreRecord>,
-    /// Max time to live for the items to avoid non-existing peers in list.
-    ttl: Duration,
-    // peers_max_fail: u64,
-    /// Peer with the highest share chain height in SHA-3 share chain.
-    // tip_of_block_height_sha3x: RwLock<Option<PeerStoreBlockHeightTip>>,
-    /// Peer with the highest share chain height in RandomX share chain.
-    // tip_of_block_height_random_x: RwLock<Option<PeerStoreBlockHeightTip>>,
-    /// The last time when we had more than 0 peers.
-    last_connected: RwLock<Option<EpochTime>>,
-    // peer_removals: Cache<PeerId, u64>,
-    // banned_peers: Cache<PeerId, ()>,
+    whitelist_peers: Cache<PeerId, PeerStoreRecord>,
+    greylist_peers: HashSet<PeerId>,
+    blacklist_peers: HashSet<PeerId>,
 }
 
 impl PeerStore {
     /// Constructs a new peer store with config.
     pub fn new(config: &PeerStoreConfig) -> Self {
         Self {
-            peers: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
-            ttl: config.peer_record_ttl,
+            whitelist_peers: CacheBuilder::new(10000).time_to_live(config.peer_record_ttl).build(),
+            greylist_peers: HashSet::new(),
+            blacklist_peers: HashSet::new(),
             // peers_max_fail: config.peers_max_fail,
             // tip_of_block_height_sha3x: RwLock::new(None),
             // tip_of_block_height_random_x: RwLock::new(None),
-            last_connected: RwLock::new(None),
             // peer_removals: CacheBuilder::new(100_000).time_to_live(config.peer_record_ttl).build(),
             // banned_peers: CacheBuilder::new(100_000).time_to_live(PEER_BAN_TIME).build(),
         }
@@ -96,7 +94,7 @@ impl PeerStore {
 
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
-    pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) {
+    pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
         dbg!(&peer_info);
         // if self.banned_peers.contains_key(&peer_id) {
         // return;
@@ -107,12 +105,29 @@ impl PeerStore {
         // self.peer_removals.remove(&peer_id).await;
         // self.banned_peers.insert(peer_id, ()).await;
         // } else {
-        self.peers.insert(peer_id, PeerStoreRecord::new(peer_info)).await;
+        if self.blacklist_peers.contains(&peer_id) {
+            return AddPeerStatus::Blacklisted;
+        }
+
+        if self.greylist_peers.contains(&peer_id) {
+            return AddPeerStatus::Greylisted;
+        }
+
+        if self.whitelist_peers.contains_key(&peer_id) {
+            self.whitelist_peers
+                .insert(peer_id, PeerStoreRecord::new(peer_info))
+                .await;
+            return AddPeerStatus::Existing;
+        }
+
+        self.whitelist_peers
+            .insert(peer_id, PeerStoreRecord::new(peer_info))
+            .await;
         // self.peer_removals.insert(peer_id, removal_count).await;
         // }
 
         // self.set_tip_of_block_heights().await;
-        self.set_last_connected().await;
+        AddPeerStatus::NewPeer
     }
 
     /// Removes a peer from store.
@@ -145,19 +160,28 @@ impl PeerStore {
     // }
 
     /// Collects all current squads from all PeerInfo collected from broadcasts.
-    pub async fn squads(&self) -> Vec<Squad> {
-        self.peers
-            .iter()
-            .map(|(_, record)| record.peer_info.squad)
-            .unique()
-            .collect_vec()
-    }
-
+    // pub async fn squads(&self) -> Vec<Squad> {
+    //     self.peers
+    //         .iter()
+    //         .map(|(_, record)| record.peer_info.squad)
+    //         .unique()
+    //         .collect_vec()
+    // }
     /// Returns count of peers.
     /// Note: it is needed to calculate number of validations needed to make sure a new block is valid.
     pub async fn peer_count(&self) -> u64 {
-        self.set_last_connected().await;
-        self.peers.entry_count()
+        self.whitelist_peers.entry_count()
+    }
+
+    pub async fn move_to_grey_list(&mut self, peer_id: PeerId) {
+        if self.whitelist_peers.contains_key(&peer_id) {
+            self.whitelist_peers.remove(&peer_id).await;
+            self.greylist_peers.insert(peer_id);
+        }
+    }
+
+    pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
+        self.whitelist_peers.contains_key(peer_id)
     }
 
     // async fn set_tip_of_block_heights(&self) {
@@ -206,7 +230,7 @@ impl PeerStore {
     // }
     // }
 
-    /// Returns peer with the highest share chain height.
+    // Returns peer with the highest share chain height.
     // pub async fn tip_of_block_height(&self, pow: PowAlgorithm) -> Option<PeerStoreBlockHeightTip> {
     //     let tip_of_block_height = match pow {
     //         PowAlgorithm::RandomX => &self.tip_of_block_height_random_x,
@@ -219,45 +243,4 @@ impl PeerStore {
     //     }
     //     None
     // }
-
-    /// Clean up expired peers.
-    pub async fn cleanup(&self) -> Vec<PeerId> {
-        let mut expired_peers = vec![];
-
-        for (k, v) in &self.peers {
-            debug!(target: LOG_TARGET, "{:?} -> {:?}", k, v);
-            let elapsed = v.created.elapsed();
-            let expired = elapsed.gt(&self.ttl);
-            debug!(target: LOG_TARGET, "{:?} ttl elapsed: {:?} <-> {:?}, Expired: {:?}", k, elapsed, &self.ttl, expired);
-            if expired {
-                expired_peers.push(*k);
-                self.peers.remove(k.as_ref()).await;
-            }
-        }
-
-        // self.set_tip_of_block_heights().await;
-        self.set_last_connected().await;
-
-        expired_peers
-    }
-
-    pub async fn set_last_connected(&self) {
-        if let Ok(mut last_connected) = self.last_connected.write() {
-            if self.peers.entry_count() > 0 {
-                if last_connected.is_none() {
-                    let _ = last_connected.insert(EpochTime::now());
-                }
-            } else {
-                *last_connected = None;
-            }
-        }
-    }
-
-    pub fn last_connected(&self) -> Option<EpochTime> {
-        if let Ok(last_connected) = self.last_connected.read() {
-            return *last_connected;
-        }
-
-        None
-    }
 }
