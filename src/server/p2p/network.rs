@@ -927,8 +927,8 @@ where S: ShareChain
                     _ => {},
                 },
                 ServerNetworkBehaviourEvent::RelayServer(event) => {
-                    debug!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
-                    dbg!("relay server");
+                    warn!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
+                    dbg!("relay server", &event);
                 },
                 ServerNetworkBehaviourEvent::RelayClient(event) => {
                     debug!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
@@ -949,19 +949,29 @@ where S: ShareChain
             return;
         }
 
-        // if self.swarm.external_addresses().count() == 0 {
-        //     // Check if we can relay
-        //     // warn!(target: LOG_TARGET, "No external addresses");
-        //     // self.swarm.add_external_address(info.observed_addr.clone());
+        if self.swarm.external_addresses().count() > 0 {
+            warn!(target: LOG_TARGET, "No need to relay, we have an external address already. {}", self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));  
+            // Check if we can relay
+            // warn!(target: LOG_TARGET, "No external addresses");
+            // self.swarm.add_external_address(info.observed_addr.clone());
+            info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
+            return;
+        }
 
         let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
 
         // adding peer to kademlia and gossipsub
         for addr in info.listen_addrs {
             // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
-            if Self::is_p2p_address(&addr) && addr.is_global_ip() && is_relay {
+            if Self::is_p2p_address(&addr) 
+            // && addr.is_global_ip() 
+            && is_relay {
                 let mut lock = self.relay_store.write().await;
-                lock.add_possible_relay(peer_id, addr);
+                if lock.add_possible_relay(peer_id, addr.clone()) {
+                    info!(target: LOG_TARGET, "Added possible relay: {peer_id:?} -> {addr:?}");
+                    drop(lock);
+                    self.attempt_relay_reservation().await;
+                }
             }
         }
         // }
@@ -994,11 +1004,11 @@ where S: ShareChain
                 },
                 NatStatus::Private => {
                     warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
-                    let lock = self.relay_store.read().await;
-                    if !lock.has_active_relay() {
-                        drop(lock);
-                        self.attempt_relay_reservation().await;
-                    }
+                    // let lock = self.relay_store.read().await;
+                    // if !lock.has_active_relay() {
+                    // drop(lock);
+                    self.attempt_relay_reservation().await;
+                    // }
                 },
                 _ => {
                     debug!(target: LOG_TARGET, "[AUTONAT] Ignoring unknown status {new:?}");
@@ -1012,16 +1022,18 @@ where S: ShareChain
 
     async fn attempt_relay_reservation(&mut self) {
         dbg!("Attempt relay reservation");
-        let mut lock = self.relay_store.write().await;
-        if lock.has_active_relay() {
-            // dbg!("Already have an active relay");
-            return;
-        }
+
         // Can happen that a previous lock already set the relaty
         if self.swarm.external_addresses().count() > 0 {
             warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
             return;
         }
+        let mut lock = self.relay_store.write().await;
+        // TODO: Do relays expire?
+        // if lock.has_active_relay() {
+        //     // dbg!("Already have an active relay");
+        //     return;
+        // }
         // dbg!("No, select a relay");
         lock.select_random_relay();
         if let Some(relay) = lock.selected_relay_mut() {

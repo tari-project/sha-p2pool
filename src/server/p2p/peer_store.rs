@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::RwLock,
     time::{Duration, Instant},
 };
@@ -14,7 +14,10 @@ use moka::future::{Cache, CacheBuilder};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::p2p::{messages::PeerInfo, Squad};
+use crate::server::{
+    http::stats_collector::StatsBroadcastClient,
+    p2p::{messages::PeerInfo, Squad},
+};
 
 const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
@@ -72,16 +75,18 @@ pub enum AddPeerStatus {
 /// A peer store, which stores all the known peers (from broadcasted [`PeerInfo`] messages) in-memory.
 /// This implementation is thread safe and async, so an [`Arc<PeerStore>`] is enough to be used to share.
 pub struct PeerStore {
-    whitelist_peers: Cache<PeerId, PeerStoreRecord>,
+    whitelist_peers: HashMap<PeerId, PeerStoreRecord>,
     greylist_peers: HashSet<PeerId>,
     blacklist_peers: HashSet<PeerId>,
+    stats_broadcast_client: StatsBroadcastClient,
 }
 
 impl PeerStore {
     /// Constructs a new peer store with config.
-    pub fn new(config: &PeerStoreConfig) -> Self {
+    pub fn new(config: &PeerStoreConfig, stats_broadcast_client: StatsBroadcastClient) -> Self {
         Self {
-            whitelist_peers: CacheBuilder::new(10000).time_to_live(config.peer_record_ttl).build(),
+            stats_broadcast_client,
+            whitelist_peers: HashMap::new(),
             greylist_peers: HashSet::new(),
             blacklist_peers: HashSet::new(),
             // peers_max_fail: config.peers_max_fail,
@@ -94,7 +99,7 @@ impl PeerStore {
 
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
-    pub async fn add(&self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
+    pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
         dbg!(&peer_info);
         // if self.banned_peers.contains_key(&peer_id) {
         // return;
@@ -114,15 +119,17 @@ impl PeerStore {
         }
 
         if self.whitelist_peers.contains_key(&peer_id) {
-            self.whitelist_peers
-                .insert(peer_id, PeerStoreRecord::new(peer_info))
-                .await;
+            self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
             return AddPeerStatus::Existing;
         }
 
-        self.whitelist_peers
-            .insert(peer_id, PeerStoreRecord::new(peer_info))
-            .await;
+        self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
+        self.stats_broadcast_client.send_new_peer(
+            self.whitelist_peers.len() as u64,
+            self.greylist_peers.len() as u64,
+            self.blacklist_peers.len() as u64,
+        );
+
         // self.peer_removals.insert(peer_id, removal_count).await;
         // }
 
@@ -170,12 +177,12 @@ impl PeerStore {
     /// Returns count of peers.
     /// Note: it is needed to calculate number of validations needed to make sure a new block is valid.
     pub async fn peer_count(&self) -> u64 {
-        self.whitelist_peers.entry_count()
+        self.whitelist_peers.len() as u64
     }
 
     pub async fn move_to_grey_list(&mut self, peer_id: PeerId) {
         if self.whitelist_peers.contains_key(&peer_id) {
-            self.whitelist_peers.remove(&peer_id).await;
+            self.whitelist_peers.remove(&peer_id);
             self.greylist_peers.insert(peer_id);
         }
     }

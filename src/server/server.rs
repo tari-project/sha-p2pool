@@ -72,7 +72,7 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let network_peer_store = PeerStore::new(&config.peer_store);
+        let network_peer_store = PeerStore::new(&config.peer_store, stats_broadcast_client.clone());
 
         let stats_client = stats_collector.create_client();
 

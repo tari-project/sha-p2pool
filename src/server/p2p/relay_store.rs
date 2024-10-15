@@ -24,8 +24,8 @@ impl RelayStore {
             .unwrap_or(false)
     }
 
-    pub fn add_possible_relay(&mut self, peer: PeerId, address: Multiaddr) {
-        self.possible_relays.entry(peer).or_default().insert(address);
+    pub fn add_possible_relay(&mut self, peer: PeerId, address: Multiaddr) -> bool {
+        self.possible_relays.entry(peer).or_default().insert(address)
     }
 
     pub fn select_random_relay(&mut self) {

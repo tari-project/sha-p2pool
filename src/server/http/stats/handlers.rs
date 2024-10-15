@@ -147,33 +147,33 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     let connected = peer_count > 0;
     // let connected_since = state.peer_store.last_connected();
     let connected_since = None;
-    // let (tx, rx) = oneshot::channel();
-    // state
-    // .p2p_service_client
-    // .send(P2pServiceQuery::GetConnectionInfo(tx))
-    // .await
-    // .map_err(|error| {
-    // error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
-    // StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
+    let (tx, rx) = oneshot::channel();
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetConnectionInfo(tx))
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    // let connection_info = rx.await.map_err(|error| {
-    // error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
-    // StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
-    let connection_info = ConnectionInfo {
-        listener_addresses: vec![],
-        connected_peers: 0,
-        network_info: NetworkInfo {
-            num_peers: 0,
-            connection_counters: ConnectionCounters {
-                pending_incoming: 0,
-                pending_outgoing: 0,
-                established_incoming: 0,
-                established_outgoing: 0,
-            },
-        },
-    };
+    let connection_info = rx.await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    // let connection_info = ConnectionInfo {
+    //     listener_addresses: vec![],
+    //     connected_peers: 0,
+    //     network_info: NetworkInfo {
+    //         num_peers: 0,
+    //         connection_counters: ConnectionCounters {
+    //             pending_incoming: 0,
+    //             pending_outgoing: 0,
+    //             established_incoming: 0,
+    //             established_outgoing: 0,
+    //         },
+    //     },
+    // };
 
     let stats = Stats {
         connected,

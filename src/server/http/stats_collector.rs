@@ -22,6 +22,9 @@ pub(crate) struct StatsCollector {
     network_difficulty: Difficulty,
     chain_height: u64,
     chain_length: u64,
+    total_peers: u64,
+    total_grey_list: u64,
+    total_black_list: u64,
 }
 
 impl StatsCollector {
@@ -39,6 +42,9 @@ impl StatsCollector {
             pool_rejected: 0,
             chain_height: 0,
             chain_length: 0,
+            total_peers: 0,
+            total_grey_list: 0,
+            total_black_list: 0,
             network_difficulty: Difficulty::min(),
         }
     }
@@ -68,6 +74,16 @@ impl StatsCollector {
                 self.chain_height = height;
                 self.chain_length = length;
             },
+            StatData::NewPeer {
+                total_peers,
+                total_grey_list,
+                total_black_list,
+                ..
+            } => {
+                self.total_peers = total_peers;
+                self.total_grey_list = total_grey_list;
+                self.total_black_list = total_black_list;
+            },
         }
     }
 
@@ -82,14 +98,17 @@ impl StatsCollector {
                 },
                 _ = stats_report_timer.tick() => {
                     info!(target: LOG_TARGET,
-                            "========= Chain Height {}. Chain Length {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
+                            "========= Chain Height {}. Chain Length {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
                             self.chain_height,
                             self.chain_length,
                             self.network_difficulty.as_u64().to_formatted_string(&Locale::en),
                             self.miner_accepted,
                             self.miner_rejected,
                             self.pool_accepted,
-                            self.pool_rejected
+                            self.pool_rejected,
+                            self.total_peers,
+                            self.total_grey_list,
+                            self.total_black_list
                         );
                 },
                 res = self.request_rx.recv() => {
@@ -170,6 +189,12 @@ pub(crate) enum StatData {
         length: u64,
         timestamp: EpochTime,
     },
+    NewPeer {
+        total_peers: u64,
+        total_grey_list: u64,
+        total_black_list: u64,
+        timestamp: EpochTime,
+    },
 }
 
 impl StatData {
@@ -181,6 +206,7 @@ impl StatData {
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
             StatData::PoolBlockRejected { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
+            StatData::NewPeer { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -255,5 +281,19 @@ impl StatsBroadcastClient {
             timestamp: EpochTime::now(),
         };
         self.broadcast(data)
+    }
+
+    pub fn send_new_peer(
+        &self,
+        total_peers: u64,
+        total_grey_list: u64,
+        total_black_list: u64,
+    ) -> Result<(), anyhow::Error> {
+        self.broadcast(StatData::NewPeer {
+            total_peers,
+            total_grey_list,
+            total_black_list,
+            timestamp: EpochTime::now(),
+        })
     }
 }
