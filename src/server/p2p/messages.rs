@@ -91,6 +91,18 @@ impl ShareChainSyncRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DirectPeerInfoRequest {
+    pub peer_id: PeerId,
+    pub info: PeerInfo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DirectPeerInfoResponse {
+    pub peer_id: PeerId,
+    pub info: PeerInfo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LocalShareChainSyncRequest {
     pub peer_id: PeerId,
     pub request: ShareChainSyncRequest,

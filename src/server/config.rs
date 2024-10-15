@@ -143,6 +143,13 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_peer_publish_interval(&mut self, config: Option<u64>) -> &mut Self {
+        if let Some(interval) = config {
+            self.config.p2p_service.peer_info_publish_interval = Duration::from_secs(interval);
+        }
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }

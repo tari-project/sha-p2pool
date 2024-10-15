@@ -41,12 +41,14 @@ impl Default for PeerStoreConfig {
 pub struct PeerStoreRecord {
     peer_info: PeerInfo,
     created: Instant,
+    last_sync_attempt: Option<Instant>,
 }
 
 impl PeerStoreRecord {
     pub fn new(peer_info: PeerInfo) -> Self {
         Self {
             peer_info,
+            last_sync_attempt: None,
             created: Instant::now(),
         }
     }
@@ -76,7 +78,7 @@ pub enum AddPeerStatus {
 /// This implementation is thread safe and async, so an [`Arc<PeerStore>`] is enough to be used to share.
 pub struct PeerStore {
     whitelist_peers: HashMap<PeerId, PeerStoreRecord>,
-    greylist_peers: HashSet<PeerId>,
+    greylist_peers: HashMap<PeerId, PeerStoreRecord>,
     blacklist_peers: HashSet<PeerId>,
     stats_broadcast_client: StatsBroadcastClient,
 }
@@ -87,7 +89,7 @@ impl PeerStore {
         Self {
             stats_broadcast_client,
             whitelist_peers: HashMap::new(),
-            greylist_peers: HashSet::new(),
+            greylist_peers: HashMap::new(),
             blacklist_peers: HashSet::new(),
             // peers_max_fail: config.peers_max_fail,
             // tip_of_block_height_sha3x: RwLock::new(None),
@@ -97,10 +99,22 @@ impl PeerStore {
         }
     }
 
+    pub fn update_last_sync_attempt(&mut self, peer_id: PeerId) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id) {
+            let mut new_record = entry.clone();
+            new_record.last_sync_attempt = Some(Instant::now());
+            *entry = new_record;
+        }
+        if let Some(entry) = self.greylist_peers.get_mut(&peer_id) {
+            let mut new_record = entry.clone();
+            new_record.last_sync_attempt = Some(Instant::now());
+            *entry = new_record;
+        }
+    }
+
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
-    pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
-        dbg!(&peer_info);
+    pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> (AddPeerStatus, Option<Instant>) {
         // if self.banned_peers.contains_key(&peer_id) {
         // return;
         // }
@@ -111,20 +125,26 @@ impl PeerStore {
         // self.banned_peers.insert(peer_id, ()).await;
         // } else {
         if self.blacklist_peers.contains(&peer_id) {
-            return AddPeerStatus::Blacklisted;
+            return (AddPeerStatus::Blacklisted, None);
         }
 
-        if self.greylist_peers.contains(&peer_id) {
-            return AddPeerStatus::Greylisted;
+        if let Some(grey) = self.greylist_peers.get(&peer_id) {
+            return (AddPeerStatus::Greylisted, grey.last_sync_attempt);
         }
 
-        if self.whitelist_peers.contains_key(&peer_id) {
-            self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
-            return AddPeerStatus::Existing;
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id) {
+            let previous_sync_attempt = entry.last_sync_attempt;
+            let mut new_record = PeerStoreRecord::new(peer_info);
+            new_record.last_sync_attempt = previous_sync_attempt;
+            new_record.created = entry.created;
+
+            *entry = new_record;
+            // self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
+            return (AddPeerStatus::Existing, previous_sync_attempt);
         }
 
         self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
-        self.stats_broadcast_client.send_new_peer(
+        let _ = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
@@ -134,7 +154,7 @@ impl PeerStore {
         // }
 
         // self.set_tip_of_block_heights().await;
-        AddPeerStatus::NewPeer
+        (AddPeerStatus::NewPeer, None)
     }
 
     /// Removes a peer from store.
@@ -182,13 +202,26 @@ impl PeerStore {
 
     pub async fn move_to_grey_list(&mut self, peer_id: PeerId) {
         if self.whitelist_peers.contains_key(&peer_id) {
-            self.whitelist_peers.remove(&peer_id);
-            self.greylist_peers.insert(peer_id);
+            let record = self.whitelist_peers.remove(&peer_id);
+            if let Some(record) = record {
+                self.greylist_peers.insert(peer_id, record);
+                let _ = self.stats_broadcast_client.send_new_peer(
+                    self.whitelist_peers.len() as u64,
+                    self.greylist_peers.len() as u64,
+                    self.blacklist_peers.len() as u64,
+                );
+            }
         }
     }
 
     pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
-        self.whitelist_peers.contains_key(peer_id)
+        if self.whitelist_peers.contains_key(peer_id) {
+            return true;
+        }
+        if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(peer_id) {
+            return true;
+        }
+        return false;
     }
 
     // async fn set_tip_of_block_heights(&self) {
