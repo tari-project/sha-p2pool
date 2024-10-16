@@ -20,8 +20,10 @@ pub(crate) struct StatsCollector {
     pool_accepted: u64,
     pool_rejected: u64,
     network_difficulty: Difficulty,
-    chain_height: u64,
-    chain_length: u64,
+    sha3x_chain_height: u64,
+    sha3x_chain_length: u64,
+    randomx_chain_height: u64,
+    randomx_chain_length: u64,
     total_peers: u64,
     total_grey_list: u64,
     total_black_list: u64,
@@ -40,8 +42,10 @@ impl StatsCollector {
             miner_rejected: 0,
             pool_accepted: 0,
             pool_rejected: 0,
-            chain_height: 0,
-            chain_length: 0,
+            sha3x_chain_height: 0,
+            sha3x_chain_length: 0,
+            randomx_chain_height: 0,
+            randomx_chain_length: 0,
             total_peers: 0,
             total_grey_list: 0,
             total_black_list: 0,
@@ -70,9 +74,17 @@ impl StatsCollector {
             StatData::PoolBlockRejected { pow_algo, .. } => {
                 self.pool_rejected += 1;
             },
-            StatData::ChainChanged { height, length, .. } => {
-                self.chain_height = height;
-                self.chain_length = length;
+            StatData::ChainChanged {
+                algo, height, length, ..
+            } => match algo {
+                PowAlgorithm::Sha3x => {
+                    self.sha3x_chain_height = height;
+                    self.sha3x_chain_length = length;
+                },
+                PowAlgorithm::RandomX => {
+                    self.randomx_chain_height = height;
+                    self.randomx_chain_length = length;
+                },
             },
             StatData::NewPeer {
                 total_peers,
@@ -98,10 +110,11 @@ impl StatsCollector {
                 },
                 _ = stats_report_timer.tick() => {
                     info!(target: LOG_TARGET,
-                            "========= Chain Height {}. Chain Length {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
-                            self.chain_height,
-                            self.chain_length,
-                            self.network_difficulty.as_u64().to_formatted_string(&Locale::en),
+                            "========= Chains:  Rx {}..{}, Sha3 {}..{}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
+                            self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
+                            self.randomx_chain_height,
+                            self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
+                            self.sha3x_chain_height,
                             self.miner_accepted,
                             self.miner_rejected,
                             self.pool_accepted,
@@ -185,6 +198,7 @@ pub(crate) enum StatData {
         timestamp: EpochTime,
     },
     ChainChanged {
+        algo: PowAlgorithm,
         height: u64,
         length: u64,
         timestamp: EpochTime,
@@ -274,8 +288,9 @@ impl StatsBroadcastClient {
         self.broadcast(data)
     }
 
-    pub fn send_chain_changed(&self, height: u64, length: u64) -> Result<(), anyhow::Error> {
+    pub fn send_chain_changed(&self, pow_algo: PowAlgorithm, height: u64, length: u64) -> Result<(), anyhow::Error> {
         let data = StatData::ChainChanged {
+            algo: pow_algo,
             height,
             length,
             timestamp: EpochTime::now(),

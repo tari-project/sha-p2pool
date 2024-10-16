@@ -38,10 +38,11 @@ impl Default for PeerStoreConfig {
 
 /// A record in peer store that holds all needed info of a peer.
 #[derive(Clone, Debug)]
-pub struct PeerStoreRecord {
-    peer_info: PeerInfo,
-    created: Instant,
-    last_sync_attempt: Option<Instant>,
+pub(crate) struct PeerStoreRecord {
+    pub peer_info: PeerInfo,
+    pub created: Instant,
+    pub last_sync_attempt: Option<Instant>,
+    pub last_grey_list_reason: Option<String>,
 }
 
 impl PeerStoreRecord {
@@ -50,6 +51,7 @@ impl PeerStoreRecord {
             peer_info,
             last_sync_attempt: None,
             created: Instant::now(),
+            last_grey_list_reason: None,
         }
     }
 }
@@ -77,9 +79,9 @@ pub enum AddPeerStatus {
 /// A peer store, which stores all the known peers (from broadcasted [`PeerInfo`] messages) in-memory.
 /// This implementation is thread safe and async, so an [`Arc<PeerStore>`] is enough to be used to share.
 pub struct PeerStore {
-    whitelist_peers: HashMap<PeerId, PeerStoreRecord>,
-    greylist_peers: HashMap<PeerId, PeerStoreRecord>,
-    blacklist_peers: HashSet<PeerId>,
+    whitelist_peers: HashMap<String, PeerStoreRecord>,
+    greylist_peers: HashMap<String, PeerStoreRecord>,
+    blacklist_peers: HashSet<String>,
     stats_broadcast_client: StatsBroadcastClient,
 }
 
@@ -99,13 +101,21 @@ impl PeerStore {
         }
     }
 
+    pub fn whitelist_peers(&self) -> &HashMap<String, PeerStoreRecord> {
+        &self.whitelist_peers
+    }
+
+    pub fn greylist_peers(&self) -> &HashMap<String, PeerStoreRecord> {
+        &self.greylist_peers
+    }
+
     pub fn update_last_sync_attempt(&mut self, peer_id: PeerId) {
-        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
             new_record.last_sync_attempt = Some(Instant::now());
             *entry = new_record;
         }
-        if let Some(entry) = self.greylist_peers.get_mut(&peer_id) {
+        if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
             new_record.last_sync_attempt = Some(Instant::now());
             *entry = new_record;
@@ -124,15 +134,15 @@ impl PeerStore {
         // self.peer_removals.remove(&peer_id).await;
         // self.banned_peers.insert(peer_id, ()).await;
         // } else {
-        if self.blacklist_peers.contains(&peer_id) {
+        if self.blacklist_peers.contains(&peer_id.to_base58()) {
             return (AddPeerStatus::Blacklisted, None);
         }
 
-        if let Some(grey) = self.greylist_peers.get(&peer_id) {
+        if let Some(grey) = self.greylist_peers.get(&peer_id.to_base58()) {
             return (AddPeerStatus::Greylisted, grey.last_sync_attempt);
         }
 
-        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let previous_sync_attempt = entry.last_sync_attempt;
             let mut new_record = PeerStoreRecord::new(peer_info);
             new_record.last_sync_attempt = previous_sync_attempt;
@@ -143,7 +153,8 @@ impl PeerStore {
             return (AddPeerStatus::Existing, previous_sync_attempt);
         }
 
-        self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
+        self.whitelist_peers
+            .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_info));
         let _ = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
@@ -159,7 +170,7 @@ impl PeerStore {
 
     pub fn clear_grey_list(&mut self) {
         for (peer_id, record) in self.greylist_peers.iter() {
-            self.whitelist_peers.insert(*peer_id, record.clone());
+            self.whitelist_peers.insert(peer_id.clone(), record.clone());
         }
         self.greylist_peers.clear();
         let _ = self.stats_broadcast_client.send_new_peer(
@@ -212,11 +223,12 @@ impl PeerStore {
         self.whitelist_peers.len() as u64
     }
 
-    pub async fn move_to_grey_list(&mut self, peer_id: PeerId) {
-        if self.whitelist_peers.contains_key(&peer_id) {
-            let record = self.whitelist_peers.remove(&peer_id);
-            if let Some(record) = record {
-                self.greylist_peers.insert(peer_id, record);
+    pub async fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
+        if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
+            let mut record = self.whitelist_peers.remove(&peer_id.to_base58());
+            if let Some(mut record) = record {
+                record.last_grey_list_reason = Some(reason.clone());
+                self.greylist_peers.insert(peer_id.to_base58(), record);
                 let _ = self.stats_broadcast_client.send_new_peer(
                     self.whitelist_peers.len() as u64,
                     self.greylist_peers.len() as u64,
@@ -227,10 +239,10 @@ impl PeerStore {
     }
 
     pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
-        if self.whitelist_peers.contains_key(peer_id) {
+        if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
             return true;
         }
-        if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(peer_id) {
+        if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(&peer_id.to_base58()) {
             return true;
         }
         return false;

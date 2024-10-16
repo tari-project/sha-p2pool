@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, env, sync::Arc};
+use std::{collections::HashMap, env, fs, sync::Arc};
 
 use libp2p::identity::Keypair;
 use log::info;
@@ -32,6 +32,7 @@ pub async fn server(
     enable_logging: bool,
 ) -> anyhow::Result<Server<InMemoryShareChain>> {
     if enable_logging {
+        let _ = fs::remove_file(cli.base_dir().join("configs/logs.yml"));
         // logger setup
         if let Err(e) = initialize_logging(
             &cli.base_dir().join("configs/logs.yml"),
@@ -84,6 +85,7 @@ pub async fn server(
     }
 
     config_builder.with_mining_enabled(!args.mining_disabled);
+    config_builder.with_is_seed_peer(args.mining_disabled);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
     config_builder.with_relay_enabled(args.relay_server_enabled);
     config_builder.with_http_server_enabled(!args.http_server_disabled);

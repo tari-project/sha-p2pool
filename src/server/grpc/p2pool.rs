@@ -217,23 +217,20 @@ where S: ShareChain
             // update coinbase extras cache
             let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
                 .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
-            let mut coinbase_extras_lock = match pow_algo {
-                PowAlgorithm::RandomX => self.coinbase_extras_random_x.write().await,
-                PowAlgorithm::Sha3x => self.coinbase_extras_sha3x.write().await,
-            };
-            coinbase_extras_lock.insert(
-                wallet_payment_address.to_base58(),
-                util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
-                    .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
-            );
-            drop(coinbase_extras_lock);
 
             // request new block template with shares as coinbases
             let share_chain = match pow_algo {
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
             };
-            let shares = share_chain.generate_shares(self.squad.clone()).await;
+            let shares = share_chain
+                .generate_shares(
+                    self.squad.clone(),
+                    util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
+                        .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
+                    wallet_payment_address.clone(),
+                )
+                .await;
 
             let mut response = self
                 .client

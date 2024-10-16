@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
+use tari_utilities::epoch_time::EpochTime;
 
 use crate::{
     server::p2p::{Error, Squad},
@@ -44,15 +45,13 @@ where T: Serialize {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
-    #[serde(default)]
     pub version: u64,
     pub current_sha3x_height: u64,
     pub current_random_x_height: u64,
     pub squad: Squad,
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub user_agent: Option<String>,
     pub user_agent_version: Option<String>,
-    #[serde(default)]
     pub public_addresses: Vec<Multiaddr>,
 }
 impl_conversions!(PeerInfo);
@@ -64,13 +63,13 @@ impl PeerInfo {
         public_addresses: Vec<Multiaddr>,
         user_agent: Option<String>,
     ) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+        let timestamp = EpochTime::now();
         Self {
-            version: 3,
+            version: 4,
             current_sha3x_height,
             current_random_x_height,
             squad,
-            timestamp,
+            timestamp: timestamp.as_u64(),
             user_agent,
             user_agent_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             public_addresses,

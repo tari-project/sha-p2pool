@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::{NewBlockCoinbase, SubmitBlockRequest};
 use num::BigUint;
-use tari_common_types::types::FixedHash;
+use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
     proof_of_work::{randomx_factory::RandomXFactory, Difficulty},
@@ -91,7 +91,12 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn tip_height(&self) -> ShareChainResult<u64>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase>;
+    async fn generate_shares(
+        &self,
+        squad: Squad,
+        my_coinbase_extra: Vec<u8>,
+        my_miner_address: TariAddress,
+    ) -> Vec<NewBlockCoinbase>;
 
     /// Return a new block that could be added via `submit_block`.
     async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> ShareChainResult<Block>;

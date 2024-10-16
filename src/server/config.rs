@@ -108,6 +108,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_is_seed_peer(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.is_seed_peer = config;
+        self
+    }
+
     pub fn with_mdns_enabled(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.mdns_enabled = config;
         self

@@ -43,9 +43,13 @@ pub(crate) struct BlockResult {
     candidate_block_prev_hash: String,
     algo: String,
 }
-pub(crate) async fn handle_connections(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ConnectedPeerInfo>>, StatusCode> {
+
+#[derive(Serialize)]
+pub(crate) struct Connections {
+    allow_list: Vec<ConnectedPeerInfo>,
+    grey_list: Vec<ConnectedPeerInfo>,
+}
+pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<Json<Connections>, StatusCode> {
     let timer = std::time::Instant::now();
     let (tx, rx) = oneshot::channel();
     state
@@ -65,7 +69,10 @@ pub(crate) async fn handle_connections(
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
         error!(target: LOG_TARGET, "handle_connections took too long: {}ms", timer.elapsed().as_millis());
     }
-    Ok(Json(res))
+    Ok(Json(Connections {
+        allow_list: res.0.clone(),
+        grey_list: res.1.clone(),
+    }))
 }
 
 pub(crate) async fn handle_chain(State(state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {

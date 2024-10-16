@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::{pow_algo, NewBlockCoinbase, SubmitBlockRequest};
 use num::{BigUint, Zero};
+use serde::de::value;
 use tari_common_types::{tari_address::TariAddress, types::BlockHash};
 use tari_core::{
     blocks,
@@ -366,7 +367,7 @@ impl InMemoryShareChain {
             return Ok(());
         }
 
-        if tip_height == 0 {
+        if tip_height == 0 && block.height > 2000 {
             // TODO: Validate the block
             block_levels.levels.clear();
             block_levels
@@ -562,6 +563,7 @@ impl ShareChain for InMemoryShareChain {
             .submit_block_with_lock(&mut block_levels_write_lock, block, &self.block_validation_params)
             .await;
         let _ = self.stat_client.send_chain_changed(
+            self.pow_algo,
             block_levels_write_lock
                 .levels
                 .front()
@@ -570,6 +572,7 @@ impl ShareChain for InMemoryShareChain {
             block_levels_write_lock.levels.len() as u64,
         );
 
+        block_levels_write_lock.cached_shares = None;
         res
         // let chain = self.chain(block_levels_write_lock.iter());
         // let last_block = chain.last().ok_or_else(|| Error::Empty)?;
@@ -578,14 +581,25 @@ impl ShareChain for InMemoryShareChain {
 
     async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()> {
         dbg!("Adding synced blocks");
+        dbg!("Blocks count: {}", blocks.len());
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
-            self.submit_block_with_lock(&mut block_levels_write_lock, &block, &self.block_validation_params)
-                .await?;
+            dbg!(block.height);
+            match self
+                .submit_block_with_lock(&mut block_levels_write_lock, &block, &self.block_validation_params)
+                .await
+            {
+                Ok(_) => {},
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "[{:?}] Failed to add block, skipping: {:?}", self.pow_algo, e);
+                },
+            }
         }
+        block_levels_write_lock.cached_shares = None;
 
         let _ = self.stat_client.send_chain_changed(
+            self.pow_algo,
             block_levels_write_lock
                 .levels
                 .front()
@@ -602,10 +616,23 @@ impl ShareChain for InMemoryShareChain {
         Ok(tip_level)
     }
 
-    async fn generate_shares(&self, squad: Squad) -> Vec<NewBlockCoinbase> {
+    async fn generate_shares(
+        &self,
+        squad: Squad,
+        my_coinbase_extra: Vec<u8>,
+        my_miner_address: TariAddress,
+    ) -> Vec<NewBlockCoinbase> {
         let bl = self.block_levels.read().await;
         if let Some(ref cached_shares) = bl.cached_shares {
-            return cached_shares.clone();
+            let mut cache = cached_shares.clone();
+            cache.push(NewBlockCoinbase {
+                address: my_miner_address.to_base58(),
+                value: MINER_REWARD_SHARES,
+                stealth_payment: false,
+                revealed_value_proof: true,
+                coinbase_extra: my_coinbase_extra,
+            });
+            return cache;
         }
 
         drop(bl);
@@ -615,7 +642,15 @@ impl ShareChain for InMemoryShareChain {
 
         // There may be two threads that reach here, so double check if the shares are already calculated
         if let Some(ref cached_shares) = bl.cached_shares {
-            return cached_shares.clone();
+            let mut cache = cached_shares.clone();
+            cache.push(NewBlockCoinbase {
+                address: my_miner_address.to_base58(),
+                value: MINER_REWARD_SHARES,
+                stealth_payment: false,
+                revealed_value_proof: true,
+                coinbase_extra: my_coinbase_extra,
+            });
+            return cache;
         }
 
         // Otherwise, let's calculate the shares
@@ -634,9 +669,13 @@ impl ShareChain for InMemoryShareChain {
             // Main blocks
             if let Some(main_block) = level.block_in_main_chain() {
                 let miner_address = main_block.miner_wallet_address.clone();
+                let coinbase_extra = main_block.miner_coinbase_extra.clone();
                 if miner_address.is_some() {
-                    let entry = miners_to_shares.entry(miner_address.unwrap().to_base58()).or_insert(0);
+                    let (entry, entry_coinbase) = miners_to_shares
+                        .entry(miner_address.unwrap().to_base58())
+                        .or_insert((0, coinbase_extra.clone()));
                     *entry += MAIN_CHAIN_SHARE_AMOUNT;
+                    *entry_coinbase = coinbase_extra;
                 }
             } else {
                 error!(target: LOG_TARGET, "No main block in level: {:?}", level.height);
@@ -661,36 +700,38 @@ impl ShareChain for InMemoryShareChain {
                 if miner_wallet_address.is_none() {
                     continue;
                 }
+                let coinbase_extra = block.miner_coinbase_extra.clone();
                 let addr = miner_wallet_address.unwrap().to_base58();
-                let share_count = miners_to_shares.entry(addr).or_insert(0);
+                let (share_count, entry_coinbase_extra) =
+                    miners_to_shares.entry(addr).or_insert((0, coinbase_extra.clone()));
                 *share_count += UNCLE_BLOCK_SHARE_AMOUNT;
+                *entry_coinbase_extra = coinbase_extra;
                 shares_left = shares_left.saturating_sub(UNCLE_BLOCK_SHARE_AMOUNT);
-            }
-            if shares_left == 0 {
-                break;
+                if shares_left == 0 {
+                    break;
+                }
             }
         }
 
         for (key, value) in miners_to_shares {
-            // find coinbase extra for wallet address
-            let mut coinbase_extra = convert_coinbase_extra(squad.clone(), String::new()).unwrap_or_default();
-            if let Ok(miner_wallet_address) = TariAddress::from_str(key.as_str()) {
-                if let Some(coinbase_extra_found) = self.find_coinbase_extra(miner_wallet_address).await {
-                    coinbase_extra = coinbase_extra_found;
-                }
-            }
-
             res.push(NewBlockCoinbase {
                 address: key,
-                value,
+                value: value.0,
                 stealth_payment: false,
                 revealed_value_proof: true,
-                coinbase_extra,
+                coinbase_extra: value.1,
             });
         }
 
         bl.cached_shares = Some(res.clone());
 
+        res.push(NewBlockCoinbase {
+            address: my_miner_address.to_base58(),
+            value: MINER_REWARD_SHARES,
+            stealth_payment: false,
+            revealed_value_proof: true,
+            coinbase_extra: my_coinbase_extra,
+        });
         res
     }
 
@@ -818,7 +859,7 @@ impl ShareChain for InMemoryShareChain {
         }
 
         drop(bl);
-        let shares = self.generate_shares(squad).await;
+        let shares = self.generate_shares(squad, vec![], TariAddress::default()).await;
         Ok(shares.iter().map(|s| (s.address.clone(), s.value)).collect())
     }
 }

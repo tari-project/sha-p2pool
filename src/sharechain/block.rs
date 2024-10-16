@@ -30,7 +30,6 @@ lazy_static! {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub(crate) struct Block {
-    #[serde(default)]
     pub version: u32,
     pub chain_id: String,
     pub hash: BlockHash,
