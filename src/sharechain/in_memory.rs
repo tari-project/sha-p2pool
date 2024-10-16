@@ -111,8 +111,8 @@ impl BlockLevel {
         if self.blocks.len() >= MAX_BLOCKS_PER_LEVEL {
             return Err(Error::TooManyBlocksInThisLevel);
         }
-        if replace_tip {
-            self.in_chain_index = self.blocks.len();
+        if replace_tip || self.blocks.len() == 1 {
+            self.in_chain_index = self.blocks.len() - 1;
         }
         self.blocks.push(block);
         Ok(())
@@ -398,6 +398,14 @@ impl InMemoryShareChain {
         let parent_height = height
             .checked_sub(1)
             .ok_or_else(|| Error::BlockValidation("Block height is 0".to_string()))?;
+        if parent_height == 0 && block_levels.levels.back().map(|e| e.height).unwrap_or_default() == 1 {
+            if let Some(back) = block_levels.levels.back_mut() {
+                back.add_block(block.clone(), false);
+                return Ok(());
+            } else {
+                Error::BlockValidation("Block parent is not found. Back was empty".to_string());
+            }
+        }
         let level_index = usize::try_from(tip_height.checked_sub(parent_height).ok_or_else(|| {
             Error::BlockValidation(format!(
                 "Block parent height is not stored in levels. parent: {}, tip: {}",
@@ -569,6 +577,7 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn add_synced_blocks(&self, blocks: Vec<Block>) -> ShareChainResult<()> {
+        dbg!("Adding synced blocks");
         let mut block_levels_write_lock = self.block_levels.write().await;
 
         for block in blocks {
@@ -737,6 +746,8 @@ impl ShareChain for InMemoryShareChain {
         }
 
         for level in &block_levels_read_lock.levels {
+            dbg!(from_height);
+            dbg!(level.height);
             if level.height < from_height {
                 break;
             }

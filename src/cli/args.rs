@@ -110,6 +110,9 @@ pub struct StartArgs {
 
     #[arg(long, value_name = "user-agent")]
     pub user_agent: Option<String>,
+
+    #[arg(long)]
+    pub peer_publish_interval: Option<u64>,
 }
 
 #[derive(Clone, Parser, Debug)]
