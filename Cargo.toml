@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "sha_p2pool"
-version = "0.3.2"
+version = "0.3.3"
 
 [dependencies]
 minotari_app_grpc = {git = "https://github.com/tari-project/tari.git"}
