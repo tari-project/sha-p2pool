@@ -157,6 +157,18 @@ impl PeerStore {
         (AddPeerStatus::NewPeer, None)
     }
 
+    pub fn clear_grey_list(&mut self) {
+        for (peer_id, record) in self.greylist_peers.iter() {
+            self.whitelist_peers.insert(*peer_id, record.clone());
+        }
+        self.greylist_peers.clear();
+        let _ = self.stats_broadcast_client.send_new_peer(
+            self.whitelist_peers.len() as u64,
+            self.greylist_peers.len() as u64,
+            self.blacklist_peers.len() as u64,
+        );
+    }
+
     /// Removes a peer from store.
     // pub async fn remove(&self, peer_id: &PeerId) {
     //     // if self.banned_peers.contains_key(peer_id) {

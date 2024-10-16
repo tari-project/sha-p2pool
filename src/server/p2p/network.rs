@@ -159,6 +159,7 @@ pub struct Config {
     pub squad: Squad,
     pub max_in_progress_sync_requests: usize,
     pub user_agent: String,
+    pub grey_list_clear_interval: Duration,
 }
 
 impl Default for Config {
@@ -175,6 +176,7 @@ impl Default for Config {
             squad: Squad::from("default".to_string()),
             max_in_progress_sync_requests: 5,
             user_agent: "tari-p2pool".to_string(),
+            grey_list_clear_interval: Duration::from_secs(2* 60),
         }
     }
 }
@@ -1184,6 +1186,8 @@ async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInf
         let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+
+        let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
         // TODO: Not sure why this is done on a loop instead of just once....
         // let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
         // kademlia_bootstrap_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1278,6 +1282,10 @@ async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInf
                 //         }
                 //     }
                 // },
+                _ = grey_list_clear_interval.tick() => {
+                    dbg!("grey list clear");
+                    self.network_peer_store.clear_grey_list();
+                },
             }
         }
     }
