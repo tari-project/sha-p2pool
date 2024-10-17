@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use human_format::Formatter;
 use log::{error, info};
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
@@ -18,7 +21,10 @@ pub(crate) struct StatsCollector {
     miner_rejected: u64,
     pool_accepted: u64,
     pool_rejected: u64,
-    network_difficulty: Difficulty,
+    sha_network_difficulty: Difficulty,
+    sha_target_difficulty: Difficulty,
+    randomx_network_difficulty: Difficulty,
+    randomx_target_difficulty: Difficulty,
     sha3x_chain_height: u64,
     sha3x_chain_length: u64,
     randomx_chain_height: u64,
@@ -48,7 +54,10 @@ impl StatsCollector {
             total_peers: 0,
             total_grey_list: 0,
             total_black_list: 0,
-            network_difficulty: Difficulty::min(),
+            sha_network_difficulty: Difficulty::min(),
+            randomx_network_difficulty: Difficulty::min(),
+            sha_target_difficulty: Difficulty::min(),
+            randomx_target_difficulty: Difficulty::min(),
         }
     }
 
@@ -95,6 +104,30 @@ impl StatsCollector {
                 self.total_grey_list = total_grey_list;
                 self.total_black_list = total_black_list;
             },
+            StatData::TargetDifficultyChanged {
+                target_difficulty,
+                pow_algo,
+                timestamp,
+            } => match pow_algo {
+                PowAlgorithm::Sha3x => {
+                    self.sha_target_difficulty = target_difficulty;
+                },
+                PowAlgorithm::RandomX => {
+                    self.randomx_target_difficulty = target_difficulty;
+                },
+            },
+            StatData::NetworkDifficultyChanged {
+                network_difficulty,
+                pow_algo,
+                timestamp,
+            } => match pow_algo {
+                PowAlgorithm::Sha3x => {
+                    self.sha_network_difficulty = network_difficulty;
+                },
+                PowAlgorithm::RandomX => {
+                    self.randomx_network_difficulty = network_difficulty;
+                },
+            },
         }
     }
 
@@ -104,57 +137,67 @@ impl StatsCollector {
 
         loop {
             tokio::select! {
-                _ = self.shutdown_signal.wait() => {
-                    break;
-                },
-                _ = stats_report_timer.tick() => {
-                    info!(target: LOG_TARGET,
-                            "========= Chains:  Rx {}..{}, Sha3 {}..{}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
-                            self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
-                            self.randomx_chain_height,
-                            self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
-                            self.sha3x_chain_height,
-                            self.miner_accepted,
-                            self.miner_rejected,
-                            self.pool_accepted,
-                            self.pool_rejected,
-                            self.total_peers,
-                            self.total_grey_list,
-                            self.total_black_list
-                        );
-                },
-                res = self.request_rx.recv() => {
-                    match res {
-                        Some(StatsRequest::GetStats(_pow, _tx)) => {
-                            todo!();
-                            // let _ = tx.send(hashrate);
-                        },
-                        None => {
+                        _ = self.shutdown_signal.wait() => {
                             break;
-                        }
-                    }
-                },
-                res = self.stats_broadcast_receiver.recv() => {
-                    match res {
-                        Ok(sample) => {
-                            if self.first_stat_received.is_none() {
-                                self.first_stat_received = Some(sample.timestamp());
+                        },
+                        _ = stats_report_timer.tick() => {
+                            let formatter = Formatter::new();
+
+                            info!(target: LOG_TARGET,
+                                    "========= Uptime: {}. Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
+                                    humantime::format_duration(Duration::from_secs(
+                                        EpochTime::now().as_u64().checked_sub(
+                                            self.first_stat_received.unwrap_or_else(|| EpochTime::now()).as_u64())
+                                .unwrap_or_default())),
+                                    self.randomx_chain_height.saturating_sub(self.randomx_chain_length.saturating_sub(1)),
+                                    self.randomx_chain_height,
+                                    self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length.saturating_sub(1)),
+                                    self.sha3x_chain_height,
+                                    formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
+            formatter.format(                            self.randomx_network_difficulty.as_u64() as f64),
+                                    formatter.format(self.sha_target_difficulty.as_u64() as f64),
+                                    formatter.format(self.sha_network_difficulty.as_u64() as f64),
+                                    self.miner_accepted,
+                                    self.miner_rejected,
+                                    self.pool_accepted,
+                                    self.pool_rejected,
+                                    self.total_peers,
+                                    self.total_grey_list,
+                                    self.total_black_list
+                                );
+                        },
+                        res = self.request_rx.recv() => {
+                            match res {
+                                Some(StatsRequest::GetStats(_pow, _tx)) => {
+                                    todo!();
+                                    // let _ = tx.send(hashrate);
+                                },
+                                None => {
+                                    break;
+                                }
                             }
-                            self.handle_stat(sample);
-                            // Expect 2 samples per second per device
-                            // let entry = self.hashrate_samples.entry(sample.device_id).or_insert_with(|| VecDeque::with_capacity(181));
-                    // if entry.len() > 180 {
-                        // entry.pop_front();
-                    // }
-                    // entry.push_back(sample);
                         },
-                        Err(e) => {
-                            error!(target: LOG_TARGET, "Error receiving hashrate sample: {:?}", e);
-                            break;
-                        }
-                    }
+                        res = self.stats_broadcast_receiver.recv() => {
+                            match res {
+                                Ok(sample) => {
+                                    if self.first_stat_received.is_none() {
+                                        self.first_stat_received = Some(sample.timestamp());
                                     }
-            }
+                                    self.handle_stat(sample);
+                                    // Expect 2 samples per second per device
+                                    // let entry = self.hashrate_samples.entry(sample.device_id).or_insert_with(|| VecDeque::with_capacity(181));
+                            // if entry.len() > 180 {
+                                // entry.pop_front();
+                            // }
+                            // entry.push_back(sample);
+                                },
+                                Err(e) => {
+                                    error!(target: LOG_TARGET, "Error receiving hashrate sample: {:?}", e);
+                                    break;
+                                }
+                            }
+                                            }
+                    }
         }
         Ok(())
     }
@@ -175,6 +218,16 @@ pub(crate) struct ChainStats {
 
 #[derive(Clone)]
 pub(crate) enum StatData {
+    TargetDifficultyChanged {
+        target_difficulty: Difficulty,
+        pow_algo: PowAlgorithm,
+        timestamp: EpochTime,
+    },
+    NetworkDifficultyChanged {
+        network_difficulty: Difficulty,
+        pow_algo: PowAlgorithm,
+        timestamp: EpochTime,
+    },
     ChainStats {
         chain: ChainStats,
         timestamp: EpochTime,
@@ -220,6 +273,8 @@ impl StatData {
             StatData::PoolBlockRejected { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
             StatData::NewPeer { timestamp, .. } => *timestamp,
+            StatData::TargetDifficultyChanged { timestamp, .. } => *timestamp,
+            StatData::NetworkDifficultyChanged { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -309,5 +364,31 @@ impl StatsBroadcastClient {
             total_black_list,
             timestamp: EpochTime::now(),
         })
+    }
+
+    pub fn send_target_difficulty(
+        &self,
+        pow_algo: PowAlgorithm,
+        target_difficulty: Difficulty,
+    ) -> Result<(), anyhow::Error> {
+        let data = StatData::TargetDifficultyChanged {
+            target_difficulty,
+            pow_algo,
+            timestamp: EpochTime::now(),
+        };
+        self.broadcast(data)
+    }
+
+    pub fn send_network_difficulty(
+        &self,
+        pow_algo: PowAlgorithm,
+        network_difficulty: Difficulty,
+    ) -> Result<(), anyhow::Error> {
+        let data = StatData::NetworkDifficultyChanged {
+            network_difficulty,
+            pow_algo,
+            timestamp: EpochTime::now(),
+        };
+        self.broadcast(data)
     }
 }

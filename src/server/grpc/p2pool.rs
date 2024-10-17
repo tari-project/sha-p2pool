@@ -260,11 +260,16 @@ where S: ShareChain
             new_tip_block.fix_hash();
 
             if let Some(miner_data) = response.miner_data.as_mut() {
+                let _ = self
+                    .stats_broadcast
+                    .send_network_difficulty(pow_algo, Difficulty::from_u64(miner_data.target_difficulty).unwrap());
                 // what happens p2pool difficulty > base chain diff
                 if target_difficulty.as_u64() < miner_data.target_difficulty {
                     miner_data.target_difficulty = target_difficulty.as_u64();
                 }
             }
+
+            let _ = self.stats_broadcast.send_target_difficulty(pow_algo, target_difficulty);
 
             // save template
             let mut list_of_template_write_lock = self.list_of_templates.write().await;

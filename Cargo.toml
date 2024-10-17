@@ -4,14 +4,14 @@ name = "sha_p2pool"
 version = "0.3.4"
 
 [dependencies]
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
-tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
-tari_common = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
-tari_core = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
-tari_script = { git = "https://github.com/tari-project/tari.git" , rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74" }
+minotari_app_grpc = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+minotari_node_grpc_client = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_common = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_common_types = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_core = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
 tari_crypto = "0.21.0"
+tari_script = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
+tari_shutdown = {git = "https://github.com/tari-project/tari.git", rev = "2d0ccb121bb13990cac422fe72945cced06c1f74"}
 tari_utilities = {version = "0.8", features = ["borsh"]}
 
 anyhow = "1.0"
@@ -24,6 +24,8 @@ digest = "0.10.7"
 dirs = "4.0.0"
 hex = "0.4.3"
 hickory-resolver = {version = "*", features = ["dns-over-rustls"]}
+human_format = "1.1.0"
+humantime = "2.1.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
 libp2p = {version = "0.54.0", features = [
