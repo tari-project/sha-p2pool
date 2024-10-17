@@ -147,7 +147,7 @@ impl InMemoryShareChain {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() {
-            if (syncing && block.height > MAX_BLOCKS_COUNT as u64) || block.height == 0 {
+            if syncing || block.height == 0 {
                 p2_chain.add_block_to_chain(block.clone())?;
                 return Ok(());
             } else {
@@ -307,7 +307,6 @@ impl ShareChain for InMemoryShareChain {
         blocks.reverse();
 
         for block in blocks {
-            dbg!(block.height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
