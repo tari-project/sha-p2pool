@@ -14,7 +14,7 @@ use libp2p::{
 };
 use thiserror::Error;
 
-use crate::{server::p2p, sharechain};
+use crate::sharechain;
 
 #[derive(Error, Debug)]
 pub enum Error {

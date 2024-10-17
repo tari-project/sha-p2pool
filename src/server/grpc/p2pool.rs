@@ -23,7 +23,14 @@ use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     blocks::Block,
     consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm, PowData},
+    proof_of_work::{
+        randomx_difficulty,
+        randomx_factory::RandomXFactory,
+        sha3x_difficulty,
+        Difficulty,
+        PowAlgorithm,
+        PowData,
+    },
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
@@ -352,7 +359,6 @@ where S: ShareChain
             let temp_pow_data = tari_block.header.pow.pow_data.clone();
             tari_block.header.nonce = 0;
             tari_block.header.pow.pow_data =PowData::default();
-            
             let tari_hash = tari_block.header.hash();
             tari_block.header.nonce = mined_nonce;
             tari_block.header.pow.pow_data = temp_pow_data;
