@@ -27,10 +27,7 @@ use tari_core::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
-use tokio::{
-    sync::{RwLock, Semaphore},
-    time::timeout,
-};
+use tokio::{sync::RwLock, time::timeout};
 use tonic::{Request, Response, Status};
 
 use crate::{
@@ -78,7 +75,6 @@ where S: ShareChain
     sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
-    submit_block_semaphore: Arc<Semaphore>,
     squad: Squad,
     coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
@@ -121,7 +117,6 @@ where S: ShareChain
             sha3_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             randomx_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
-            submit_block_semaphore: Arc::new(Semaphore::new(1)),
             squad,
             coinbase_extras_sha3x,
             coinbase_extras_random_x,
@@ -133,19 +128,18 @@ where S: ShareChain
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: &P2Block) -> Result<(), Status> {
+    pub async fn submit_share_chain_block(&self, block: Arc<P2Block>) -> Result<(), Status> {
         let pow_algo = block.original_block.header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.submit_block(block).await {
+        match share_chain.submit_block(block.clone()).await {
             Ok(_) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
                 let res = self
                     .p2p_client
-                    .broadcast_block(block)
-                    .await
+                    .broadcast_block(block.clone())
                     .map_err(|error| Status::internal(error.to_string()));
                 if res.is_ok() {
                     info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
@@ -201,10 +195,11 @@ where S: ShareChain
             };
             let coinbase_extra =
                 convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra).unwrap_or_default();
-            let mut new_tip_block = share_chain
+            let mut new_tip_block = (*share_chain
                 .generate_new_tip_block(&wallet_payment_address, coinbase_extra)
                 .await
-                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?;
+                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?)
+            .clone();
             let shares = share_chain
                 .generate_shares(&new_tip_block)
                 .await
@@ -468,8 +463,9 @@ where S: ShareChain
             }
 
             debug!(target: LOG_TARGET, "Trace - submitting to share chain: {}", timer.elapsed().as_millis());
+            let p2pool_block = Arc::new(p2pool_block);
             // Don't error if we can't submit it.
-            match self.submit_share_chain_block(&p2pool_block).await {
+            match self.submit_share_chain_block(p2pool_block.clone()).await {
                 Ok(_) => {
                     let pow_type = p2pool_block.original_block.header.pow.pow_algo.to_string();
                     info!(target: LOG_TARGET, "🔗 Block submitted to {} share chain!", pow_type);

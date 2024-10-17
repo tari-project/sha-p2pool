@@ -140,7 +140,7 @@ impl InMemoryShareChain {
     async fn submit_block_with_lock(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
-        block: &P2Block,
+        block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
     ) -> Result<(), Error> {
@@ -175,7 +175,7 @@ impl InMemoryShareChain {
         }
 
         // validate
-        let _validate_result = self.validate_block(block, params).await?;
+        let _validate_result = self.validate_block(&block, params).await?;
         let new_block = block.clone();
 
         // add block to chain
@@ -282,7 +282,7 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: &P2Block) -> Result<(), Error> {
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let res = self
             .submit_block_with_lock(
@@ -300,7 +300,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: &[P2Block]) -> Result<(), Error> {
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         let mut blocks = blocks.to_vec();
@@ -310,7 +310,7 @@ impl ShareChain for InMemoryShareChain {
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
-                    &block,
+                    block.clone(),
                     self.block_validation_params.clone(),
                     true,
                 )
@@ -399,7 +399,7 @@ impl ShareChain for InMemoryShareChain {
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<P2Block, Error> {
+    ) -> Result<Arc<P2Block>, Error> {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
@@ -444,7 +444,7 @@ impl ShareChain for InMemoryShareChain {
             .build())
     }
 
-    async fn blocks(&self, from_height: u64) -> Result<Vec<P2Block>, Error> {
+    async fn blocks(&self, from_height: u64) -> Result<Vec<Arc<P2Block>>, Error> {
         // Should really only be used in syncing
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut res = vec![];
@@ -598,7 +598,7 @@ pub mod test {
 
             prev_hash = block.generate_hash();
 
-            share_chain.submit_block(&block).await.unwrap();
+            share_chain.submit_block(block).await.unwrap();
         }
 
         let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
@@ -644,7 +644,7 @@ pub mod test {
 
             prev_hash = block.generate_hash();
 
-            share_chain.submit_block(&block).await.unwrap();
+            share_chain.submit_block(block).await.unwrap();
         }
 
         let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
@@ -698,7 +698,7 @@ pub mod test {
                     .with_prev_hash(prev_hash_uncle)
                     .build();
                 uncles.push((i as u64 - 1, block.hash));
-                share_chain.submit_block(&block).await.unwrap();
+                share_chain.submit_block(block).await.unwrap();
             }
             let block = P2Block::builder()
                 .with_timestamp(timestamp)
@@ -711,7 +711,7 @@ pub mod test {
 
             prev_hash = block.generate_hash();
 
-            share_chain.submit_block(&block).await.unwrap();
+            share_chain.submit_block(block).await.unwrap();
         }
 
         let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();

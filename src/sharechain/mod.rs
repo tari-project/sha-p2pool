@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
@@ -95,10 +95,10 @@ impl BlockValidationParams {
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: &P2Block) -> Result<(), Error>;
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[P2Block]) -> Result<(), Error>;
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<(), Error>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, Error>;
@@ -111,13 +111,13 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<P2Block, Error>;
+    ) -> Result<Arc<P2Block>, Error>;
 
     // /// Return a new block that could be added via `submit_block`.
     // async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> Result<P2Block, Error>;
 
     /// Returns blocks from the given height (`from_height`, exclusive).
-    async fn blocks(&self, from_height: u64) -> Result<Vec<P2Block>, Error>;
+    async fn blocks(&self, from_height: u64) -> Result<Vec<Arc<P2Block>>, Error>;
 
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).

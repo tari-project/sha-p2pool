@@ -246,10 +246,8 @@ where S: ShareChain
     query_rx: mpsc::Receiver<P2pServiceQuery>,
     // service client related channels
     // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
-    client_broadcast_block_tx: broadcast::Sender<P2Block>,
-    client_broadcast_block_rx: broadcast::Receiver<P2Block>,
-    snooze_block_tx: mpsc::Sender<(usize, P2Block)>,
-    snooze_block_rx: mpsc::Receiver<(usize, P2Block)>,
+    client_broadcast_block_tx: broadcast::Sender<Arc<P2Block>>,
+    client_broadcast_block_rx: broadcast::Receiver<Arc<P2Block>>,
 
     relay_store: Arc<RwLock<RelayStore>>,
 }
@@ -269,9 +267,9 @@ where S: ShareChain
         let swarm = Self::new_swarm(config).await?;
 
         // client related channels
-        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<P2Block>(1000);
-        let (_share_chain_sync_tx, _share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
-        let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, P2Block)>(1000);
+        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<Arc<P2Block>>(100);
+        // let (_share_chain_sync_tx, _share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
+        // let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, P2Block)>(1000);
         let (query_tx, query_rx) = mpsc::channel(100);
 
         Ok(Self {
@@ -286,8 +284,6 @@ where S: ShareChain
             client_broadcast_block_rx: broadcast_block_rx,
             query_tx,
             query_rx,
-            snooze_block_rx,
-            snooze_block_tx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
         })
     }
@@ -467,7 +463,7 @@ where S: ShareChain
     }
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
-    async fn broadcast_block(&mut self, result: Result<P2Block, RecvError>) {
+    async fn broadcast_block(&mut self, result: Result<Arc<P2Block>, RecvError>) {
         dbg!("Broadcast block");
         // if self.sync_in_progress.load(Ordering::SeqCst) {
         //     return;
@@ -475,7 +471,7 @@ where S: ShareChain
 
         match result {
             Ok(block) => {
-                let block_raw_result: Result<Vec<u8>, Error> = block.try_into();
+                let block_raw_result: Result<Vec<u8>, Error> = (*block).clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
                         match self
@@ -613,6 +609,7 @@ where S: ShareChain
                 // }
                 match P2Block::try_from(message) {
                     Ok(payload) => {
+                        let payload = Arc::new(payload);
                         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");
 
                         if payload.version < MIN_BLOCK_VERSION {
@@ -634,9 +631,9 @@ where S: ShareChain
                                 Some(payload.height.saturating_sub(num_missing_parents)),
                             )
                             .await;
-                            if snoozed {
-                                let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
-                            }
+                            // if snoozed {
+                            // let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
+                            // }
                         }
                     },
                     Err(error) => {
@@ -722,9 +719,9 @@ where S: ShareChain
 
     async fn try_add_propagated_block(
         share_chain: &Arc<S>,
-        block: P2Block,
+        block: Arc<P2Block>,
     ) -> Result<(bool, u64), crate::sharechain::error::Error> {
-        match share_chain.submit_block(&block.clone()).await {
+        match share_chain.submit_block(block.clone()).await {
             Ok(_result) => {
                 // info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}",
                 // &block.hash.to_hex(), &block.height);
@@ -803,7 +800,7 @@ where S: ShareChain
                     .swarm
                     .behaviour_mut()
                     .share_chain_sync
-                    .send_response(channel, ShareChainSyncResponse::new(request.algo(), blocks.clone()))
+                    .send_response(channel, ShareChainSyncResponse::new(request.algo(), &blocks))
                     .is_err()
                 {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
@@ -828,7 +825,8 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.add_synced_blocks(response.blocks()).await {
+        let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
+        match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 // Ok(())
@@ -1275,9 +1273,6 @@ where S: ShareChain
                     }
                 },
 
-                _res = self.snooze_block_rx.recv() => {
-                    info!(target: LOG_TARGET, "snooze block");
-                         dbg!("snooze");
                         //  if let Some((snoozes_left, block)) = res {
                         //     let snooze_sender = self.snooze_block_tx.clone();
                         //     let share_chain = match block.original_block_header.pow.pow_algo {
@@ -1304,7 +1299,6 @@ where S: ShareChain
                         // } else {
                         //     error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
                         // }
-                },
                 // req = self.share_chain_sync_rx.recv() => {
                 //     dbg!("share chain sync rx");
                 //     match req {

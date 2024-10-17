@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
+
 use blake2::Blake2b;
 use digest::consts::U32;
 use lazy_static::lazy_static;
@@ -27,7 +29,7 @@ lazy_static! {
     };
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct P2Block {
     #[serde(default)]
     pub version: u32,
@@ -150,10 +152,10 @@ impl BlockBuilder {
         self
     }
 
-    pub fn build(mut self) -> P2Block {
+    pub fn build(mut self) -> Arc<P2Block> {
         if !self.use_specific_hash {
             self.block.hash = self.block.generate_hash();
         }
-        self.block
+        Arc::new(self.block)
     }
 }
