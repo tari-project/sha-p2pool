@@ -6,7 +6,7 @@ use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
-use num::{BigUint, Zero};
+use num::{traits::SaturatingSub, BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
@@ -128,6 +128,76 @@ impl InMemoryShareChain {
         Ok(curr_difficulty)
     }
 
+    // this tries to go through the log parent hashes to try and find a matching hash in our change and send back the
+    // missing parents. if the block hashes dont match at 10/20/100/2160, it will ask for a complete sync
+    fn try_calculate_last_known_parent(p2_chain: &mut RwLockWriteGuard<'_, P2Chain>, block: &P2Block) -> Error {
+        let tip_height = p2_chain.get_height();
+        if block.height > 10 && tip_height >= block.height - 10 {
+            match p2_chain.get_at_height(block.height - 10) {
+                Some(level) => {
+                    if level.blocks.get(&block.log_parent_hashes[0]).is_some() {
+                        return Error::BlockParentDoesNotExist {
+                            num_missing_parents: 10,
+                        };
+                    }
+                },
+                None => {},
+            }
+        } else {
+            return Error::BlockParentDoesNotExist {
+                num_missing_parents: MAX_BLOCKS_COUNT as u64,
+            };
+        }
+
+        if block.height > 20 && tip_height >= block.height - 20 {
+            match p2_chain.get_at_height(block.height - 20) {
+                Some(level) => {
+                    if level.blocks.get(&block.log_parent_hashes[1]).is_some() {
+                        return Error::BlockParentDoesNotExist {
+                            num_missing_parents: 20,
+                        };
+                    }
+                },
+                None => {},
+            }
+        } else {
+            return Error::BlockParentDoesNotExist {
+                num_missing_parents: MAX_BLOCKS_COUNT as u64,
+            };
+        }
+        if block.height > 100 && tip_height >= block.height - 100 {
+            match p2_chain.get_at_height(block.height - 100) {
+                Some(level) => {
+                    if level.blocks.get(&block.log_parent_hashes[2]).is_some() {
+                        return Error::BlockParentDoesNotExist {
+                            num_missing_parents: 100,
+                        };
+                    }
+                },
+                None => {},
+            }
+        } else {
+            return Error::BlockParentDoesNotExist {
+                num_missing_parents: MAX_BLOCKS_COUNT as u64,
+            };
+        }
+        if block.height > 2160 && tip_height >= block.height - 2160 {
+            match p2_chain.get_at_height(block.height - 2160) {
+                Some(level) => {
+                    if level.blocks.get(&block.log_parent_hashes[3]).is_some() {
+                        return Error::BlockParentDoesNotExist {
+                            num_missing_parents: 2160,
+                        };
+                    }
+                },
+                None => {},
+            }
+        }
+        Error::BlockParentDoesNotExist {
+            num_missing_parents: MAX_BLOCKS_COUNT as u64,
+        }
+    }
+
     /// Submits a new block to share chain.
     async fn submit_block_with_lock(
         &self,
@@ -145,9 +215,12 @@ impl InMemoryShareChain {
             } else {
                 // we just received a propagated block and we dont have any blocks, we need to sync.
                 return Err(Error::BlockParentDoesNotExist {
-                    num_missing_parents: block.height.saturating_sub(SHARE_WINDOW as u64),
+                    num_missing_parents: MAX_BLOCKS_COUNT as u64,
                 });
             }
+        }
+        if p2_chain.get_parent_block(block).is_none() {
+            return Err(Self::try_calculate_last_known_parent(p2_chain, block));
         }
 
         // this is safe as we already checked it does exist
@@ -425,6 +498,42 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
         }
+        let mut log_parents = [FixedHash::zero(); 4];
+        log_parents[0] = if new_height >= 10 {
+            match chain_read_lock.get_at_height(new_height - 10) {
+                Some(level) => level.chain_block.clone(),
+                None => FixedHash::zero(),
+            }
+        } else {
+            FixedHash::zero()
+        };
+
+        log_parents[1] = if new_height >= 20 {
+            match chain_read_lock.get_at_height(new_height - 20) {
+                Some(level) => level.chain_block.clone(),
+                None => FixedHash::zero(),
+            }
+        } else {
+            FixedHash::zero()
+        };
+
+        log_parents[2] = if new_height >= 100 {
+            match chain_read_lock.get_at_height(new_height - 100) {
+                Some(level) => level.chain_block.clone(),
+                None => FixedHash::zero(),
+            }
+        } else {
+            FixedHash::zero()
+        };
+
+        log_parents[3] = if new_height >= 2160 {
+            match chain_read_lock.get_at_height(new_height - 2160) {
+                Some(level) => level.chain_block.clone(),
+                None => FixedHash::zero(),
+            }
+        } else {
+            FixedHash::zero()
+        };
 
         Ok(P2Block::builder()
             .with_timestamp(EpochTime::now())
