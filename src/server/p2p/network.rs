@@ -738,7 +738,7 @@ where S: ShareChain
         share_chain: &Arc<S>,
         block: P2Block,
     ) -> Result<(bool, u64), crate::sharechain::error::Error> {
-        match share_chain.add_synced_blocks(vec![block.clone()]).await {
+        match share_chain.submit_block(&block.clone()).await {
             Ok(_result) => {
                 // info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}",
                 // &block.hash.to_hex(), &block.height);
