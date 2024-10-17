@@ -1,8 +1,6 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
-
 use axum::{routing::get, Router};
 use log::info;
 use tari_shutdown::ShutdownSignal;
@@ -10,12 +8,9 @@ use thiserror::Error;
 use tokio::{io, sync::mpsc::Sender};
 
 use super::stats_collector::StatsClient;
-use crate::{
-    server::{
-        http::{health, stats::handlers, version},
-        p2p::{peer_store::PeerStore, P2pServiceQuery, Squad},
-    },
-    sharechain::ShareChain,
+use crate::server::{
+    http::{health, stats::handlers, version},
+    p2p::{P2pServiceQuery, Squad},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats";

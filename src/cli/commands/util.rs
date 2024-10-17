@@ -20,9 +20,9 @@ use crate::{
         self as main_server,
         http::stats_collector::{StatsBroadcastClient, StatsCollector},
         p2p::Squad,
-        Server,
+        server::Server,
     },
-    sharechain::{in_memory::InMemoryShareChain, BlockValidationParams, MAX_BLOCKS_COUNT},
+    sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
 };
 
 pub async fn server(
@@ -106,7 +106,7 @@ pub async fn server(
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
     let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
 
-    info!(target: "p2pool::server", "Consensus manager initialized with network: {}, and genesis hash {}", Network::get_current_or_user_setting_or_default(), 
+    info!(target: "p2pool::server", "Consensus manager initialized with network: {}, and genesis hash {}", Network::get_current_or_user_setting_or_default(),
 genesis_block_hash.to_hex());
     let block_validation_params = Arc::new(BlockValidationParams::new(
         randomx_factory,
@@ -120,18 +120,16 @@ genesis_block_hash.to_hex());
     let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
 
     let share_chain_sha3x = InMemoryShareChain::new(
-        MAX_BLOCKS_COUNT,
         PowAlgorithm::Sha3x,
-        block_validation_params.clone(),
+        None,
         consensus_manager.clone(),
         coinbase_extras_sha3x.clone(),
         stats_broadcast_client.clone(),
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
-        MAX_BLOCKS_COUNT,
         PowAlgorithm::RandomX,
-        block_validation_params.clone(),
+        Some(block_validation_params.clone()),
         consensus_manager,
         coinbase_extras_random_x.clone(),
         stats_broadcast_client.clone(),

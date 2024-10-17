@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     str::FromStr,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
-use digest::typenum::Diff;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
@@ -17,13 +16,12 @@ use minotari_app_grpc::tari_rpc::{
     GetNewBlockRequest,
     GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest,
-    NewBlockTemplateRequest,
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
-use num_format::{Locale, ToFormattedString};
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
+    blocks::Block,
     consensus::ConsensusManager,
     proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
 };
@@ -37,33 +35,25 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     server::{
-        grpc::{error::Error, util, MAX_ACCEPTABLE_GRPC_TIMEOUT},
-        http::{
-            stats::{
-                self,
-                algo_stat_key,
-                MINER_STAT_ACCEPTED_BLOCKS_COUNT,
-                MINER_STAT_REJECTED_BLOCKS_COUNT,
-                P2POOL_STAT_ACCEPTED_BLOCKS_COUNT,
-                P2POOL_STAT_REJECTED_BLOCKS_COUNT,
-            },
-            stats_collector::StatsBroadcastClient,
-        },
-        p2p::{self, Squad},
+        grpc::{error::Error, util, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
+        http::stats_collector::StatsBroadcastClient,
+        p2p,
+        p2p::Squad,
     },
-    sharechain::{block::Block, BlockValidationParams, ShareChain, SHARE_COUNT},
+    sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
 
+pub const MAX_STORED_TEMPLATES: usize = 20;
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 
 pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
     let consensus_constants = consensus_manager.consensus_constants(height);
     match pow {
         PowAlgorithm::RandomX => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).expect("Bad difficulty")
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).unwrap_or(Difficulty::min())
         },
         PowAlgorithm::Sha3x => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).expect("Bad difficulty")
+            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).unwrap_or(Difficulty::min())
         }, // SHA min difficulty is too low. Will be updated in future
     }
 }
@@ -80,17 +70,19 @@ where S: ShareChain
     share_chain_sha3x: Arc<S>,
     /// RandomX share chain
     share_chain_random_x: Arc<S>,
+    /// Stats store
     stats_broadcast: StatsBroadcastClient,
     /// Block validation params to be used when checking block difficulty.
     block_validation_params: BlockValidationParams,
     sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
-    consensus_manager: ConsensusManager,
     submit_block_semaphore: Arc<Semaphore>,
     squad: Squad,
     coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    template_store: RwLock<HashMap<FixedHash, P2Block>>,
+    list_of_templates: RwLock<VecDeque<FixedHash>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -114,10 +106,10 @@ where S: ShareChain
             client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
-            stats_broadcast,
             p2p_client,
             share_chain_sha3x,
             share_chain_random_x,
+            stats_broadcast,
             block_validation_params: BlockValidationParams::new(
                 random_x_factory,
                 consensus_manager.clone(),
@@ -126,28 +118,25 @@ where S: ShareChain
             sha3_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             randomx_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
-            consensus_manager,
             submit_block_semaphore: Arc::new(Semaphore::new(1)),
             squad,
             coinbase_extras_sha3x,
             coinbase_extras_random_x,
+            template_store: RwLock::new(HashMap::new()),
+            list_of_templates: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES + 1)),
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: &Block) -> Result<(), Status> {
-        let pow_algo = block.original_block_header.pow.pow_algo;
+    pub async fn submit_share_chain_block(&self, block: &P2Block) -> Result<(), Status> {
+        let pow_algo = block.original_block.header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let timer = Instant::now();
         match share_chain.submit_block(block).await {
             Ok(_) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                // self.stats_store
-                // .inc(&algo_stat_key(pow_algo, MINER_STAT_ACCEPTED_BLOCKS_COUNT), 1)
-                // .await;
                 let res = self
                     .p2p_client
                     .broadcast_block(block)
@@ -161,9 +150,6 @@ where S: ShareChain
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
                 let _ = self.stats_broadcast.send_miner_block_rejected(pow_algo);
-                // self.stats_store
-                // .inc(&algo_stat_key(pow_algo, MINER_STAT_REJECTED_BLOCKS_COUNT), 1)
-                // .await;
                 Ok(())
             },
         }
@@ -185,36 +171,21 @@ where S: ShareChain
 
         let result = timeout(timeout_duration, async {
             let timer = Instant::now();
-
             let grpc_req = request.into_inner();
 
             // extract pow algo
             let grpc_block_header_pow = grpc_req.pow.ok_or(Status::invalid_argument("missing pow in request"))?;
-            let grpc_pow_algo = PowAlgos::from_i32(grpc_block_header_pow.pow_algo)
-                .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
+            let grpc_pow_algo: PowAlgos = grpc_block_header_pow
+                .pow_algo
+                .try_into()
+                .map_err(|_| Status::internal("invalid block header pow algo in request"))?;
             let pow_algo = match grpc_pow_algo {
                 PowAlgos::Randomx => PowAlgorithm::RandomX,
                 PowAlgos::Sha3x => PowAlgorithm::Sha3x,
             };
 
-            // request original block template to get reward
-            let req = NewBlockTemplateRequest {
-                algo: Some(grpc_block_header_pow.clone()),
-                max_weight: 0,
-            };
-            let template_response = self
-                .client
-                .write()
-                .await
-                .get_new_block_template(req)
-                .await?
-                .into_inner();
-            let _miner_data = template_response
-                .miner_data
-                .ok_or_else(|| Status::internal("missing miner data"))?;
-            // let reward = miner_data.reward;
-
             // update coinbase extras cache
+            // investigate lock usage
             let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
                 .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
 
@@ -223,14 +194,16 @@ where S: ShareChain
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
             };
+            let coinbase_extra =
+                convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra).unwrap_or_default();
+            let mut new_tip_block = share_chain
+                .generate_new_tip_block(&wallet_payment_address, coinbase_extra)
+                .await
+                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?;
             let shares = share_chain
-                .generate_shares(
-                    self.squad.clone(),
-                    util::convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra)
-                        .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?,
-                    wallet_payment_address.clone(),
-                )
-                .await;
+                .generate_shares(&new_tip_block)
+                .await
+                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?;
 
             let mut response = self
                 .client
@@ -254,6 +227,15 @@ where S: ShareChain
                 .block
                 .as_ref()
                 .ok_or_else(|| Status::internal("missing missing block"))?;
+            let mut tari_block: Block = grpc_block
+                .clone()
+                .try_into()
+                .map_err(|e| Status::internal(format!("Could not convert gprc block to tari block: {}", e)))?;
+            // we set the nonce to 0 in order to find the template again.
+            tari_block.header.nonce = 0;
+            new_tip_block.original_block = tari_block;
+            let tari_hash = new_tip_block.original_block.hash();
+
             let height = grpc_block
                 .header
                 .as_ref()
@@ -273,38 +255,29 @@ where S: ShareChain
                     .await
                     .insert(height, actual_diff),
             };
-            let min_difficulty = min_difficulty(&self.consensus_manager, pow_algo, height);
-            let chain = match pow_algo {
-                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-            };
-            let mut target_difficulty = chain
-                .get_target_difficulty()
-                .await
-                .map_err(|e| Status::internal("Could not get target difficutly"))?;
+            let target_difficulty = share_chain.get_target_difficulty(height).await;
+            new_tip_block.target_difficulty = target_difficulty;
+            new_tip_block.fix_hash();
 
-            if target_difficulty < min_difficulty {
-                target_difficulty = min_difficulty;
-            }
-
-            if target_difficulty > actual_diff {
-                warn!(
-                    target: LOG_TARGET,
-                    "Target difficulty is higher than actual difficulty. Target: {}, Actual: {}",
-                    target_difficulty,
-                    actual_diff
-                );
-                // Never go higher than the network.
-                target_difficulty = actual_diff;
-            }
             if let Some(miner_data) = response.miner_data.as_mut() {
-                miner_data.target_difficulty = target_difficulty.as_u64();
+                // what happens p2pool difficulty > base chain diff
+                if target_difficulty.as_u64() < miner_data.target_difficulty {
+                    miner_data.target_difficulty = target_difficulty.as_u64();
+                }
             }
+
+            // save template
+            let mut list_of_template_write_lock = self.list_of_templates.write().await;
+            list_of_template_write_lock.push_back(tari_hash.clone());
+            if list_of_template_write_lock.len() > MAX_STORED_TEMPLATES {
+                let _ = list_of_template_write_lock.pop_front();
+            }
+            drop(list_of_template_write_lock);
+            self.template_store.write().await.insert(tari_hash, new_tip_block);
 
             if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
                 warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
             }
-
             Ok(Response::new(GetNewBlockResponse {
                 block: Some(response),
                 target_difficulty: target_difficulty.as_u64(),
@@ -332,193 +305,160 @@ where S: ShareChain
         let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT;
 
         let result = timeout(timeout_duration, async {
-        let timer = Instant::now();
-        // if self.submit_block_semaphore.available_permits() == 0 {
-        //     return Err(Status::resource_exhausted("submit_block semaphore is full"));
-        // }
-        // // Only one submit at a time
-        // let _permit = self.submit_block_semaphore.acquire().await;
-        debug!(target: LOG_TARGET, "submit_block permit acquired: {}", timer.elapsed().as_millis());
+            let timer = Instant::now();
+            // Only one submit at a time
 
-        // get all grpc request related data
-        let grpc_block = request.get_ref();
-        let grpc_request_payload = grpc_block
-            .block
-            .clone()
-            .ok_or_else(|| Status::internal("missing block in request"))?;
-        let grpc_block_header = grpc_request_payload
-            .header
-            .clone()
-            .ok_or_else(|| Status::internal("missing block header in request"))?;
-        let grpc_block_header_pow = grpc_block_header
-            .pow
-            .ok_or_else(|| Status::internal("missing block header pow in request"))?;
-        let grpc_pow_algo = PowAlgos::from_i32(i32::try_from(grpc_block_header_pow.pow_algo).map_err(|error| {
-            error!("Failed to get pow algo: {error:?}");
-            Status::internal("general error")
-        })?)
-        .ok_or_else(|| Status::internal("invalid block header pow algo in request"))?;
+            debug!(target: LOG_TARGET, "submit_block permit acquired: {}", timer.elapsed().as_millis());
 
-        debug!(target: LOG_TARGET, "Trace - getting new block from share chain: {}", timer.elapsed().as_millis());
-        // get new share chain block
-        let pow_algo = match grpc_pow_algo {
-            PowAlgos::Randomx => PowAlgorithm::RandomX,
-            PowAlgos::Sha3x => PowAlgorithm::Sha3x,
-        };
-        let share_chain = match pow_algo {
-            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-        };
-        let mut block = share_chain
-            .new_block(grpc_block, self.squad.clone())
-            .await
-            .map_err(|error| Status::internal(error.to_string()))?;
+            debug!("Trace - getting grpc fields");
+            // get all grpc request related data
+            let grpc_block = request.get_ref();
+            let grpc_request_payload = grpc_block
+                .block
+                .clone()
+                .ok_or_else(|| Status::internal("missing block in request"))?;
+            let grpc_block_header = grpc_request_payload
+                .header
+                .clone()
+                .ok_or_else(|| Status::internal("missing block header in request"))?;
+            let grpc_block_header_pow = grpc_block_header
+                .pow
+                .ok_or_else(|| Status::internal("missing block header pow in request"))?;
+            let grpc_pow_algo:PowAlgos = (i32::try_from(grpc_block_header_pow.pow_algo).map_err(|error| {
+                error!("Failed to get pow algo: {error:?}");
+                Status::internal("general error")
+            })?).try_into()
+                .map_err(|_| Status::internal("invalid block header pow algo in request"))?;
 
-            let origin_block_header = &&block.original_block_header.clone();
+            debug!(target: LOG_TARGET, "Trace - getting new block from share chain: {}", timer.elapsed().as_millis());
+            // get new share chain block
+            let pow_algo = match grpc_pow_algo {
+                PowAlgos::Randomx => PowAlgorithm::RandomX,
+                PowAlgos::Sha3x => PowAlgorithm::Sha3x,
+            };
 
-        debug!(target: LOG_TARGET, "Trace - getting block difficulty: {}", timer.elapsed().as_millis());
-        // Check block's difficulty compared to the latest network one to increase the probability
-        // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
-        let request_block_difficulty = match origin_block_header.pow.pow_algo {
-            PowAlgorithm::Sha3x => {
-                sha3x_difficulty(origin_block_header).map_err(|error| Status::internal(error.to_string()))?
-            },
-            PowAlgorithm::RandomX => randomx_difficulty(
-                origin_block_header,
-                self.block_validation_params.random_x_factory(),
-                self.block_validation_params.genesis_block_hash(),
-                self.block_validation_params.consensus_manager(),
-            )
-            .map_err(|error| Status::internal(error.to_string()))?,
-        };
-        info!(
+            let mut tari_block: Block = grpc_request_payload
+                .clone()
+                .try_into()
+                .map_err(|e| Status::internal(format!("Could not convert gprc block to tari block: {}", e)))?;
+            let mined_nonce = tari_block.header.nonce;
+            tari_block.header.nonce = 0;
+            let tari_hash = tari_block.header.hash();
+            tari_block.header.nonce = mined_nonce;
+            //todo dont remove, just peek
+            let mut p2pool_block =
+                self
+                    .template_store
+                    .read()
+                    .await.get(&tari_hash)
+                .ok_or(Status::internal("missing template"))?.clone();
+
+
+            p2pool_block.original_block = tari_block;
+            let mined_tari_hash = p2pool_block.original_block.hash();
+
+            debug!(target: LOG_TARGET, "Trace - getting block difficulty: {}", timer.elapsed().as_millis());
+            // Check block's difficulty compared to the latest network one to increase the probability
+            // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
+            let request_block_difficulty = match p2pool_block.original_block.header.pow.pow_algo {
+                PowAlgorithm::Sha3x => sha3x_difficulty(&p2pool_block.original_block.header)
+                    .map_err(|error| Status::internal(error.to_string()))?,
+                PowAlgorithm::RandomX => randomx_difficulty(
+                    &p2pool_block.original_block.header,
+                    self.block_validation_params.random_x_factory(),
+                    self.block_validation_params.genesis_block_hash(),
+                    self.block_validation_params.consensus_manager(),
+                )
+                    .map_err(|error| Status::internal(error.to_string()))?,
+            };
+            info!(
             target: LOG_TARGET,
             "Submitted {} block difficulty: {}",
-            origin_block_header.pow.pow_algo, request_block_difficulty
+            p2pool_block.original_block.header.pow.pow_algo, request_block_difficulty
         );
-        // TODO: Cache this so that we don't ask each time. If we have a block we should not
-        // waste time before submitting it, or we might lose a share
-        // let mut network_difficulty_stream = self
-        //     .client
-        //     .lock()
-        //     .await
-        //     .get_network_difficulty(HeightRequest {
-        //         from_tip: 0,
-        //         start_height: origin_block_header.height - 1,
-        //         end_height: origin_block_header.height,
-        //     })
-        //     .await?
-        //     .into_inner();
-        // let mut network_difficulty_matches = false;
-        // while let Ok(Some(diff_resp)) = network_difficulty_stream.message().await {
-        //     dbg!("Diff resp: {:?}", &diff_resp);
-        //     if origin_block_header.height == diff_resp.height + 1
-        //         && request_block_difficulty.as_u64() >= diff_resp.difficulty
-        //     {
-        //         network_difficulty_matches = true;
-        //     }
-        // }
-        debug!(target: LOG_TARGET, "Trace - getting network difficulty: {}", timer.elapsed().as_millis());
-        let network_difficulty = match origin_block_header.pow.pow_algo {
-            PowAlgorithm::Sha3x => self
-                .sha3_block_height_difficulty_cache
-                .read()
-                .await
-                .get(&(origin_block_header.height))
-                .copied()
-                .unwrap_or_else(Difficulty::min),
-            PowAlgorithm::RandomX => self
-                .randomx_block_height_difficulty_cache
-                .read()
-                .await
-                .get(&(origin_block_header.height))
-                .copied()
-                .unwrap_or_else(Difficulty::min),
-        };
-        let network_difficulty_matches = request_block_difficulty >= network_difficulty;
-        debug!(target: LOG_TARGET, "Trace - saving max difficulty: {}", timer.elapsed().as_millis());
-        let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
-        if *max_difficulty < request_block_difficulty {
-            *max_difficulty = request_block_difficulty;
-        }
 
-        block.achieved_difficulty = request_block_difficulty;
+            debug!(target: LOG_TARGET, "Trace - getting network difficulty: {}", timer.elapsed().as_millis());
+            let network_difficulty = match p2pool_block.original_block.header.pow.pow_algo {
+                PowAlgorithm::Sha3x => self
+                    .sha3_block_height_difficulty_cache
+                    .read()
+                    .await
+                    .get(&(p2pool_block.original_block.header.height))
+                    .copied()
+                    .unwrap_or_else(Difficulty::min),
+                PowAlgorithm::RandomX => self
+                    .randomx_block_height_difficulty_cache
+                    .read()
+                    .await
+                    .get(&(p2pool_block.original_block.header.height))
+                    .copied()
+                    .unwrap_or_else(Difficulty::min),
+            };
+            let network_difficulty_matches = request_block_difficulty >= network_difficulty;
+            debug!(target: LOG_TARGET, "Trace - saving max difficulty: {}", timer.elapsed().as_millis());
+            let mut max_difficulty = self.stats_max_difficulty_since_last_success.write().await;
+            if *max_difficulty < request_block_difficulty {
+                *max_difficulty = request_block_difficulty;
+            }
 
-        debug!(target: LOG_TARGET, "Trace - checking if can submit to main chain: {}", timer.elapsed().as_millis());
-        if network_difficulty_matches {
-            // submit block to base node
-            let (metadata, extensions, _inner) = request.into_parts();
-            info!(target: LOG_TARGET, "🔗 Submitting block  {} to base node...", origin_block_header.hash());
+            debug!(target: LOG_TARGET, "Trace - checking if can submit to main chain: {}", timer.elapsed().as_millis());
+            if network_difficulty_matches {
+                // submit block to base node
+                let (metadata, extensions, _inner) = request.into_parts();
+                info!(target: LOG_TARGET, "🔗 Submitting block  {} to base node...", mined_tari_hash);
 
-            let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-            match self.client.write().await.submit_block(grpc_request).await {
-                Ok(_resp) => {
-                    *max_difficulty = Difficulty::min();
-                    self.stats_broadcast.send_pool_block_accepted(pow_algo);
-                    // self.stats_store
-                        // .inc(&algo_stat_key(pow_algo, P2POOL_STAT_ACCEPTED_BLOCKS_COUNT), 1)
-                        // .await;
-                    info!(
+                let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
+                match self.client.write().await.submit_block(grpc_request).await {
+                    Ok(_resp) => {
+                        *max_difficulty = Difficulty::min();
+                        let _ = self.stats_broadcast.send_pool_block_accepted(pow_algo);
+                        info!(
                         target: LOG_TARGET,
                         "💰 New matching block found and sent to network! Block hash: {}",
-                        origin_block_header.hash()
+                        mined_tari_hash
                     );
-                    block.sent_to_main_chain = true;
-                    self.submit_share_chain_block(&block).await?;
-                },
-                Err(error) => {
-                    warn!(
+                        p2pool_block.sent_to_main_chain = true;
+                    },
+                    Err(error) => {
+                        warn!(
                         target: LOG_TARGET,
                         "Failed to submit block  {} to Tari network: {error:?}",
-                        origin_block_header.hash()
+                        mined_tari_hash
                     );
-                    warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
-                    // self.stats_store
-                    //     .inc(&algo_stat_key(pow_algo, P2POOL_STAT_REJECTED_BLOCKS_COUNT), 1)
-                    //     .await;
-                    self.stats_broadcast.send_pool_block_rejected(pow_algo);
-                    block.sent_to_main_chain = false;
-                    self.submit_share_chain_block(&block).await?;
+                        warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
+                        let _ = self.stats_broadcast.send_pool_block_rejected(pow_algo);
+                        p2pool_block.sent_to_main_chain = false;
 
-                    if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
-                        warn!(target: LOG_TARGET, "submit_block took {}ms and errored", timer.elapsed().as_millis());
-                    }
-                    return Err(Status::internal(error.to_string()));
-                },
+                        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+                            warn!(target: LOG_TARGET, "submit_block took {}ms and errored", timer.elapsed().as_millis());
+                        }
+                        return Err(Status::internal(error.to_string()));
+                    },
+                }
             }
-        } else {
-        debug!(target: LOG_TARGET, "Trace - submitting to share chain: {}", timer.elapsed().as_millis());
-            block.sent_to_main_chain = false;
+
+            debug!(target: LOG_TARGET, "Trace - submitting to share chain: {}", timer.elapsed().as_millis());
             // Don't error if we can't submit it.
-            match self.submit_share_chain_block(&block).await {
+            match self.submit_share_chain_block(&p2pool_block).await {
                 Ok(_) => {
-                    let pow_type = origin_block_header.pow.pow_algo.to_string();
+                    let pow_type = p2pool_block.original_block.header.pow.pow_algo.to_string();
                     info!(target: LOG_TARGET, "🔗 Block submitted to {} share chain!", pow_type);
                 },
                 Err(error) => {
                     warn!(target: LOG_TARGET, "Failed to submit block to share chain: {error:?}");
                 },
             };
-        }
 
-        // info!(target: LOG_TARGET,
-        //     "========= Max difficulty: {}. Network difficulty {}. Miner(A/R): {}/{}. Pool(A/R) {}/{}. ==== ",
-        //     max_difficulty.as_u64().to_formatted_string(&Locale::en),
-        //     network_difficulty.as_u64().to_formatted_string(&Locale::en),
-        //     stats[0],
-        //     stats[1],
-        //     stats[2],
-        //     stats[3]
-        // );
 
-        if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
-            warn!(target: LOG_TARGET, "submit_block took {}ms", timer.elapsed().as_millis());
-        }
 
-        Ok(Response::new(SubmitBlockResponse {
-            block_hash: block.hash.to_vec(),
-        }))
-    }).await;
+            if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
+                warn!(target: LOG_TARGET, "submit_block took {}ms", timer.elapsed().as_millis());
+            }
+
+            Ok(Response::new(SubmitBlockResponse {
+                block_hash: tari_hash.to_vec(),
+            }))
+        }).await;
 
         match result {
             Ok(response) => match response {

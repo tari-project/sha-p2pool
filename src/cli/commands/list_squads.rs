@@ -1,26 +1,17 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use anyhow::anyhow;
-use itertools::Itertools;
-use tari_shutdown::{Shutdown, ShutdownSignal};
-use tokio::{select, sync::oneshot, task::JoinHandle, time};
+use tari_shutdown::ShutdownSignal;
 
-use crate::{
-    cli::{
-        args::{Cli, ListSquadArgs, StartArgs},
-        commands::util,
-    },
-    server::p2p::peer_store::PeerStore,
-};
+use crate::cli::args::{Cli, ListSquadArgs, StartArgs};
 
 pub async fn handle_list_squads(
-    cli: Arc<Cli>,
-    args: &StartArgs,
-    list_squad_args: &ListSquadArgs,
-    cli_shutdown_signal: ShutdownSignal,
+    _cli: Arc<Cli>,
+    _args: &StartArgs,
+    _list_squad_args: &ListSquadArgs,
+    _cli_shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
     // start server asynchronously
     // let cli_ref = cli.clone();
@@ -71,5 +62,5 @@ pub async fn handle_list_squads(
     // print!("{}", serde_json::to_value(squads)?);
     todo!();
 
-    Ok(())
+    // Ok(())
 }
