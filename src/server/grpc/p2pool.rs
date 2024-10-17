@@ -43,7 +43,8 @@ use crate::{
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
 
-pub const MAX_STORED_TEMPLATES: usize = 20;
+pub const MAX_STORED_TEMPLATES_RX: usize = 30;
+pub const MAX_STORED_TEMPLATES_SHA3X: usize = 100;
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 
 pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
@@ -81,8 +82,10 @@ where S: ShareChain
     squad: Squad,
     coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-    template_store: RwLock<HashMap<FixedHash, P2Block>>,
-    list_of_templates: RwLock<VecDeque<FixedHash>>,
+    template_store_sha3x: RwLock<HashMap<FixedHash, P2Block>>,
+    list_of_templates_sha3x: RwLock<VecDeque<FixedHash>>,
+    template_store_rx: RwLock<HashMap<FixedHash, P2Block>>,
+    list_of_templates_rx: RwLock<VecDeque<FixedHash>>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -122,8 +125,10 @@ where S: ShareChain
             squad,
             coinbase_extras_sha3x,
             coinbase_extras_random_x,
-            template_store: RwLock::new(HashMap::new()),
-            list_of_templates: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES + 1)),
+            template_store_sha3x: RwLock::new(HashMap::new()),
+            list_of_templates_sha3x: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_SHA3X + 1)),
+            template_store_rx: RwLock::new(HashMap::new()),
+            list_of_templates_rx: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_RX + 1)),
         })
     }
 
@@ -272,13 +277,27 @@ where S: ShareChain
             let _ = self.stats_broadcast.send_target_difficulty(pow_algo, target_difficulty);
 
             // save template
-            let mut list_of_template_write_lock = self.list_of_templates.write().await;
-            list_of_template_write_lock.push_back(tari_hash.clone());
-            if list_of_template_write_lock.len() > MAX_STORED_TEMPLATES {
-                let _ = list_of_template_write_lock.pop_front();
-            }
-            drop(list_of_template_write_lock);
-            self.template_store.write().await.insert(tari_hash, new_tip_block);
+            match pow_algo {
+                PowAlgorithm::Sha3x => {
+                    let mut write_lock = self.list_of_templates_sha3x.write().await;
+                    write_lock.push_back(tari_hash.clone());
+                    if write_lock.len() > MAX_STORED_TEMPLATES_SHA3X {
+                        let _ = write_lock.pop_front();
+                    }
+                },
+                PowAlgorithm::RandomX => {
+                    let mut write_lock = self.list_of_templates_rx.write().await;
+                    write_lock.push_back(tari_hash.clone());
+                    if write_lock.len() > MAX_STORED_TEMPLATES_RX {
+                        let _ = write_lock.pop_front();
+                    }
+                },
+            };
+
+            match pow_algo {
+                PowAlgorithm::Sha3x => self.template_store_sha3x.write().await.insert(tari_hash, new_tip_block),
+                PowAlgorithm::RandomX => self.template_store_rx.write().await.insert(tari_hash, new_tip_block),
+            };
 
             if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
                 warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
@@ -351,12 +370,18 @@ where S: ShareChain
             let tari_hash = tari_block.header.hash();
             tari_block.header.nonce = mined_nonce;
             //todo dont remove, just peek
-            let mut p2pool_block =
-                self
-                    .template_store
+            let mut p2pool_block = match pow_algo{
+                PowAlgorithm::Sha3x =>  self
+                    .template_store_sha3x
                     .read()
                     .await.get(&tari_hash)
-                .ok_or(Status::internal("missing template"))?.clone();
+                    .ok_or(Status::internal("missing template"))?.clone(),
+                PowAlgorithm::RandomX =>  self
+                    .template_store_rx
+                    .read()
+                    .await.get(&tari_hash)
+                    .ok_or(Status::internal("missing template"))?.clone(),
+            };
 
 
             p2pool_block.original_block = tari_block;
