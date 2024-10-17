@@ -145,7 +145,7 @@ impl InMemoryShareChain {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() {
-            if syncing || block.height == 0 {
+            if (syncing && block.height > MAX_BLOCKS_COUNT as u64) || block.height == 0 {
                 p2_chain.add_block_to_chain(block.clone())?;
                 return Ok(());
             } else {
@@ -299,27 +299,36 @@ impl ShareChain for InMemoryShareChain {
             .await;
         let _ = self.stat_client.send_chain_changed(
             self.pow_algo,
-            p2_chain_write_lock.get_max_level_height(),
+            p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<(), Error> {
+    async fn add_synced_blocks(&self, blocks: &[P2Block]) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         for block in blocks {
-            self.submit_block_with_lock(
-                &mut p2_chain_write_lock,
-                &block,
-                self.block_validation_params.clone(),
-                true,
-            )
-            .await?;
+            dbg!(block.height);
+            match self
+                .submit_block_with_lock(
+                    &mut p2_chain_write_lock,
+                    &block,
+                    self.block_validation_params.clone(),
+                    true,
+                )
+                .await
+            {
+                Ok(_) => (),
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Failed to add block: {}", e);
+                    return Err(e);
+                },
+            }
         }
         let _ = self.stat_client.send_chain_changed(
             self.pow_algo,
-            p2_chain_write_lock.get_max_level_height(),
+            p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
         Ok(())

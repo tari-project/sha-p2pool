@@ -32,7 +32,7 @@ use libp2p::{
     multiaddr::Protocol,
     noise,
     relay,
-    request_response::{self, cbor, ResponseChannel},
+    request_response::{self, cbor, json, ResponseChannel},
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
@@ -244,7 +244,6 @@ where S: ShareChain
     share_chain_random_x: Arc<S>,
     network_peer_store: PeerStore,
     config: Config,
-    sync_permits: Arc<AtomicU32>,
     shutdown_signal: ShutdownSignal,
     // share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
     query_tx: mpsc::Sender<P2pServiceQuery>,
@@ -277,7 +276,6 @@ where S: ShareChain
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<P2Block>(1000);
         let (_share_chain_sync_tx, _share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
         let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, P2Block)>(1000);
-        let sync_permits = Arc::new(AtomicU32::new(config.p2p_service.max_in_progress_sync_requests as u32));
         let (query_tx, query_rx) = mpsc::channel(100);
 
         Ok(Self {
@@ -290,7 +288,6 @@ where S: ShareChain
             shutdown_signal,
             client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
-            sync_permits,
             query_tx,
             query_rx,
             snooze_block_rx,
@@ -392,7 +389,7 @@ where S: ShareChain
                             StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
                             request_response::ProtocolSupport::Full,
                         )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
+                        request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
                     ),
                     kademlia: kad::Behaviour::new(
                         key_pair.public().to_peer_id(),
@@ -466,7 +463,7 @@ where S: ShareChain
         let peer_info_squad_raw = PeerInfo::new(
             current_height_sha3x,
             current_height_random_x,
-            self.config.squad.clone(),
+            self.config.squad.as_string(),
             public_addresses,
             Some(self.config.user_agent.clone()),
         );
@@ -578,7 +575,7 @@ where S: ShareChain
                         trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                         return;
                     }
-                    if payload.squad != self.config.squad {
+                    if payload.squad != self.config.squad.as_string() {
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is not in the same squad, skipping. Our squad: {}, their squad:{}", peer, self.config.squad, payload.squad);
                         return;
                     }
@@ -635,22 +632,15 @@ where S: ShareChain
                         if let Ok((snoozed, num_missing_parents)) =
                             Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
                         {
-                            if self.sync_permits.load(Ordering::SeqCst) > 0 {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Max sync permits reached, skipping peer info sync");
-                            } else {
-                                self.sync_permits.fetch_sub(1, Ordering::SeqCst);
-                                self.sync_share_chain(
-                                    payload.original_block.header.pow.pow_algo,
-                                    peer,
-                                    Some(payload.height.saturating_sub(num_missing_parents)),
-                                )
-                                .await;
-                                if snoozed {
-                                    let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
-                                }
+                            self.sync_share_chain(
+                                payload.original_block.header.pow.pow_algo,
+                                peer,
+                                Some(payload.height.saturating_sub(num_missing_parents)),
+                            )
+                            .await;
+                            if snoozed {
+                                let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
                             }
-                        } else {
-                            error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add new block to share chain");
                         }
                     },
                     Err(error) => {
@@ -669,7 +659,7 @@ where S: ShareChain
     async fn add_peer_and_try_sync(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
         let their_randomx_height = payload.current_random_x_height;
         let their_sha3x_height = payload.current_sha3x_height;
-        for addr in &payload.public_addresses {
+        for addr in &payload.public_addresses() {
             self.swarm.add_peer_address(peer, addr.clone());
         }
         let (add_status, last_sync_attempt) = self.network_peer_store.add(peer, payload).await;
@@ -689,7 +679,7 @@ where S: ShareChain
                         .direct_peer_exchange
                         .send_request(&peer, DirectPeerInfoRequest {
                             info: my_info,
-                            peer_id: local_peer_id,
+                            peer_id: local_peer_id.to_base58(),
                         });
                 }
             },
@@ -779,7 +769,7 @@ where S: ShareChain
                 .behaviour_mut()
                 .direct_peer_exchange
                 .send_response(channel, DirectPeerInfoResponse {
-                    peer_id: local_peer_id,
+                    peer_id: local_peer_id.to_base58(),
                     info,
                 })
                 .is_err()
@@ -788,11 +778,13 @@ where S: ShareChain
             }
         }
 
-        self.add_peer_and_try_sync(request.info, request.peer_id).await;
+        self.add_peer_and_try_sync(request.info, request.peer_id.parse().unwrap())
+            .await;
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        self.add_peer_and_try_sync(response.info, response.peer_id).await;
+        self.add_peer_and_try_sync(response.info, response.peer_id.parse().unwrap())
+            .await;
     }
 
     /// Handles share chain sync request (coming from other peer).
@@ -805,17 +797,17 @@ where S: ShareChain
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync request: {request:?}");
 
         info!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
-        let share_chain = match request.algo {
+        let share_chain = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.blocks(request.from_height).await {
+        match share_chain.blocks(request.from_height()).await {
             Ok(blocks) => {
                 if self
                     .swarm
                     .behaviour_mut()
                     .share_chain_sync
-                    .send_response(channel, ShareChainSyncResponse::new(request.algo, blocks.clone()))
+                    .send_response(channel, ShareChainSyncResponse::new(request.algo(), blocks.clone()))
                     .is_err()
                 {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
@@ -836,11 +828,11 @@ where S: ShareChain
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
         // }
-        let share_chain = match response.algo {
+        let share_chain = match response.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.add_synced_blocks(response.blocks).await {
+        match share_chain.add_synced_blocks(response.blocks()).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 // Ok(())
@@ -871,7 +863,8 @@ where S: ShareChain
         }
 
         info!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
-        self.swarm
+        let _outbound_id = self
+            .swarm
             .behaviour_mut()
             .share_chain_sync
             .send_request(&peer, ShareChainSyncRequest::new(algo, from_tip.unwrap_or(0)));
@@ -960,9 +953,14 @@ where S: ShareChain
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
-                        debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
-                        // Unlock the permit
-                        self.network_peer_store.move_to_grey_list(peer, error.to_string()).await;
+                        warn!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
+                        // TODO: find out why this errors
+                        // self.network_peer_store
+                        //     .move_to_grey_list(
+                        //         peer,
+                        //         format!("Error during direct peer exchange: {}", error.to_string()),
+                        //     )
+                        //     .await;
                     },
                     request_response::Event::InboundFailure { peer, error, .. } => {
                         error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES  peer info inbound failure: {peer:?} -> {error:?}");
@@ -989,7 +987,9 @@ where S: ShareChain
                         // Peers can be offline
                         warn!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                         // Unlock the permit
-                        self.network_peer_store.move_to_grey_list(peer, error.to_string()).await;
+                        self.network_peer_store
+                            .move_to_grey_list(peer, format!("Error during share chain sync:{}", error.to_string()))
+                            .await;
 
                         // Remove peer from peer store to try to sync from another peer,
                         // if the peer goes online/accessible again, the peer store will have it again.
