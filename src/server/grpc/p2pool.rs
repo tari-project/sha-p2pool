@@ -23,7 +23,7 @@ use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     blocks::Block,
     consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm},
+    proof_of_work::{randomx_difficulty, randomx_factory::RandomXFactory, sha3x_difficulty, Difficulty, PowAlgorithm, PowData},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
@@ -40,21 +40,9 @@ use crate::{
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
 
-pub const MAX_STORED_TEMPLATES_RX: usize = 30;
+pub const MAX_STORED_TEMPLATES_RX: usize = 100;
 pub const MAX_STORED_TEMPLATES_SHA3X: usize = 100;
 const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
-
-pub fn min_difficulty(consensus_manager: &ConsensusManager, pow: PowAlgorithm, height: u64) -> Difficulty {
-    let consensus_constants = consensus_manager.consensus_constants(height);
-    match pow {
-        PowAlgorithm::RandomX => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).unwrap_or(Difficulty::min())
-        },
-        PowAlgorithm::Sha3x => {
-            Difficulty::from_u64(consensus_constants.min_pow_difficulty(pow).as_u64() / 4).unwrap_or(Difficulty::min())
-        }, // SHA min difficulty is too low. Will be updated in future
-    }
-}
 
 /// P2Pool specific gRPC service to provide `get_new_block` and `submit_block` functionalities.
 pub(crate) struct ShaP2PoolGrpc<S>
@@ -361,9 +349,13 @@ where S: ShareChain
                 .try_into()
                 .map_err(|e| Status::internal(format!("Could not convert gprc block to tari block: {}", e)))?;
             let mined_nonce = tari_block.header.nonce;
+            let temp_pow_data = tari_block.header.pow.pow_data.clone();
             tari_block.header.nonce = 0;
+            tari_block.header.pow.pow_data =PowData::default();
+            
             let tari_hash = tari_block.header.hash();
             tari_block.header.nonce = mined_nonce;
+            tari_block.header.pow.pow_data = temp_pow_data;
             //todo dont remove, just peek
             let mut p2pool_block = match pow_algo{
                 PowAlgorithm::Sha3x =>  self

@@ -15,9 +15,16 @@ use tari_core::{
 use tari_utilities::epoch_time::EpochTime;
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
-use super::{MAIN_REWARD_SHARE, MAX_BLOCKS_COUNT, SHARE_WINDOW, UNCLE_REWARD_SHARE};
+use super::{
+    MAIN_REWARD_SHARE,
+    MAX_BLOCKS_COUNT,
+    MIN_RANDOMX_SCALING_FACTOR,
+    MIN_SHA3X_SCALING_FACTOR,
+    SHARE_WINDOW,
+    UNCLE_REWARD_SHARE,
+};
 use crate::{
-    server::{grpc::p2pool::min_difficulty, http::stats_collector::StatsBroadcastClient, p2p::Squad},
+    server::{http::stats_collector::StatsBroadcastClient, p2p::Squad},
     sharechain::{
         error::{Error, ValidationError},
         p2block::P2Block,
@@ -86,20 +93,6 @@ impl InMemoryShareChain {
         }
     }
 
-    fn validate_min_difficulty(
-        &self,
-        pow: PowAlgorithm,
-        curr_difficulty: Difficulty,
-        height: u64,
-    ) -> Result<(), ValidationError> {
-        if curr_difficulty < min_difficulty(&self.consensus_manager, pow, height) {
-            warn!(target: LOG_TARGET, "[{:?}] ❌ Too low difficulty!", self.pow_algo);
-            return Err(ValidationError::DifficultyBelowMinimum);
-        }
-
-        Ok(())
-    }
-
     /// Validating a new block.
     async fn validate_block(
         &self,
@@ -128,7 +121,6 @@ impl InMemoryShareChain {
                 sha3x_difficulty(&block.original_block.header).map_err(ValidationError::Difficulty)?
             },
         };
-        self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block.header.height)?;
         if curr_difficulty < block.target_difficulty {
             return Err(ValidationError::DifficultyTarget);
         }
@@ -537,10 +529,18 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty {
-        let min = self
+        let mut min = self
             .consensus_manager
             .consensus_constants(height)
             .min_pow_difficulty(self.pow_algo);
+        match self.pow_algo {
+            PowAlgorithm::RandomX => {
+                min = Difficulty::from_u64(min.as_u64() / MIN_RANDOMX_SCALING_FACTOR).unwrap();
+            },
+            PowAlgorithm::Sha3x => {
+                min = Difficulty::from_u64(min.as_u64() / MIN_SHA3X_SCALING_FACTOR).unwrap();
+            },
+        }
         let max = self
             .consensus_manager
             .consensus_constants(height)

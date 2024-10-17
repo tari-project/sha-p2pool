@@ -54,6 +54,9 @@ pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 
 pub const BLOCK_TARGET_TIME: u64 = 10;
 
+pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 5; // i.e. 1/5 of the minimum difficulty
+pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1; // i.e. 1/5 of the minimum difficulty
+
 pub mod error;
 pub mod in_memory;
 pub mod p2block;
