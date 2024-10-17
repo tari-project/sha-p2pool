@@ -186,12 +186,12 @@ where S: ShareChain
             let mut new_tip_block = (*share_chain
                 .generate_new_tip_block(&wallet_payment_address, coinbase_extra)
                 .await
-                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?)
+                .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
             let shares = share_chain
                 .generate_shares(&new_tip_block)
                 .await
-                .map_err(|error| Status::internal(format!("failed to convert coinbase extra {error:?}")))?;
+                .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
             let mut response = self
                 .client
