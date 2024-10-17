@@ -351,12 +351,16 @@ impl ShareChain for InMemoryShareChain {
             (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
         );
         for uncle in new_tip_block.uncles.iter() {
-            let uncle_block = chain_read_lock
+            let uncle_block = match chain_read_lock
                 .get_at_height(uncle.0)
                 .ok_or_else(|| Error::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
-                .ok_or_else(|| Error::UncleBlockNotFound)?;
+            {
+                Some(v) => v,
+                None => continue,
+            };
+            // .ok_or_else(|| Error::UncleBlockNotFound)?;
             miners_to_shares.insert(
                 uncle_block.miner_wallet_address.to_base58(),
                 (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
