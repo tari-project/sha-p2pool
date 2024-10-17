@@ -365,7 +365,11 @@ where S: ShareChain
                 }
 
                 // relay server
-                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(), Default::default());
+                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(), relay::Config{
+                    max_reservations: if config.p2p_service.is_seed_peer {  1024 } else { 512 },
+                    ..Default::default()
+                }
+                );
 
                 Ok(ServerNetworkBehaviour {
                     gossipsub,
