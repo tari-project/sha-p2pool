@@ -42,6 +42,7 @@ pub(crate) struct P2Block {
     // list of uncles blocks confirmed by this block
     // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
+    pub miner_coinbase_extra: Vec<u8>,
 }
 impl_conversions!(P2Block);
 
@@ -60,6 +61,7 @@ impl P2Block {
             .chain(&self.original_block.header)
             .chain(&self.target_difficulty)
             .chain(&self.uncles)
+            .chain(&self.miner_coinbase_extra)
             .finalize()
             .into()
     }
@@ -93,7 +95,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: P2Block {
-                version: 4,
+                version: 5,
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),
@@ -103,6 +105,7 @@ impl BlockBuilder {
                 sent_to_main_chain: false,
                 target_difficulty: Difficulty::min(),
                 uncles: Vec::new(),
+                miner_coinbase_extra: vec![],
             },
         }
     }
@@ -134,6 +137,11 @@ impl BlockBuilder {
 
     pub fn with_miner_wallet_address(mut self, miner_wallet_address: TariAddress) -> Self {
         self.block.miner_wallet_address = miner_wallet_address;
+        self
+    }
+
+    pub fn with_miner_coinbase_extra(mut self, coinbase_extra: Vec<u8>) -> Self {
+        self.block.miner_coinbase_extra = coinbase_extra;
         self
     }
 

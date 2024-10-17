@@ -17,11 +17,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use super::{MAIN_REWARD_SHARE, MAX_BLOCKS_COUNT, SHARE_WINDOW, UNCLE_REWARD_SHARE};
 use crate::{
-    server::{
-        grpc::{p2pool::min_difficulty},
-        http::stats_collector::StatsBroadcastClient,
-        p2p::Squad,
-    },
+    server::{grpc::p2pool::min_difficulty, http::stats_collector::StatsBroadcastClient, p2p::Squad},
     sharechain::{
         error::{Error, ValidationError},
         p2block::P2Block,
@@ -236,7 +232,7 @@ impl InMemoryShareChain {
             &mut miners_to_shares,
             cur_block.miner_wallet_address.to_base58(),
             MAIN_REWARD_SHARE,
-            cur_block.miner_coinbase_extra.clone()
+            cur_block.miner_coinbase_extra.clone(),
         );
         for uncle in cur_block.uncles.iter() {
             let uncle_block = p2_chain
@@ -249,7 +245,7 @@ impl InMemoryShareChain {
                 &mut miners_to_shares,
                 uncle_block.miner_wallet_address.to_base58(),
                 UNCLE_REWARD_SHARE,
-                uncle_block.miner_coinbase_extra.clone()
+                uncle_block.miner_coinbase_extra.clone(),
             );
         }
         if cur_block.height == stop_height {}
@@ -259,7 +255,7 @@ impl InMemoryShareChain {
                 &mut miners_to_shares,
                 cur_block.miner_wallet_address.to_base58(),
                 MAIN_REWARD_SHARE,
-                cur_block.miner_coinbase_extra.clone()
+                cur_block.miner_coinbase_extra.clone(),
             );
             for uncle in cur_block.uncles.iter() {
                 let uncle_block = p2_chain
@@ -272,7 +268,7 @@ impl InMemoryShareChain {
                     &mut miners_to_shares,
                     uncle_block.miner_wallet_address.to_base58(),
                     UNCLE_REWARD_SHARE,
-                    uncle_block.miner_coinbase_extra.clone()
+                    uncle_block.miner_coinbase_extra.clone(),
                 );
             }
         }
@@ -334,7 +330,10 @@ impl ShareChain for InMemoryShareChain {
         }
 
         // lets add the new tip block to the hashmap
-        miners_to_shares.insert(new_tip_block.miner_wallet_address.to_base58(), (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()));
+        miners_to_shares.insert(
+            new_tip_block.miner_wallet_address.to_base58(),
+            (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
+        );
         for uncle in new_tip_block.uncles.iter() {
             let uncle_block = chain_read_lock
                 .get_at_height(uncle.0)
@@ -342,7 +341,10 @@ impl ShareChain for InMemoryShareChain {
                 .blocks
                 .get(&uncle.1)
                 .ok_or_else(|| Error::UncleBlockNotFound)?;
-            miners_to_shares.insert(uncle_block.miner_wallet_address.to_base58(), (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()));
+            miners_to_shares.insert(
+                uncle_block.miner_wallet_address.to_base58(),
+                (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+            );
         }
 
         let mut res = vec![];
