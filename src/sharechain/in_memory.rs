@@ -303,6 +303,9 @@ impl ShareChain for InMemoryShareChain {
     async fn add_synced_blocks(&self, blocks: &[P2Block]) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
+        let mut blocks = blocks.to_vec();
+        blocks.reverse();
+
         for block in blocks {
             dbg!(block.height);
             match self
@@ -317,7 +320,7 @@ impl ShareChain for InMemoryShareChain {
                 Ok(_) => (),
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to add block: {}", e);
-                    return Err(e);
+                    // return Err(e);
                 },
             }
         }

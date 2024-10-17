@@ -857,9 +857,14 @@ where S: ShareChain
 
         info!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
-        if !self.network_peer_store.is_whitelisted(&peer) {
-            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, skipping sync");
+        if self.network_peer_store.is_blacklisted(&peer) {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is blacklisted, skipping sync");
             return;
+        }
+
+        if !self.network_peer_store.is_whitelisted(&peer) {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
+            // return;
         }
 
         info!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
