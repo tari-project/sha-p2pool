@@ -103,7 +103,6 @@ impl InMemoryShareChain {
     /// Validating a new block.
     async fn validate_block(
         &self,
-        _last_block: &P2Block,
         block: &P2Block,
         params: Option<Arc<BlockValidationParams>>,
     ) -> Result<Difficulty, ValidationError> {
@@ -130,6 +129,9 @@ impl InMemoryShareChain {
             },
         };
         self.validate_min_difficulty(pow_algo, curr_difficulty, block.original_block.header.height)?;
+        if curr_difficulty < block.target_difficulty {
+            return Err(ValidationError::DifficultyTarget);
+        }
 
         Ok(curr_difficulty)
     }
@@ -172,16 +174,9 @@ impl InMemoryShareChain {
             }
         }
 
-        let parent = p2_chain
-            .get_parent_block(block)
-            .ok_or_else(|| Error::BlockParentDoesNotExist {
-                num_missing_parents: block.height.saturating_sub(tip_height),
-            })?;
-
         // validate
-        let validate_result = self.validate_block(parent, block, params).await?;
-        let mut new_block = block.clone();
-        new_block.target_difficulty = validate_result;
+        let _validate_result = self.validate_block(block, params).await?;
+        let new_block = block.clone();
 
         // add block to chain
         p2_chain.add_block_to_chain(new_block)?;
