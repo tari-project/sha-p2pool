@@ -348,22 +348,11 @@ where S: ShareChain
             //todo dont remove, just peek
             let mut p2pool_block = self
                 .template_store
-                .write()
+                .read()
                 .await
-                .remove(&tari_hash)
+                .get(&tari_hash)
                 .ok_or(Status::internal("missing template"))?;
-            let mut list_of_template_write_lock = self.list_of_templates.write().await;
-            let mut delete_index = None;
-            for (index, hash) in list_of_template_write_lock.iter().enumerate() {
-                if hash == &tari_hash {
-                    delete_index = Some(index);
-                    break;
-                }
-            }
-            if let Some(index) = delete_index {
-                list_of_template_write_lock.remove(index);
-            }
-            drop(list_of_template_write_lock);
+
             p2pool_block.original_block = tari_block;
             let mined_tari_hash = p2pool_block.original_block.hash();
 
