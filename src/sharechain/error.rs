@@ -56,4 +56,6 @@ pub enum ValidationError {
     Difficulty(#[from] DifficultyError),
     #[error("RandomX difficulty calculation error: {0}")]
     RandomXDifficulty(#[from] MergeMineError),
+    #[error("Block achieved difficulty is below the target")]
+    DifficultyTarget,
 }
