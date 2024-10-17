@@ -167,7 +167,7 @@ impl InMemoryShareChain {
         let parent = p2_chain
             .get_parent_block(block)
             .ok_or_else(|| Error::BlockParentDoesNotExist {
-                num_missing_parents: block.height - tip_height,
+                num_missing_parents: block.height.saturating_sub(tip_height),
             })?;
 
         // validate
