@@ -46,18 +46,18 @@ pub struct PeerInfo {
     pub version: u64,
     pub current_sha3x_height: u64,
     pub current_random_x_height: u64,
-    pub squad: Squad,
+    pub squad: String,
     pub timestamp: u64,
     pub user_agent: Option<String>,
     pub user_agent_version: Option<String>,
-    pub public_addresses: Vec<Multiaddr>,
+    public_addresses: Vec<String>,
 }
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(
         current_sha3x_height: u64,
         current_random_x_height: u64,
-        squad: Squad,
+        squad: String,
         public_addresses: Vec<Multiaddr>,
         user_agent: Option<String>,
     ) -> Self {
@@ -70,32 +70,47 @@ impl PeerInfo {
             timestamp: timestamp.as_u64(),
             user_agent,
             user_agent_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            public_addresses,
+            public_addresses: public_addresses.iter().map(|addr| addr.to_string()).collect(),
         }
+    }
+
+    pub fn public_addresses(&self) -> Vec<Multiaddr> {
+        self.public_addresses.iter().map(|addr| addr.parse().unwrap()).collect()
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncRequest {
-    pub algo: PowAlgorithm,
-    pub from_height: u64,
+    algo: u64,
+    from_height: u64,
 }
 
 impl ShareChainSyncRequest {
     pub fn new(algo: PowAlgorithm, from_height: u64) -> Self {
-        Self { algo, from_height }
+        Self {
+            algo: algo.as_u64(),
+            from_height,
+        }
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        PowAlgorithm::try_from(self.algo).unwrap()
+    }
+
+    pub fn from_height(&self) -> u64 {
+        self.from_height
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoRequest {
-    pub peer_id: PeerId,
+    pub peer_id: String,
     pub info: PeerInfo,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoResponse {
-    pub peer_id: PeerId,
+    pub peer_id: String,
     pub info: PeerInfo,
 }
 
@@ -113,12 +128,23 @@ impl LocalShareChainSyncRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
-    pub algo: PowAlgorithm,
-    pub blocks: Vec<P2Block>,
+    algo: u64,
+    blocks: Vec<P2Block>,
 }
 
 impl ShareChainSyncResponse {
     pub fn new(algo: PowAlgorithm, blocks: Vec<P2Block>) -> Self {
-        Self { algo, blocks }
+        Self {
+            algo: algo.as_u64(),
+            blocks,
+        }
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        PowAlgorithm::try_from(self.algo).unwrap()
+    }
+
+    pub fn blocks(&self) -> &[P2Block] {
+        &self.blocks
     }
 }
