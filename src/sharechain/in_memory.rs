@@ -140,12 +140,20 @@ impl InMemoryShareChain {
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
         block: &P2Block,
         params: Option<Arc<BlockValidationParams>>,
+        syncing: bool,
     ) -> Result<(), Error> {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() {
-            p2_chain.add_block_to_chain(block.clone())?;
-            return Ok(());
+            if syncing || block.height == 0 {
+                p2_chain.add_block_to_chain(block.clone())?;
+                return Ok(());
+            } else {
+                // we just received a propagated block and we dont have any blocks, we need to sync.
+                return Err(Error::BlockParentDoesNotExist {
+                    num_missing_parents: block.height.saturating_sub(SHARE_WINDOW as u64),
+                });
+            }
         }
 
         // this is safe as we already checked it does exist
@@ -282,7 +290,12 @@ impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: &P2Block) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let res = self
-            .submit_block_with_lock(&mut p2_chain_write_lock, block, self.block_validation_params.clone())
+            .submit_block_with_lock(
+                &mut p2_chain_write_lock,
+                block,
+                self.block_validation_params.clone(),
+                false,
+            )
             .await;
         let _ = self.stat_client.send_chain_changed(
             self.pow_algo,
@@ -296,8 +309,13 @@ impl ShareChain for InMemoryShareChain {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         for block in blocks {
-            self.submit_block_with_lock(&mut p2_chain_write_lock, &block, self.block_validation_params.clone())
-                .await?;
+            self.submit_block_with_lock(
+                &mut p2_chain_write_lock,
+                &block,
+                self.block_validation_params.clone(),
+                true,
+            )
+            .await?;
         }
         let _ = self.stat_client.send_chain_changed(
             self.pow_algo,

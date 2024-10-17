@@ -346,12 +346,13 @@ where S: ShareChain
             let tari_hash = tari_block.header.hash();
             tari_block.header.nonce = mined_nonce;
             //todo dont remove, just peek
-            let mut p2pool_block = self
-                .template_store
-                .read()
-                .await
-                .get(&tari_hash)
-                .ok_or(Status::internal("missing template"))?;
+            let mut p2pool_block =
+                self
+                    .template_store
+                    .read()
+                    .await.get(&tari_hash)
+                .ok_or(Status::internal("missing template"))?.clone();
+
 
             p2pool_block.original_block = tari_block;
             let mined_tari_hash = p2pool_block.original_block.hash();
