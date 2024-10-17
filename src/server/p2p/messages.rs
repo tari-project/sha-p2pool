@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{
-    server::p2p::{Error, Squad},
-    sharechain::p2block::P2Block,
-};
+use crate::{server::p2p::Error, sharechain::p2block::P2Block};
 
 #[macro_export]
 macro_rules! impl_conversions {
