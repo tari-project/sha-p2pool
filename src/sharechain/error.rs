@@ -10,14 +10,12 @@ use tari_core::{
 };
 use thiserror::Error;
 
-use crate::sharechain::p2block::P2Block;
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),
-    #[error("Invalid block: {0:?}")]
-    InvalidBlock(P2Block),
+    #[error("Invalid block: {reason}")]
+    InvalidBlock { reason: String },
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
     #[error("Consensus builder error: {0}")]

@@ -20,7 +20,10 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
 
@@ -114,8 +117,8 @@ impl P2Chain {
                 if hash == level.chain_block {
                     // its the main block, so remove its difficulty
                     self.decrease_total_chain_difficulty(block.target_difficulty)?;
-                    for (height, block_hash) in block.uncles {
-                        let link_level = self.get_at_height(height).ok_or(Error::BlockLevelNotFound)?;
+                    for (height, block_hash) in &block.uncles {
+                        let link_level = self.get_at_height(*height).ok_or(Error::BlockLevelNotFound)?;
                         let uncle_block = link_level.blocks.get(&block_hash).ok_or(Error::BlockNotFound)?;
                         self.decrease_total_chain_difficulty(uncle_block.target_difficulty)?;
                     }
@@ -130,7 +133,7 @@ impl P2Chain {
         Ok(())
     }
 
-    pub fn add_block_to_chain(&mut self, block: P2Block) -> Result<(), Error> {
+    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
         // edge case if its the first block
         if self.get_tip().is_none() {
             self.lwma
@@ -327,7 +330,7 @@ impl P2Chain {
         Ok(())
     }
 
-    pub fn get_parent_block(&self, block: &P2Block) -> Option<&P2Block> {
+    pub fn get_parent_block(&self, block: &P2Block) -> Option<&Arc<P2Block>> {
         let parent_height = match block.height.checked_sub(1) {
             Some(height) => height,
             None => return None,

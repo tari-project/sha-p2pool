@@ -24,8 +24,6 @@ pub enum Error {
     SerializeDeserialize(#[from] serde_cbor::Error),
     #[error("Share chain error: {0}")]
     ShareChain(#[from] sharechain::error::Error),
-    #[error("Share chain error: {0}")]
-    Client(#[from] p2p::client::ClientError),
 }
 
 #[derive(Error, Debug)]

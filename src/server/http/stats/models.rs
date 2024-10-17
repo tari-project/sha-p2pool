@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tari_common_types::tari_address::TariAddress;
 use tari_core::transactions::tari_amount::MicroMinotari;
@@ -16,8 +18,8 @@ pub struct StatsBlock {
     pub miner_wallet_address: TariAddress,
 }
 
-impl From<P2Block> for StatsBlock {
-    fn from(block: P2Block) -> Self {
+impl From<Arc<P2Block>> for StatsBlock {
+    fn from(block: Arc<P2Block>) -> Self {
         StatsBlock {
             hash: block.hash.to_hex(),
             height: block.height,

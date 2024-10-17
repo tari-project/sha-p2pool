@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use tari_common_types::types::BlockHash;
 
@@ -28,13 +28,13 @@ use crate::sharechain::{error::Error, p2block::P2Block};
 /// A collection of blocks with the same height.
 #[derive(Debug, Clone)]
 pub struct P2ChainLevel {
-    pub blocks: HashMap<BlockHash, P2Block>,
+    pub blocks: HashMap<BlockHash, Arc<P2Block>>,
     pub height: u64,
     pub chain_block: BlockHash,
 }
 
 impl P2ChainLevel {
-    pub fn new(block: P2Block) -> Self {
+    pub fn new(block: Arc<P2Block>) -> Self {
         let mut blocks = HashMap::new();
         let chain_block = block.hash.clone();
         let height = block.height;
@@ -54,9 +54,11 @@ impl P2ChainLevel {
         }
     }
 
-    pub fn add_block(&mut self, block: P2Block, replace_tip: bool) -> Result<(), crate::sharechain::error::Error> {
+    pub fn add_block(&mut self, block: Arc<P2Block>, replace_tip: bool) -> Result<(), crate::sharechain::error::Error> {
         if self.height != block.height {
-            return Err(Error::InvalidBlock(block));
+            return Err(Error::InvalidBlock {
+                reason: "Block height does not match the chain level height".to_string(),
+            });
         }
         if replace_tip {
             self.chain_block = block.hash.clone();
@@ -65,7 +67,7 @@ impl P2ChainLevel {
         Ok(())
     }
 
-    pub fn block_in_main_chain(&self) -> Option<&P2Block> {
+    pub fn block_in_main_chain(&self) -> Option<&Arc<P2Block>> {
         self.blocks.get(&self.chain_block)
     }
 }

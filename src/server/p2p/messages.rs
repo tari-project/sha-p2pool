@@ -1,15 +1,14 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
+
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{
-    server::p2p::{Error, Squad},
-    sharechain::p2block::P2Block,
-};
+use crate::{server::p2p::Error, sharechain::p2block::P2Block};
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -133,10 +132,10 @@ pub struct ShareChainSyncResponse {
 }
 
 impl ShareChainSyncResponse {
-    pub fn new(algo: PowAlgorithm, blocks: Vec<P2Block>) -> Self {
+    pub fn new(algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
         Self {
             algo: algo.as_u64(),
-            blocks,
+            blocks: blocks.iter().map(|block| (**block).clone()).collect(),
         }
     }
 
@@ -144,7 +143,7 @@ impl ShareChainSyncResponse {
         PowAlgorithm::try_from(self.algo).unwrap()
     }
 
-    pub fn blocks(&self) -> &[P2Block] {
-        &self.blocks
+    pub fn into_blocks(self) -> Vec<P2Block> {
+        self.blocks
     }
 }
