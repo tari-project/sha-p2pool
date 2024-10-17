@@ -6,7 +6,7 @@ use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
-use num::{traits::SaturatingSub, BigUint, Zero};
+use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
@@ -130,7 +130,7 @@ impl InMemoryShareChain {
 
     // this tries to go through the log parent hashes to try and find a matching hash in our change and send back the
     // missing parents. if the block hashes dont match at 10/20/100/2160, it will ask for a complete sync
-    fn try_calculate_last_known_parent(p2_chain: &mut RwLockWriteGuard<'_, P2Chain>, block: &P2Block) -> Error {
+    fn try_calculate_last_known_parent(p2_chain: &mut RwLockWriteGuard<'_, P2Chain>, block: Arc<P2Block>) -> Error {
         let tip_height = p2_chain.get_height();
         if block.height > 10 && tip_height >= block.height - 10 {
             match p2_chain.get_at_height(block.height - 10) {
@@ -219,7 +219,7 @@ impl InMemoryShareChain {
                 });
             }
         }
-        if p2_chain.get_parent_block(block).is_none() {
+        if p2_chain.get_parent_block(&block).is_none() {
             return Err(Self::try_calculate_last_known_parent(p2_chain, block));
         }
 
