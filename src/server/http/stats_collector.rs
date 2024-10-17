@@ -107,7 +107,7 @@ impl StatsCollector {
             StatData::TargetDifficultyChanged {
                 target_difficulty,
                 pow_algo,
-                timestamp,
+                timestamp: _,
             } => match pow_algo {
                 PowAlgorithm::Sha3x => {
                     self.sha_target_difficulty = target_difficulty;
@@ -119,7 +119,7 @@ impl StatsCollector {
             StatData::NetworkDifficultyChanged {
                 network_difficulty,
                 pow_algo,
-                timestamp,
+                timestamp: _,
             } => match pow_algo {
                 PowAlgorithm::Sha3x => {
                     self.sha_network_difficulty = network_difficulty;

@@ -7,10 +7,7 @@ use std::{
     hash::Hash,
     ops::ControlFlow,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -32,7 +29,7 @@ use libp2p::{
     multiaddr::Protocol,
     noise,
     relay,
-    request_response::{self, cbor, json, ResponseChannel},
+    request_response::{self, cbor, ResponseChannel},
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
@@ -98,7 +95,6 @@ use crate::{
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/1";
-const DIRECT_PEER_INFO_REQ_RESP_PROTOCOL: &str = "/peer_info/1";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
