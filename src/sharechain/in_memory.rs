@@ -222,6 +222,15 @@ impl InMemoryShareChain {
         if p2_chain.get_parent_block(&block).is_none() {
             return Err(Self::try_calculate_last_known_parent(p2_chain, block));
         }
+        // lets check the uncles
+        for uncle in block.uncles.iter() {
+            let _block = p2_chain
+                .get_at_height(uncle.0)
+                .ok_or(Error::BlockParentDoesNotExist { num_missing_parents: 3 })?
+                .blocks
+                .get(&uncle.1)
+                .ok_or(Error::BlockParentDoesNotExist { num_missing_parents: 3 })?;
+        }
 
         // this is safe as we already checked it does exist
         let tip_height = p2_chain.get_tip().unwrap().height;
@@ -369,7 +378,6 @@ impl ShareChain for InMemoryShareChain {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         let mut blocks = blocks.to_vec();
-        blocks.reverse();
 
         for block in blocks {
             match self
@@ -556,10 +564,33 @@ impl ShareChain for InMemoryShareChain {
             return Ok(res);
         }
 
-        for height in (from_height..=tip_height).rev() {
+        // lets look for uncles and make sure we return those as well
+        for height in from_height..from_height + 3 {
+            let main_block = p2_chain_read_lock
+                .get_at_height(height)
+                .ok_or(Error::BlockLevelNotFound)?
+                .block_in_main_chain()
+                .ok_or(Error::BlockNotFound)?;
+            for uncle in main_block.uncles.iter() {
+                // we only care about uncles here that are less than from height, as the rest will be added below
+                if uncle.0 < from_height {
+                    res.push(
+                        p2_chain_read_lock
+                            .get_at_height(uncle.0)
+                            .ok_or(Error::BlockLevelNotFound)?
+                            .blocks
+                            .get(&uncle.1)
+                            .ok_or(Error::BlockNotFound)?
+                            .clone(),
+                    );
+                }
+            }
+        }
+
+        for height in from_height..=tip_height {
             p2_chain_read_lock
                 .get_at_height(height)
-                .ok_or(Error::BlockNotFound)?
+                .ok_or(Error::BlockLevelNotFound)?
                 .blocks
                 .iter()
                 .for_each(|(_, block)| {
