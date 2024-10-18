@@ -74,14 +74,13 @@ use crate::{
     server::{
         config,
         p2p::{
-            messages::{self, LocalShareChainSyncRequest, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
+            messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
             Error,
             LibP2PError,
             ServiceClient,
             MAX_MISSING_PARENTS_TO_SNOOZE,
-            MAX_SNOOZES,
             MIN_BLOCK_VERSION,
             MIN_PEER_INFO_VERSION,
         },
@@ -627,7 +626,7 @@ where S: ShareChain
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         // TODO: Treating this as a sync for now.
-                        if let Ok((snoozed, num_missing_parents)) =
+                        if let Ok((_snoozed, num_missing_parents)) =
                             Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
                         {
                             self.sync_share_chain(

@@ -3,12 +3,7 @@
 
 use std::sync::Arc;
 
-use log::error;
-use thiserror::Error;
-use tokio::sync::{
-    broadcast,
-    broadcast::error::{RecvError, SendError},
-};
+use tokio::sync::broadcast;
 
 use crate::sharechain::p2block::P2Block;
 

@@ -8,7 +8,10 @@ use digest::consts::U32;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::{tari_address::TariAddress, types::BlockHash};
+use tari_common_types::{
+    tari_address::TariAddress,
+    types::{BlockHash, FixedHash},
+};
 use tari_core::{
     blocks::{genesis_block::get_genesis_block, Block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
@@ -45,6 +48,9 @@ pub(crate) struct P2Block {
     // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
+    // Will contain this locks parents at height - [10][20][100][2160]
+    // We use to try and indicate if this block shares a chain with us
+    pub log_parent_hashes: [FixedHash; 4],
 }
 impl_conversions!(P2Block);
 
@@ -64,6 +70,7 @@ impl P2Block {
             .chain(&self.target_difficulty)
             .chain(&self.uncles)
             .chain(&self.miner_coinbase_extra)
+            .chain(&self.log_parent_hashes)
             .finalize()
             .into()
     }
@@ -97,7 +104,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: P2Block {
-                version: 5,
+                version: 6,
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),
@@ -108,6 +115,7 @@ impl BlockBuilder {
                 target_difficulty: Difficulty::min(),
                 uncles: Vec::new(),
                 miner_coinbase_extra: vec![],
+                log_parent_hashes: [FixedHash::zero(); 4],
             },
         }
     }
@@ -144,6 +152,11 @@ impl BlockBuilder {
 
     pub fn with_miner_coinbase_extra(mut self, coinbase_extra: Vec<u8>) -> Self {
         self.block.miner_coinbase_extra = coinbase_extra;
+        self
+    }
+
+    pub fn with_log_parent_hashes(mut self, log_parent_hashes: [FixedHash; 4]) -> Self {
+        self.block.log_parent_hashes = log_parent_hashes;
         self
     }
 
