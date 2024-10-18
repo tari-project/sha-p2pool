@@ -208,7 +208,7 @@ impl InMemoryShareChain {
     ) -> Result<(), Error> {
         let new_block_p2pool_height = block.height;
 
-        if p2_chain.get_tip().is_none() {
+        if p2_chain.get_tip().is_none() || block.height == 0 {
             if syncing || block.height == 0 {
                 p2_chain.add_block_to_chain(block.clone())?;
                 return Ok(());
