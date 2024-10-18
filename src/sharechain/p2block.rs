@@ -50,6 +50,7 @@ pub(crate) struct P2Block {
     pub miner_coinbase_extra: Vec<u8>,
     // Will contain this locks parents at height - [10][20][100][2160]
     // We use to try and indicate if this block shares a chain with us
+    #[serde(default)]
     pub log_parent_hashes: [FixedHash; 4],
 }
 impl_conversions!(P2Block);

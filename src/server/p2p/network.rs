@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     hash::Hash,
+    num::NonZeroU32,
     ops::ControlFlow,
     path::PathBuf,
     sync::Arc,
@@ -80,7 +81,6 @@ use crate::{
             Error,
             LibP2PError,
             ServiceClient,
-            MAX_MISSING_PARENTS_TO_SNOOZE,
             MIN_BLOCK_VERSION,
             MIN_PEER_INFO_VERSION,
         },
@@ -344,9 +344,11 @@ where S: ShareChain
                 // gossipsub
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
-                    // TODO: Reduce to 1 in future versions. This has to remain what is currently out there now
-                    // .validation_mode(gossipsub::ValidationMode::Strict)
-                    // .max_transmit_size(8192)
+                    .fanout_ttl(Duration::from_secs(10))
+                    .max_ihave_length(1000) // Default is 5000
+                    .max_messages_per_rpc(Some(1000))
+                    // We get a lot of messages, so 
+                    .duplicate_cache_time(Duration::from_secs(1))
                     .build()
                     .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
                 let gossipsub = gossipsub::Behaviour::new(
@@ -364,10 +366,13 @@ where S: ShareChain
                 }
 
                 // relay server
-                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(), relay::Config{
-                    max_reservations: if config.p2p_service.is_seed_peer {  1024 } else { 512 },
-                    ..Default::default()
-                }
+          let relay_config =  relay::Config{
+            max_reservations: if config.p2p_service.is_seed_peer {  1024 } else { 512 },
+            ..Default::default()
+        };
+
+                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(), 
+                relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
                 );
 
                 Ok(ServerNetworkBehaviour {
@@ -733,12 +738,8 @@ where S: ShareChain
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { num_missing_parents } => {
-                    if num_missing_parents < MAX_MISSING_PARENTS_TO_SNOOZE {
                         // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
                         return Ok((true, num_missing_parents));
-                    }
-                    error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?} and too many missing parents");
-                    Err(error)
                 },
                 _ => {
                     error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
