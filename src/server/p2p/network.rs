@@ -369,7 +369,7 @@ where S: ShareChain
             ..Default::default()
         };
 
-                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(), 
+                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(),
                 relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
                 );
 
@@ -737,8 +737,8 @@ where S: ShareChain
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { num_missing_parents } => {
-                        // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
-                        return Ok((true, num_missing_parents));
+                    // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
+                    return Ok((true, num_missing_parents));
                 },
                 _ => {
                     error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");

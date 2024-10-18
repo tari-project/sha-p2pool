@@ -208,17 +208,11 @@ impl InMemoryShareChain {
     ) -> Result<(), Error> {
         let new_block_p2pool_height = block.height;
 
-        if p2_chain.get_tip().is_none() || block.height == 0 {
-            if syncing || block.height == 0 {
-                p2_chain.add_block_to_chain(block.clone())?;
-                return Ok(());
-            } else {
-                // we just received a propagated block and we dont have any blocks, we need to sync.
-                return Err(Error::BlockParentDoesNotExist {
-                    num_missing_parents: MAX_BLOCKS_COUNT as u64,
-                });
-            }
+        if p2_chain.get_tip().is_none() || block.height == 0 || syncing {
+            p2_chain.add_block_to_chain(block.clone())?;
+            return Ok(());
         }
+
         if p2_chain.get_parent_block(&block).is_none() {
             return Err(Self::try_calculate_last_known_parent(p2_chain, block));
         }
