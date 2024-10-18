@@ -148,7 +148,6 @@ pub struct Config {
     pub mdns_enabled: bool,
     pub relay_server_enabled: bool,
     pub squad: Squad,
-    pub max_in_progress_sync_requests: usize,
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
     pub is_seed_peer: bool,
@@ -166,7 +165,6 @@ impl Default for Config {
             mdns_enabled: false,
             relay_server_enabled: false,
             squad: Squad::from("default".to_string()),
-            max_in_progress_sync_requests: 5,
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(2 * 60),
             is_seed_peer: false,
@@ -646,7 +644,8 @@ where S: ShareChain
                         }
                     },
                     Err(error) => {
-                        error!(target: LOG_TARGET, squad = &self.config.squad; "Can't deserialize broadcast block payload: {:?}", error);
+                        // TODO: elevate to error
+                        debug!(target: LOG_TARGET, squad = &self.config.squad; "Can't deserialize broadcast block payload: {:?}", error);
                     },
                 }
             },

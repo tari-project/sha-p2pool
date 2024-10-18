@@ -34,7 +34,7 @@ pub enum Error {
     BlockLevelNotFound,
     #[error("Validation error: {0}")]
     ValidationError(#[from] ValidationError),
-    #[error("Block parent does not exist")]
+    #[error("Block parent does not exist: Missing parents: {num_missing_parents}")]
     BlockParentDoesNotExist { num_missing_parents: u64 },
     #[error("Missing block validation params!")]
     MissingBlockValidationParams,

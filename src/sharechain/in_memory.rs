@@ -391,7 +391,7 @@ impl ShareChain for InMemoryShareChain {
             {
                 Ok(_) => (),
                 Err(e) => {
-                    error!(target: LOG_TARGET, "Failed to add block: {}", e);
+                    error!(target: LOG_TARGET, "Failed to add block (height {}): {}", block.height, e);
                     // return Err(e);
                 },
             }
