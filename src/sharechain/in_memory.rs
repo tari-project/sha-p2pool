@@ -465,54 +465,6 @@ impl ShareChain for InMemoryShareChain {
             .build())
     }
 
-    // async fn blocks(&self, from_height: u64) -> Result<Vec<Arc<P2Block>>, Error> {
-    //     // Should really only be used in syncing
-    //     let p2_chain_read_lock = self.p2_chain.read().await;
-    //     let mut res = vec![];
-    //     // todo add is empty check
-    //     // unwrap safe here
-    //     let tip_height = p2_chain_read_lock.get_tip().unwrap().height;
-    //     if tip_height < from_height {
-    //         return Ok(res);
-    //     }
-    //
-    //     // lets look for uncles and make sure we return those as well
-    //     for height in from_height..from_height + 3 {
-    //         let main_block = p2_chain_read_lock
-    //             .get_at_height(height)
-    //             .ok_or(Error::BlockLevelNotFound)?
-    //             .block_in_main_chain()
-    //             .ok_or(Error::BlockNotFound)?;
-    //         for uncle in main_block.uncles.iter() {
-    //             // we only care about uncles here that are less than from height, as the rest will be added below
-    //             if uncle.0 < from_height {
-    //                 res.push(
-    //                     p2_chain_read_lock
-    //                         .get_at_height(uncle.0)
-    //                         .ok_or(Error::BlockLevelNotFound)?
-    //                         .blocks
-    //                         .get(&uncle.1)
-    //                         .ok_or(Error::BlockNotFound)?
-    //                         .clone(),
-    //                 );
-    //             }
-    //         }
-    //     }
-    //
-    //     for height in from_height..=tip_height {
-    //         p2_chain_read_lock
-    //             .get_at_height(height)
-    //             .ok_or(Error::BlockLevelNotFound)?
-    //             .blocks
-    //             .iter()
-    //             .for_each(|(_, block)| {
-    //                 res.push(block.clone());
-    //             });
-    //     }
-    //
-    //     Ok(res)
-    // }
-
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut blocks = Vec::new();

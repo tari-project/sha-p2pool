@@ -120,7 +120,8 @@ impl P2Chain {
             .ok_or(Error::BlockNotFound)?
             .clone();
         // edge case for first block
-        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if the newly added block == 0
+        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
+        // the newly added block == 0
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
                 AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
@@ -130,13 +131,21 @@ impl P2Chain {
                 .total_accumulated_tip_difficulty
                 .checked_add_difficulty(block.target_difficulty)
                 .ok_or_else(|| Error::DifficultyOverflow)?;
+            for uncle in block.uncles.iter() {
+                if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                    self.total_accumulated_tip_difficulty = self
+                        .total_accumulated_tip_difficulty
+                        .checked_add_difficulty(uncle_block.target_difficulty)
+                        .ok_or(Error::DifficultyOverflow)?;
+                }
+            }
         }
         let level = self.get_mut_at_height(new_height).ok_or(Error::BlockLevelNotFound)?;
         level.chain_block = hash;
         self.current_tip = level.height;
 
         // lets see if we need to subtract difficulty now that we have added a block
-        if self.current_tip >= self.share_window as u64{
+        if self.current_tip >= self.share_window as u64 {
             // our tip is more than the share window so its possible that we need to drop a block out of the pow window
             if let Some(level) = self
                 .get_at_height(self.current_tip.saturating_sub(self.share_window as u64))
@@ -145,11 +154,11 @@ impl P2Chain {
                 let block = level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
                 self.decrease_total_chain_difficulty(block.target_difficulty)?;
                 for (height, block_hash) in &block.uncles {
-                if let Some(link_level) = self.get_at_height(*height) {
-                    let uncle_block = link_level.blocks.get(&block_hash).ok_or(Error::BlockNotFound)?;
-                    self.decrease_total_chain_difficulty(uncle_block.target_difficulty)?;
+                    if let Some(link_level) = self.get_at_height(*height) {
+                        let uncle_block = link_level.blocks.get(&block_hash).ok_or(Error::BlockNotFound)?;
+                        self.decrease_total_chain_difficulty(uncle_block.target_difficulty)?;
+                    }
                 }
-            }
                 // for (hash, block) in level.blocks.iter() {
                 //     if *hash == level.chain_block {
                 //         dbg!("removeing difficulty");
@@ -186,8 +195,10 @@ impl P2Chain {
             }
         }
         // edge case for first block
-        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if the newly added block == 0
-        if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0) {
+        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
+        // the newly added block == 0
+        if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0)
+        {
             self.set_new_tip(new_block_height, hash)?;
             return Ok(());
         }
