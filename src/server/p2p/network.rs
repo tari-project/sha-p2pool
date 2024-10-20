@@ -814,6 +814,12 @@ where S: ShareChain
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
+        let peer = message.source;
+        if peer.is_none() {
+            warn!("Message source is not set! {:?}", message);
+            return;
+        }
+        let peer = peer.unwrap();
 
         let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
@@ -829,9 +835,17 @@ where S: ShareChain
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 // Ok(())
             },
-            Err(error) => {
-                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
-            },
+            Err(error) => match error {
+                crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
+                    self.sync_share_chain(response.algo(), peer, missing_parents)
+                        .await;
+                    return Ok(());
+                },
+                _ => {
+                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+                    Err(error)
+                },
+            }
         };
         if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Share chain sync response took too long: {:?}", timer.elapsed());
