@@ -181,8 +181,7 @@ impl P2Chain {
 
         // do we know of the parent
         // we should not check the chain start for parents
-        if block.prev_hash != FixedHash::zero() && block.height != 0
-        {
+        if block.prev_hash != FixedHash::zero() && block.height != 0 {
             if self
                 .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
                 .is_none()

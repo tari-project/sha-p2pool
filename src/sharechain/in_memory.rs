@@ -294,7 +294,6 @@ impl ShareChain for InMemoryShareChain {
         let blocks = blocks.to_vec();
 
         for block in blocks {
-
             info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
             match self
                 .submit_block_with_lock(
