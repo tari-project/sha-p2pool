@@ -54,6 +54,7 @@ use log::{
 };
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
+use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
@@ -75,12 +76,12 @@ use crate::{
     server::{
         config,
         p2p::{
+            client::ServiceClient,
             messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
             Error,
             LibP2PError,
-            ServiceClient,
             MIN_BLOCK_VERSION,
             MIN_PEER_INFO_VERSION,
         },
@@ -93,8 +94,8 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
-const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/2";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/2";
+const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/3";
+const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/3";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
@@ -102,7 +103,7 @@ pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
     inner: String,
 }
@@ -615,7 +616,8 @@ where S: ShareChain
                 //     return;
                 // }
                 match P2Block::try_from(message) {
-                    Ok(payload) => {
+                    Ok(mut payload) => {
+                        payload.verified = false;
                         let payload = Arc::new(payload);
                         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");
 
@@ -628,19 +630,12 @@ where S: ShareChain
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
-                        // TODO: Treating this as a sync for now.
-                        if let Ok((_snoozed, num_missing_parents)) =
+
+                        if let Ok(Some(missing_parents)) =
                             Service::<S>::try_add_propagated_block(&share_chain, payload.clone()).await
                         {
-                            self.sync_share_chain(
-                                payload.original_block.header.pow.pow_algo,
-                                peer,
-                                Some(payload.height.saturating_sub(num_missing_parents)),
-                            )
-                            .await;
-                            // if snoozed {
-                            // let _ = self.snooze_block_tx.send((MAX_SNOOZES, payload)).await;
-                            // }
+                            self.sync_share_chain(payload.original_block.header.pow.pow_algo, peer, missing_parents)
+                                .await;
                         }
                     },
                     Err(error) => {
@@ -708,18 +703,17 @@ where S: ShareChain
         let our_height = self.share_chain_random_x.tip_height().await.unwrap_or_default();
         if our_height < their_randomx_height {
             self.network_peer_store.update_last_sync_attempt(peer);
-            self.sync_share_chain(
-                PowAlgorithm::RandomX,
-                peer,
-                Some(their_randomx_height.saturating_sub(2000)),
-            )
+            self.sync_share_chain(PowAlgorithm::RandomX, peer, vec![(
+                their_randomx_height,
+                FixedHash::zero(),
+            )])
             .await;
         }
 
         let our_height = self.share_chain_sha3x.tip_height().await.unwrap_or_default();
         if our_height < their_sha3x_height {
             self.network_peer_store.update_last_sync_attempt(peer);
-            self.sync_share_chain(PowAlgorithm::Sha3x, peer, Some(their_sha3x_height.saturating_sub(2000)))
+            self.sync_share_chain(PowAlgorithm::Sha3x, peer, vec![(their_sha3x_height, FixedHash::zero())])
                 .await;
         }
         ControlFlow::Continue(())
@@ -728,17 +722,17 @@ where S: ShareChain
     async fn try_add_propagated_block(
         share_chain: &Arc<S>,
         block: Arc<P2Block>,
-    ) -> Result<(bool, u64), crate::sharechain::error::Error> {
+    ) -> Result<Option<Vec<(u64, FixedHash)>>, crate::sharechain::error::Error> {
         match share_chain.submit_block(block.clone()).await {
             Ok(_result) => {
                 // info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}",
                 // &block.hash.to_hex(), &block.height);
-                Ok((false, 0))
+                Ok(None)
             },
             Err(error) => match error {
-                crate::sharechain::error::Error::BlockParentDoesNotExist { num_missing_parents } => {
+                crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
                     // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
-                    return Ok((true, num_missing_parents));
+                    return Ok(Some(missing_parents));
                 },
                 _ => {
                     error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
@@ -798,13 +792,17 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        match share_chain.blocks(request.from_height()).await {
+        let local_peer_id = self.swarm.local_peer_id().clone();
+        match share_chain.get_blocks(request.missing_blocks()).await {
             Ok(blocks) => {
                 if self
                     .swarm
                     .behaviour_mut()
                     .share_chain_sync
-                    .send_response(channel, ShareChainSyncResponse::new(request.algo(), &blocks))
+                    .send_response(
+                        channel,
+                        ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks),
+                    )
                     .is_err()
                 {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
@@ -820,12 +818,14 @@ where S: ShareChain
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
+        let peer = response.peer_id().clone();
 
         let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
         // }
-        let share_chain = match response.algo() {
+        let algo = response.algo().clone();
+        let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
@@ -835,8 +835,14 @@ where S: ShareChain
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 // Ok(())
             },
-            Err(error) => {
-                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+            Err(error) => match error {
+                crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
+                    self.sync_share_chain(algo, peer, missing_parents).await;
+                    return;
+                },
+                _ => {
+                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+                },
             },
         };
         if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
@@ -846,7 +852,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, from_tip: Option<u64>) {
+    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, missing_parents: Vec<(u64, FixedHash)>) {
         // if self.sync_in_progress.load(Ordering::SeqCst) {
         //     warn!(target: LOG_TARGET, "Sync already in progress...");
         //     return;
@@ -870,7 +876,7 @@ where S: ShareChain
             .swarm
             .behaviour_mut()
             .share_chain_sync
-            .send_request(&peer, ShareChainSyncRequest::new(algo, from_tip.unwrap_or(0)));
+            .send_request(&peer, ShareChainSyncRequest::new(algo, missing_parents));
         return;
 
         // match self.squad_peer_store.tip_of_block_height(algo).await {

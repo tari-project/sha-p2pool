@@ -41,8 +41,7 @@ use crate::{
     server::{
         grpc::{error::Error, util, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
-        p2p,
-        p2p::Squad,
+        p2p::{client::ServiceClient, Squad},
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
@@ -58,7 +57,7 @@ where S: ShareChain
     /// Base node client
     client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
     /// P2P service client
-    p2p_client: p2p::ServiceClient,
+    p2p_client: ServiceClient,
     /// SHA-3 share chain
     share_chain_sha3x: Arc<S>,
     /// RandomX share chain
@@ -82,7 +81,7 @@ where S: ShareChain
 {
     pub async fn new(
         base_node_address: String,
-        p2p_client: p2p::ServiceClient,
+        p2p_client: ServiceClient,
         share_chain_sha3x: Arc<S>,
         share_chain_random_x: Arc<S>,
         shutdown_signal: ShutdownSignal,
@@ -91,8 +90,6 @@ where S: ShareChain
         genesis_block_hash: FixedHash,
         stats_broadcast: StatsBroadcastClient,
         squad: Squad,
-        coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-        coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     ) -> Result<Self, Error> {
         Ok(Self {
             client: Arc::new(RwLock::new(

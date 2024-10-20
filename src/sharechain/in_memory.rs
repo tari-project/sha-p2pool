@@ -94,7 +94,7 @@ impl InMemoryShareChain {
     }
 
     /// Validating a new block.
-    async fn validate_block(
+    async fn validate_claimed_difficulty(
         &self,
         block: &P2Block,
         params: Option<Arc<BlockValidationParams>>,
@@ -122,80 +122,11 @@ impl InMemoryShareChain {
             },
         };
         if curr_difficulty < block.target_difficulty {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty, curr_difficulty);
             return Err(ValidationError::DifficultyTarget);
         }
 
         Ok(curr_difficulty)
-    }
-
-    // this tries to go through the log parent hashes to try and find a matching hash in our change and send back the
-    // missing parents. if the block hashes dont match at 10/20/100/2160, it will ask for a complete sync
-    fn try_calculate_last_known_parent(p2_chain: &mut RwLockWriteGuard<'_, P2Chain>, block: Arc<P2Block>) -> Error {
-        let tip_height = p2_chain.get_height();
-        if block.height > 10 && tip_height >= block.height - 10 {
-            match p2_chain.get_at_height(block.height - 10) {
-                Some(level) => {
-                    if level.blocks.get(&block.log_parent_hashes[0]).is_some() {
-                        return Error::BlockParentDoesNotExist {
-                            num_missing_parents: 10,
-                        };
-                    }
-                },
-                None => {},
-            }
-        } else {
-            return Error::BlockParentDoesNotExist {
-                num_missing_parents: MAX_BLOCKS_COUNT as u64,
-            };
-        }
-
-        if block.height > 20 && tip_height >= block.height - 20 {
-            match p2_chain.get_at_height(block.height - 20) {
-                Some(level) => {
-                    if level.blocks.get(&block.log_parent_hashes[1]).is_some() {
-                        return Error::BlockParentDoesNotExist {
-                            num_missing_parents: 20,
-                        };
-                    }
-                },
-                None => {},
-            }
-        } else {
-            return Error::BlockParentDoesNotExist {
-                num_missing_parents: MAX_BLOCKS_COUNT as u64,
-            };
-        }
-        if block.height > 100 && tip_height >= block.height - 100 {
-            match p2_chain.get_at_height(block.height - 100) {
-                Some(level) => {
-                    if level.blocks.get(&block.log_parent_hashes[2]).is_some() {
-                        return Error::BlockParentDoesNotExist {
-                            num_missing_parents: 100,
-                        };
-                    }
-                },
-                None => {},
-            }
-        } else {
-            return Error::BlockParentDoesNotExist {
-                num_missing_parents: MAX_BLOCKS_COUNT as u64,
-            };
-        }
-        if block.height > 2160 && tip_height >= block.height - 2160 {
-            match p2_chain.get_at_height(block.height - 2160) {
-                Some(level) => {
-                    if level.blocks.get(&block.log_parent_hashes[3]).is_some() {
-                        return Error::BlockParentDoesNotExist {
-                            num_missing_parents: 2160,
-                        };
-                    }
-                },
-                None => {},
-            }
-        }
-        Error::BlockParentDoesNotExist {
-            num_missing_parents: MAX_BLOCKS_COUNT as u64,
-        }
     }
 
     /// Submits a new block to share chain.
@@ -209,28 +140,16 @@ impl InMemoryShareChain {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() || block.height == 0 || syncing {
+            let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
             p2_chain.add_block_to_chain(block.clone())?;
             return Ok(());
-        }
-
-        if p2_chain.get_parent_block(&block).is_none() {
-            return Err(Self::try_calculate_last_known_parent(p2_chain, block));
-        }
-        // lets check the uncles
-        for uncle in block.uncles.iter() {
-            let _block = p2_chain
-                .get_at_height(uncle.0)
-                .ok_or(Error::BlockParentDoesNotExist { num_missing_parents: 3 })?
-                .blocks
-                .get(&uncle.1)
-                .ok_or(Error::BlockParentDoesNotExist { num_missing_parents: 3 })?;
         }
 
         // this is safe as we already checked it does exist
         let tip_height = p2_chain.get_tip().unwrap().height;
         // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
         // older than the share window is way too old for us to care about.
-        if block.height < tip_height.saturating_sub(SHARE_WINDOW as u64) {
+        if block.height < tip_height.saturating_sub(SHARE_WINDOW as u64) && !syncing {
             return Err(Error::BlockValidation("Block is older than share window".to_string()));
         }
 
@@ -243,7 +162,7 @@ impl InMemoryShareChain {
         }
 
         // validate
-        let _validate_result = self.validate_block(&block, params).await?;
+        let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
         let new_block = block.clone();
 
         // add block to chain
@@ -352,6 +271,7 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
+        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
         let res = self
             .submit_block_with_lock(
                 &mut p2_chain_write_lock,
@@ -371,9 +291,10 @@ impl ShareChain for InMemoryShareChain {
     async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
-        let mut blocks = blocks.to_vec();
+        let blocks = blocks.to_vec();
 
         for block in blocks {
+            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
@@ -386,7 +307,7 @@ impl ShareChain for InMemoryShareChain {
                 Ok(_) => (),
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to add block (height {}): {}", block.height, e);
-                    // return Err(e);
+                    return Err(e);
                 },
             }
         }
@@ -547,52 +468,24 @@ impl ShareChain for InMemoryShareChain {
             .build())
     }
 
-    async fn blocks(&self, from_height: u64) -> Result<Vec<Arc<P2Block>>, Error> {
-        // Should really only be used in syncing
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
         let p2_chain_read_lock = self.p2_chain.read().await;
-        let mut res = vec![];
-        // todo add is empty check
-        // unwrap safe here
-        let tip_height = p2_chain_read_lock.get_tip().unwrap().height;
-        if tip_height < from_height {
-            return Ok(res);
-        }
+        let mut blocks = Vec::new();
 
-        // lets look for uncles and make sure we return those as well
-        for height in from_height..from_height + 3 {
-            let main_block = p2_chain_read_lock
-                .get_at_height(height)
-                .ok_or(Error::BlockLevelNotFound)?
-                .block_in_main_chain()
-                .ok_or(Error::BlockNotFound)?;
-            for uncle in main_block.uncles.iter() {
-                // we only care about uncles here that are less than from height, as the rest will be added below
-                if uncle.0 < from_height {
-                    res.push(
-                        p2_chain_read_lock
-                            .get_at_height(uncle.0)
-                            .ok_or(Error::BlockLevelNotFound)?
-                            .blocks
-                            .get(&uncle.1)
-                            .ok_or(Error::BlockNotFound)?
-                            .clone(),
-                    );
+        for block in requested_blocks {
+            if let Some(level) = p2_chain_read_lock.get_at_height(block.0) {
+                if let Some(block) = level.blocks.get(&block.1) {
+                    blocks.push(block.clone());
+                } else {
+                    // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it wont
+                    // find this hash, so we return the curent chain block
+                    if let Some(block) = level.block_in_main_chain() {
+                        blocks.push(block.clone());
+                    }
                 }
             }
         }
-
-        for height in from_height..=tip_height {
-            p2_chain_read_lock
-                .get_at_height(height)
-                .ok_or(Error::BlockLevelNotFound)?
-                .blocks
-                .iter()
-                .for_each(|(_, block)| {
-                    res.push(block.clone());
-                });
-        }
-
-        Ok(res)
+        Ok(blocks)
     }
 
     async fn hash_rate(&self) -> Result<BigUint, Error> {
@@ -718,6 +611,7 @@ pub mod test {
 
         let mut timestamp = EpochTime::now();
         let mut prev_hash = BlockHash::zero();
+        let static_coinbase_extra = Vec::new();
 
         for i in 0..15 {
             let address = new_random_address();
@@ -726,8 +620,9 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_prev_hash(prev_hash)
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
             prev_hash = block.generate_hash();
@@ -738,7 +633,7 @@ pub mod test {
         let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
         assert_eq!(shares.len(), 15);
         for share in shares {
-            assert_eq!(share.1, 5)
+            assert_eq!(share.1, (5, static_coinbase_extra.clone()))
         }
     }
 
@@ -747,6 +642,7 @@ pub mod test {
         let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let static_coinbase_extra = Vec::new();
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let share_chain = InMemoryShareChain::new(
             PowAlgorithm::Sha3x,
@@ -772,8 +668,9 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_prev_hash(prev_hash)
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
             prev_hash = block.generate_hash();
@@ -784,7 +681,7 @@ pub mod test {
         let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
-            assert_eq!(share.1, 15)
+            assert_eq!(share.1, (15, static_coinbase_extra.clone()))
         }
     }
 
@@ -794,6 +691,7 @@ pub mod test {
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+        let static_coinbase_extra = Vec::new();
         let share_chain = InMemoryShareChain::new(
             PowAlgorithm::Sha3x,
             None,
@@ -828,8 +726,9 @@ pub mod test {
                     .with_timestamp(timestamp)
                     .with_height(i as u64 - 1)
                     .with_miner_wallet_address(address.clone())
-                    .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+                    .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                     .with_prev_hash(prev_hash_uncle)
+                    .with_miner_coinbase_extra(static_coinbase_extra.clone())
                     .build();
                 uncles.push((i as u64 - 1, block.hash));
                 share_chain.submit_block(block).await.unwrap();
@@ -838,9 +737,10 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_uncles(uncles)
                 .with_prev_hash(prev_hash)
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
             prev_hash = block.generate_hash();
@@ -855,7 +755,7 @@ pub mod test {
         let mut counter_27 = 0;
         let mut counter_23 = 0;
         for share in shares {
-            match share.1 {
+            match share.1 .0 {
                 27 => counter_27 += 1,
                 23 => counter_23 += 1,
                 _ => panic!("Should be 27 or 23"),

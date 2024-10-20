@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
@@ -81,14 +82,14 @@ impl PeerInfo {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncRequest {
     algo: u64,
-    from_height: u64,
+    missing_blocks: Vec<(u64, FixedHash)>,
 }
 
 impl ShareChainSyncRequest {
-    pub fn new(algo: PowAlgorithm, from_height: u64) -> Self {
+    pub fn new(algo: PowAlgorithm, missing_blocks: Vec<(u64, FixedHash)>) -> Self {
         Self {
             algo: algo.as_u64(),
-            from_height,
+            missing_blocks,
         }
     }
 
@@ -96,8 +97,8 @@ impl ShareChainSyncRequest {
         PowAlgorithm::try_from(self.algo).unwrap()
     }
 
-    pub fn from_height(&self) -> u64 {
-        self.from_height
+    pub fn missing_blocks(&self) -> &[(u64, FixedHash)] {
+        &self.missing_blocks
     }
 }
 
@@ -127,16 +128,22 @@ impl LocalShareChainSyncRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
+    peer_id: PeerId,
     algo: u64,
     blocks: Vec<P2Block>,
 }
 
 impl ShareChainSyncResponse {
-    pub fn new(algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
+    pub fn new(peer_id: PeerId, algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
         Self {
+            peer_id,
             algo: algo.as_u64(),
             blocks: blocks.iter().map(|block| (**block).clone()).collect(),
         }
+    }
+
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
     }
 
     pub fn algo(&self) -> PowAlgorithm {
@@ -144,6 +151,10 @@ impl ShareChainSyncResponse {
     }
 
     pub fn into_blocks(self) -> Vec<P2Block> {
-        self.blocks
+        let mut blocks = self.blocks;
+        for block in &mut blocks {
+            block.verified = false;
+        }
+        blocks
     }
 }

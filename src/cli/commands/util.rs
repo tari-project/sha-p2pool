@@ -139,8 +139,6 @@ genesis_block_hash.to_hex());
         config,
         share_chain_sha3x,
         share_chain_random_x,
-        coinbase_extras_sha3x.clone(),
-        coinbase_extras_random_x.clone(),
         stats_collector,
         stats_broadcast_client,
         shutdown_signal,

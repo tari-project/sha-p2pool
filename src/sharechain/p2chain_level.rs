@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tari_common_types::types::BlockHash;
+use tari_common_types::types::{BlockHash, FixedHash};
 
 use crate::sharechain::{error::Error, p2block::P2Block};
 
@@ -36,7 +36,9 @@ pub struct P2ChainLevel {
 impl P2ChainLevel {
     pub fn new(block: Arc<P2Block>) -> Self {
         let mut blocks = HashMap::new();
-        let chain_block = block.hash.clone();
+        // although this is the only block on this level, it might not be part of the main chain, so we need to set this
+        // later
+        let chain_block = FixedHash::zero();
         let height = block.height;
         blocks.insert(block.hash, block);
         Self {
@@ -50,18 +52,15 @@ impl P2ChainLevel {
         Self {
             blocks: HashMap::new(),
             height,
-            chain_block: BlockHash::default(),
+            chain_block: BlockHash::zero(),
         }
     }
 
-    pub fn add_block(&mut self, block: Arc<P2Block>, replace_tip: bool) -> Result<(), crate::sharechain::error::Error> {
+    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), crate::sharechain::error::Error> {
         if self.height != block.height {
             return Err(Error::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
             });
-        }
-        if replace_tip {
-            self.chain_block = block.hash.clone();
         }
         self.blocks.insert(block.hash, block);
         Ok(())
@@ -87,6 +86,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build();
         let mut chain_level = P2ChainLevel::new(block.clone());
+        chain_level.chain_block = block.generate_hash();
 
         assert_eq!(
             chain_level.block_in_main_chain().unwrap().generate_hash(),
@@ -101,7 +101,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build();
 
-        chain_level.add_block(block_2.clone(), false).unwrap();
+        chain_level.add_block(block_2.clone()).unwrap();
         assert_eq!(
             chain_level.block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
@@ -115,7 +115,8 @@ mod test {
             .with_miner_wallet_address(address)
             .build();
 
-        chain_level.add_block(block_3.clone(), true).unwrap();
+        chain_level.add_block(block_3.clone()).unwrap();
+        chain_level.chain_block = block_3.generate_hash();
 
         assert_eq!(
             chain_level.block_in_main_chain().unwrap().generate_hash(),
