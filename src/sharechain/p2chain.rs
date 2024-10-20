@@ -312,7 +312,7 @@ impl P2Chain {
                             return Err(Error::BlockNotFound);
                         }
                         // fix the main chain
-                        let mut_parent_level = self.get_mut_at_height(self.current_tip.saturating_sub(1)).unwrap();
+                        let mut_parent_level = self.get_mut_at_height(current_block.height.saturating_sub(1)).unwrap();
                         mut_parent_level.chain_block = current_block.prev_hash.clone();
                         current_block = nextblock.unwrap().clone();
                         self.lwma.add_front(
