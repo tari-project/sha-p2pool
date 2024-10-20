@@ -47,8 +47,6 @@ pub enum Error {
 pub enum ValidationError {
     #[error("Proof of work algorithm does not match chain algorithm")]
     InvalidPowAlgorithm,
-    #[error("Difficulty is below the allowed minimum")]
-    DifficultyBelowMinimum,
     #[error("Number conversion error: {0}")]
     FromIntConversion(#[from] TryFromIntError),
     #[error("Missing block validation params!")]
