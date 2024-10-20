@@ -594,7 +594,7 @@ where S: ShareChain
 
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {peer:?} -> {payload:?}");
                         if payload.version < MIN_PEER_INFO_VERSION {
-                            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
+                            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                             return;
                         }
                         if !self.config.is_seed_peer {
@@ -681,7 +681,7 @@ where S: ShareChain
             },
             AddPeerStatus::Existing => {},
             AddPeerStatus::Greylisted => {
-                info!(target: LOG_TARGET, "Added peer but it was grey listed");
+                debug!(target: LOG_TARGET, "Added peer but it was grey listed");
                 return ControlFlow::Continue(());
             },
             AddPeerStatus::Blacklisted => {
@@ -913,7 +913,7 @@ where S: ShareChain
                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
             SwarmEvent::Dialing { peer_id, .. } => {
-                info!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
+                debug!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
             },
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
@@ -962,7 +962,7 @@ where S: ShareChain
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
-                        warn!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
+                        debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
                         // TODO: find out why this errors
                         // self.network_peer_store
                         //     .move_to_grey_list(
@@ -994,7 +994,7 @@ where S: ShareChain
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
-                        warn!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                        debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                         // Unlock the permit
                         self.network_peer_store
                             .move_to_grey_list(peer, format!("Error during share chain sync:{}", error.to_string()))
@@ -1011,7 +1011,7 @@ where S: ShareChain
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated { peer, addresses, .. } => {
-                        info!(target: LOG_TARGET, squad = &self.config.squad; "Routing updated: {peer:?} -> {addresses:?}");
+                        debug!(target: LOG_TARGET, squad = &self.config.squad; "Routing updated: {peer:?} -> {addresses:?}");
                         // addresses.iter().for_each(|addr| {
                         //     self.swarm.add_peer_address(peer, addr.clone());
                         // });
@@ -1056,11 +1056,11 @@ where S: ShareChain
         }
 
         if self.swarm.external_addresses().count() > 0 {
-            warn!(target: LOG_TARGET, "No need to relay, we have an external address already. {}", self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));
+            debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}", self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));
             // Check if we can relay
             // warn!(target: LOG_TARGET, "No external addresses");
             // self.swarm.add_external_address(info.observed_addr.clone());
-            info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
+            // info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
             return;
         }
 
