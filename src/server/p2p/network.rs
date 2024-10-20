@@ -94,8 +94,8 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const NEW_BLOCK_TOPIC: &str = "new_block";
-const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/2";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/2";
+const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/3";
+const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/3";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";

@@ -98,7 +98,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: P2Block {
-                version: 6,
+                version: 7,
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),
