@@ -180,17 +180,21 @@ impl P2Chain {
             .clone();
 
         // do we know of the parent
-        if self
-            .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
-            .is_none()
+        // we should not check the chain start for parents
+        if block.prev_hash != FixedHash::zero() && block.height != 0
         {
-            // we dont know the parent, lets see if we know of it
-            missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
-        }
-        // now lets check the uncles
-        for uncle in block.uncles.iter() {
-            if self.get_block_at_height(uncle.0, &uncle.1).is_none() {
-                missing_parents.push((uncle.0, uncle.1.clone()));
+            if self
+                .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
+                .is_none()
+            {
+                // we dont know the parent, lets see if we know of it
+                missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
+            }
+            // now lets check the uncles
+            for uncle in block.uncles.iter() {
+                if self.get_block_at_height(uncle.0, &uncle.1).is_none() {
+                    missing_parents.push((uncle.0, uncle.1.clone()));
+                }
             }
         }
         // edge case for first block

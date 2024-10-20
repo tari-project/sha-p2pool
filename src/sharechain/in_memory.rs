@@ -122,6 +122,7 @@ impl InMemoryShareChain {
             },
         };
         if curr_difficulty < block.target_difficulty {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty, curr_difficulty);
             return Err(ValidationError::DifficultyTarget);
         }
 
@@ -270,6 +271,7 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
+        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
         let res = self
             .submit_block_with_lock(
                 &mut p2_chain_write_lock,
@@ -292,6 +294,8 @@ impl ShareChain for InMemoryShareChain {
         let blocks = blocks.to_vec();
 
         for block in blocks {
+
+            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
@@ -304,7 +308,7 @@ impl ShareChain for InMemoryShareChain {
                 Ok(_) => (),
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to add block (height {}): {}", block.height, e);
-                    // return Err(e);
+                    return Err(e);
                 },
             }
         }
