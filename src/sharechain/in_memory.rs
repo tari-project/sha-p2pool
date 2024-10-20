@@ -617,7 +617,7 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_prev_hash(prev_hash)
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
@@ -665,7 +665,7 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_prev_hash(prev_hash)
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
@@ -723,7 +723,7 @@ pub mod test {
                     .with_timestamp(timestamp)
                     .with_height(i as u64 - 1)
                     .with_miner_wallet_address(address.clone())
-                    .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+                    .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                     .with_prev_hash(prev_hash_uncle)
                     .with_miner_coinbase_extra(static_coinbase_extra.clone())
                     .build();
@@ -734,7 +734,7 @@ pub mod test {
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .with_uncles(uncles)
                 .with_prev_hash(prev_hash)
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
