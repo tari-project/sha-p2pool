@@ -792,13 +792,17 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
+        let local_peer_id = self.swarm.local_peer_id().clone();
         match share_chain.get_blocks(request.missing_blocks()).await {
             Ok(blocks) => {
                 if self
                     .swarm
                     .behaviour_mut()
                     .share_chain_sync
-                    .send_response(channel, ShareChainSyncResponse::new(request.algo(), &blocks))
+                    .send_response(
+                        channel,
+                        ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks),
+                    )
                     .is_err()
                 {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
@@ -814,18 +818,14 @@ where S: ShareChain
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
-        let peer = message.source;
-        if peer.is_none() {
-            warn!("Message source is not set! {:?}", message);
-            return;
-        }
-        let peer = peer.unwrap();
+        let peer = response.peer_id().clone();
 
         let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
         // }
-        let share_chain = match response.algo() {
+        let algo = response.algo().clone();
+        let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
@@ -837,15 +837,13 @@ where S: ShareChain
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                    self.sync_share_chain(response.algo(), peer, missing_parents)
-                        .await;
-                    return Ok(());
+                    self.sync_share_chain(algo, peer, missing_parents).await;
+                    return;
                 },
                 _ => {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
-                    Err(error)
                 },
-            }
+            },
         };
         if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Share chain sync response took too long: {:?}", timer.elapsed());

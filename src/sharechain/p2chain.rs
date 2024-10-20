@@ -28,7 +28,6 @@ use std::{
 
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
-use tari_utilities::hex::Hex;
 
 use crate::sharechain::{
     error::Error,
