@@ -252,6 +252,10 @@ impl P2Chain {
             let mut counter = 1;
 
             while let Some(parent) = self.get_parent_block(&current_counting_block) {
+                if !parent.verified {
+                    // we cannot count unverified blocks
+                    break;
+                }
                 total_work = total_work
                     .checked_add_difficulty(parent.target_difficulty)
                     .ok_or_else(|| Error::DifficultyOverflow)?;
@@ -261,6 +265,10 @@ impl P2Chain {
                         total_work = total_work
                             .checked_add_difficulty(uncle_block.target_difficulty)
                             .ok_or(Error::DifficultyOverflow)?;
+                        if !uncle_block.verified {
+                            // we cannot count unverified blocks
+                            break;
+                        }
                     } else {
                         missing_parents.push((uncle.0, uncle.1.clone()));
                     }
