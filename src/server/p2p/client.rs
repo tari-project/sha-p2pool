@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 
 use crate::sharechain::p2block::P2Block;
 
-pub(crate) struct ServiceClient {
+pub struct ServiceClient {
     broadcast_block_sender: broadcast::Sender<Arc<P2Block>>,
 }
 

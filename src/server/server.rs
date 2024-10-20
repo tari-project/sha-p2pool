@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
     net::{AddrParseError, SocketAddr},
     str::FromStr,
     sync::Arc,
@@ -14,7 +13,6 @@ use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
 use thiserror::Error;
-use tokio::sync::RwLock;
 
 use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
@@ -64,8 +62,6 @@ where S: ShareChain
         config: config::Config,
         share_chain_sha3x: S,
         share_chain_random_x: S,
-        coinbase_extras_sha3x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-        coinbase_extras_random_x: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stats_collector: StatsCollector,
         stats_broadcast_client: StatsBroadcastClient,
         shutdown_signal: ShutdownSignal,
@@ -109,8 +105,6 @@ where S: ShareChain
                 genesis_block_hash,
                 stats_broadcast_client.clone(),
                 config.p2p_service.squad.clone(),
-                coinbase_extras_sha3x.clone(),
-                coinbase_extras_random_x.clone(),
             )
             .await
             .map_err(Error::Grpc)?;

@@ -3,7 +3,10 @@
 
 use std::num::TryFromIntError;
 
-use tari_common_types::{tari_address::TariAddressError, types::FixedHashSizeError};
+use tari_common_types::{
+    tari_address::TariAddressError,
+    types::{FixedHash, FixedHashSizeError},
+};
 use tari_core::{
     consensus::ConsensusBuilderError,
     proof_of_work::{monero_rx::MergeMineError, DifficultyError},
@@ -34,8 +37,8 @@ pub enum Error {
     BlockLevelNotFound,
     #[error("Validation error: {0}")]
     ValidationError(#[from] ValidationError),
-    #[error("Block parent does not exist: Missing parents: {num_missing_parents}")]
-    BlockParentDoesNotExist { num_missing_parents: u64 },
+    #[error("Missing parents")]
+    BlockParentDoesNotExist { missing_parents: Vec<(u64, FixedHash)> },
     #[error("Missing block validation params!")]
     MissingBlockValidationParams,
 }

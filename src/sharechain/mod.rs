@@ -119,8 +119,8 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     // /// Return a new block that could be added via `submit_block`.
     // async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> Result<P2Block, Error>;
 
-    /// Returns blocks from the given height (`from_height`, exclusive).
-    async fn blocks(&self, from_height: u64) -> Result<Vec<Arc<P2Block>>, Error>;
+    /// Returns the requested blocks from this chain
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
 
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).

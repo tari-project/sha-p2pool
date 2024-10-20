@@ -6,11 +6,10 @@
 
 use std::time::Duration;
 
-pub use client::*;
 pub use error::*;
 pub use network::*;
 
-pub(crate) mod client;
+pub mod client;
 mod error;
 mod global_ip;
 pub mod messages;
