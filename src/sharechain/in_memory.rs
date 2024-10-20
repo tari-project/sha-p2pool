@@ -271,7 +271,8 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
-        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
+        let height = block.height;
+        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo,height );
         let res = self
             .submit_block_with_lock(
                 &mut p2_chain_write_lock,
@@ -285,6 +286,16 @@ impl ShareChain for InMemoryShareChain {
             p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
+        if let Ok(()) = &res {
+            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully", self.pow_algo, height);
+        }
+
+        if let Err(Error::BlockParentDoesNotExist { missing_parents }) = &res {
+            let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
+            info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
+        } else if let Err(e) = &res {
+            error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
+        }
         res
     }
 
@@ -294,19 +305,28 @@ impl ShareChain for InMemoryShareChain {
         let blocks = blocks.to_vec();
 
         for block in blocks {
-            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, block.height);
+            let height = block.height;
+            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
-                    block.clone(),
+                    block,
                     self.block_validation_params.clone(),
                     true,
                 )
                 .await
             {
-                Ok(_) => (),
+                Ok(_) => {
+                    info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully", self.pow_algo, height);
+                },
                 Err(e) => {
-                    error!(target: LOG_TARGET, "Failed to add block (height {}): {}", block.height, e);
+                    error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
+                    if let Error::BlockParentDoesNotExist { missing_parents } = &e {
+                        let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
+                        info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
+                    } else {
+                        error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
+                    }
                     return Err(e);
                 },
             }
