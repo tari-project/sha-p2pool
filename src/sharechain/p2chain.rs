@@ -281,7 +281,7 @@ impl P2Chain {
                     }
                 }
                 if !missing_parents.is_empty() {
-                    return Err(Error::BlockParentDoesNotExist { missing_parents });
+                    break;
                 }
                 counter += 1;
                 if counter >= self.share_window {
@@ -349,9 +349,16 @@ impl P2Chain {
                 if block.1.prev_hash == hash {
                     info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
                     // we have a parent here
-                    self.verify_chain(next_level.height, block.0.clone())?;
+                    match self.verify_chain(next_level.height, block.0.clone()){
+                        Err(Error::BlockParentDoesNotExist {missing_parents: mut missing}) => missing_parents.append(&mut missing),
+                        Err(e) => return Err(e),
+                        Ok(_) => (),
+                    }
                 }
             }
+        }
+        if !missing_parents.is_empty() {
+            return Err(Error::BlockParentDoesNotExist { missing_parents });
         }
         Ok(())
     }

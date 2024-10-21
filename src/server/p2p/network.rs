@@ -684,8 +684,6 @@ where S: ShareChain
             return ControlFlow::Continue(());
         }
 
-        let their_randomx_height = payload.current_random_x_height;
-        let their_sha3x_height = payload.current_sha3x_height;
         for addr in &payload.public_addresses() {
             self.swarm.add_peer_address(peer, addr.clone());
         }
@@ -1349,7 +1347,7 @@ where S: ShareChain
     async fn try_sync_from_best_peer(&mut self) {
         for algo in &[PowAlgorithm::RandomX, PowAlgorithm::Sha3x] {
             // Find any blocks we are missing.
-            let chain = match algo {
+            let _chain = match algo {
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
             };
