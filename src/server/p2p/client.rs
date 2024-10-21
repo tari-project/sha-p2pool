@@ -1,24 +1,22 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
-
 use tokio::sync::broadcast;
 
-use crate::sharechain::p2block::P2Block;
+use crate::server::p2p::messages::NotifyNewTipBlock;
 
 pub struct ServiceClient {
-    broadcast_block_sender: broadcast::Sender<Arc<P2Block>>,
+    broadcast_block_sender: broadcast::Sender<NotifyNewTipBlock>,
 }
 
 impl ServiceClient {
-    pub fn new(broadcast_block_sender: broadcast::Sender<Arc<P2Block>>) -> Self {
+    pub fn new(broadcast_block_sender: broadcast::Sender<NotifyNewTipBlock>) -> Self {
         Self { broadcast_block_sender }
     }
 
     /// Triggering broadcasting of a new block to p2pool network.
-    pub fn broadcast_block(&self, block: Arc<P2Block>) -> Result<(), anyhow::Error> {
-        self.broadcast_block_sender.send(block)?;
+    pub fn broadcast_block(&self, new_blocks: NotifyNewTipBlock) -> Result<(), anyhow::Error> {
+        self.broadcast_block_sender.send(new_blocks)?;
 
         Ok(())
     }

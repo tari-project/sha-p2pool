@@ -120,6 +120,13 @@ pub struct LocalShareChainSyncRequest {
     pub request: ShareChainSyncRequest,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NotifyNewTipBlock {
+    pub algo: u64,
+    pub new_blocks: Vec<(u64, FixedHash)>,
+}
+impl_conversions!(NotifyNewTipBlock);
+
 impl LocalShareChainSyncRequest {
     pub fn new(peer_id: PeerId, request: ShareChainSyncRequest) -> Self {
         Self { peer_id, request }
