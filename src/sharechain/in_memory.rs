@@ -430,17 +430,16 @@ impl ShareChain for InMemoryShareChain {
         let mut excluded_uncles = vec![];
         let mut uncles = vec![];
         for height in new_height.saturating_sub(3)..new_height {
-            let older_level = chain_read_lock
-                .level_at_height(height)
-                .ok_or(Error::BlockLevelNotFound)?;
-            let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
-            // Blocks in the main chain can't be uncles
-            excluded_uncles.push(chain_block.hash);
-            for uncle in chain_block.uncles.iter() {
-                excluded_uncles.push(uncle.1);
-            }
-            for block in older_level.blocks.iter() {
-                uncles.push((height, block.0.clone()));
+            if let Some(older_level) = chain_read_lock.level_at_height(height) {
+                let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
+                // Blocks in the main chain can't be uncles
+                excluded_uncles.push(chain_block.hash);
+                for uncle in chain_block.uncles.iter() {
+                    excluded_uncles.push(uncle.1);
+                }
+                for block in older_level.blocks.iter() {
+                    uncles.push((height, block.0.clone()));
+                }
             }
         }
 
