@@ -8,7 +8,6 @@ use std::{
     time::Instant,
 };
 
-use axum::response;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
@@ -17,7 +16,6 @@ use minotari_app_grpc::tari_rpc::{
     GetNewBlockRequest,
     GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest,
-    NewBlockCoinbase,
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
