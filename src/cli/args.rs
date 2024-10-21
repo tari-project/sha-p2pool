@@ -113,6 +113,9 @@ pub struct StartArgs {
 
     #[arg(long)]
     pub peer_publish_interval: Option<u64>,
+
+    #[arg(long)]
+    pub debug_print_chain: bool,
 }
 
 #[derive(Clone, Parser, Debug)]

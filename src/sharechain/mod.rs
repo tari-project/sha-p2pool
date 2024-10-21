@@ -131,4 +131,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn miners_with_shares(&self, squad: Squad) -> Result<HashMap<String, (u64, Vec<u8>)>, Error>;
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
+
+    async fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }

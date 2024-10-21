@@ -96,6 +96,7 @@ pub async fn server(
             .unwrap_or_else(|| "tari-p2pool".to_string()),
     );
     config_builder.with_peer_publish_interval(args.peer_publish_interval);
+    config_builder.with_debug_print_chain(args.debug_print_chain);
     if let Some(stats_server_port) = args.stats_server_port {
         config_builder.with_stats_server_port(stats_server_port);
     }

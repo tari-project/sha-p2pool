@@ -4,12 +4,14 @@
 use std::{
     collections::HashMap,
     fmt::Display,
+    fs,
     hash::Hash,
+    io::Write,
     num::NonZeroU32,
     ops::ControlFlow,
     path::PathBuf,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use convert_case::{Case, Casing};
@@ -152,6 +154,7 @@ pub struct Config {
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
     pub is_seed_peer: bool,
+    pub debug_print_chain: bool,
 }
 
 impl Default for Config {
@@ -169,6 +172,7 @@ impl Default for Config {
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(2 * 60),
             is_seed_peer: false,
+            debug_print_chain: false,
         }
     }
 }
@@ -1233,6 +1237,14 @@ where S: ShareChain
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
+
+        let mut debug_chain_graph = if self.config.debug_print_chain {
+            tokio::time::interval(Duration::from_secs(30))
+        } else {
+            // only once a day, but even then will be skipped
+            tokio::time::interval(Duration::from_secs(60 * 60 * 24))
+        };
+        debug_chain_graph.set_missed_tick_behavior(MissedTickBehavior::Skip);
         // TODO: Not sure why this is done on a loop instead of just once....
         // let mut kademlia_bootstrap_interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
         // kademlia_bootstrap_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1324,8 +1336,74 @@ where S: ShareChain
                 _ = grey_list_clear_interval.tick() => {
                     self.network_peer_store.clear_grey_list();
                 },
+                _ = debug_chain_graph.tick() => {
+                 if self.config.debug_print_chain {
+                    self.print_debug_chain_graph().await;
+                 }
+                },
             }
         }
+    }
+
+    async fn print_debug_chain_graph(&self) {
+        self.print_debug_chain_graph_inner(&self.share_chain_random_x, "randomx")
+            .await;
+        self.print_debug_chain_graph_inner(&self.share_chain_sha3x, "sha3x")
+            .await;
+    }
+
+    async fn print_debug_chain_graph_inner(&self, chain: &S, prefix: &str) {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(format!("{}_blocks_{}.txt", prefix, time))
+            .unwrap();
+
+        file.write(b"@startuml\n").unwrap();
+        file.write(b"digraph B {\n").unwrap();
+        let blocks = chain.all_blocks().await.expect("errored");
+        for b in blocks {
+            file.write(
+                format!(
+                    "B{} [label=\"{} - {}\"]\n",
+                    &b.hash.to_hex()[0..8],
+                    &b.height,
+                    &b.hash.to_hex()[0..8]
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            file.write(format!("B{} -> B{}\n", &b.hash.to_hex()[0..8], &b.prev_hash.to_hex()[0..8]).as_bytes())
+                .unwrap();
+            for u in b.uncles.iter().take(3) {
+                file.write(
+                    format!(
+                        "B{} -> B{} [style=dotted]\n",
+                        &b.hash.to_hex()[0..8],
+                        &u.1.to_hex()[0..8]
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            }
+            if b.uncles.len() > 3 {
+                file.write(
+                    format!(
+                        "B{} -> B{}others [style=dotted, label=\"{} others\"]\n",
+                        &b.hash.to_hex()[0..8],
+                        &b.hash.to_hex()[0..8],
+                        b.uncles.len() - 3
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            }
+        }
+
+        file.write(b"}\n").unwrap();
     }
 
     async fn parse_seed_peers(&mut self) -> Result<HashMap<PeerId, Multiaddr>, Error> {
