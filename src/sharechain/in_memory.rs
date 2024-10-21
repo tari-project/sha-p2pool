@@ -154,7 +154,7 @@ impl InMemoryShareChain {
         }
 
         // Check if already added.
-        if let Some(level) = p2_chain.get_at_height(new_block_p2pool_height) {
+        if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
             if level.blocks.contains_key(&block.hash) {
                 info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
                 return Ok(());
@@ -226,7 +226,7 @@ impl InMemoryShareChain {
         );
         for uncle in cur_block.uncles.iter() {
             let uncle_block = p2_chain
-                .get_at_height(uncle.0)
+                .level_at_height(uncle.0)
                 .ok_or_else(|| Error::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
@@ -249,7 +249,7 @@ impl InMemoryShareChain {
             );
             for uncle in cur_block.uncles.iter() {
                 let uncle_block = p2_chain
-                    .get_at_height(uncle.0)
+                    .level_at_height(uncle.0)
                     .ok_or_else(|| Error::UncleBlockNotFound)?
                     .blocks
                     .get(&uncle.1)
@@ -368,7 +368,7 @@ impl ShareChain for InMemoryShareChain {
         );
         for uncle in new_tip_block.uncles.iter() {
             let uncle_block = chain_read_lock
-                .get_at_height(uncle.0)
+                .level_at_height(uncle.0)
                 .ok_or_else(|| Error::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
@@ -430,17 +430,23 @@ impl ShareChain for InMemoryShareChain {
         let mut excluded_uncles = vec![];
         let mut uncles = vec![];
         for height in new_height.saturating_sub(3)..new_height {
-            let older_level = chain_read_lock.get_at_height(height).ok_or(Error::BlockLevelNotFound)?;
-            excluded_uncles.push(older_level.chain_block.clone());
+            let older_level = chain_read_lock
+                .level_at_height(height)
+                .ok_or(Error::BlockLevelNotFound)?;
             let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
+            // Blocks in the main chain can't be uncles
+            excluded_uncles.push(chain_block.hash);
             for uncle in chain_block.uncles.iter() {
                 excluded_uncles.push(uncle.1);
             }
             for block in older_level.blocks.iter() {
-                if !excluded_uncles.contains(&block.0) {
-                    uncles.push((height, block.0.clone()));
-                }
+                uncles.push((height, block.0.clone()));
             }
+        }
+
+        // Remove excluded.
+        for excluded in excluded_uncles.iter() {
+            uncles.retain(|uncle| &uncle.1 != excluded);
         }
 
         Ok(P2Block::builder()
@@ -458,7 +464,7 @@ impl ShareChain for InMemoryShareChain {
         let mut blocks = Vec::new();
 
         for block in requested_blocks {
-            if let Some(level) = p2_chain_read_lock.get_at_height(block.0) {
+            if let Some(level) = p2_chain_read_lock.level_at_height(block.0) {
                 if let Some(block) = level.blocks.get(&block.1) {
                     blocks.push(block.clone());
                 } else {
@@ -561,6 +567,18 @@ impl ShareChain for InMemoryShareChain {
 
         let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
         cmp::max(min, cmp::min(max, difficulty))
+    }
+
+    // For debugging only
+    async fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+        let chain_read_lock = self.p2_chain.read().await;
+        let mut res = Vec::new();
+        for level in &chain_read_lock.levels {
+            for block in level.blocks.values() {
+                res.push(block.clone());
+            }
+        }
+        Ok(res)
     }
 }
 
@@ -703,7 +721,7 @@ pub mod test {
                     .p2_chain
                     .read()
                     .await
-                    .get_at_height(i as u64 - 2)
+                    .level_at_height(i as u64 - 2)
                     .unwrap()
                     .chain_block;
                 // lets create an uncle block

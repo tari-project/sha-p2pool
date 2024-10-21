@@ -45,7 +45,7 @@ pub const MAX_EXTRA_SYNC: usize = 2000;
 
 pub struct P2Chain {
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
-    levels: VecDeque<P2ChainLevel>,
+    pub(crate) levels: VecDeque<P2ChainLevel>,
     total_size: usize,
     share_window: usize,
     total_accumulated_tip_difficulty: AccumulatedDifficulty,
@@ -54,7 +54,7 @@ pub struct P2Chain {
 }
 
 impl P2Chain {
-    pub fn get_at_height(&self, height: u64) -> Option<&P2ChainLevel> {
+    pub fn level_at_height(&self, height: u64) -> Option<&P2ChainLevel> {
         let tip = self.levels.front()?.height;
         if height > tip {
             return None;
@@ -65,7 +65,7 @@ impl P2Chain {
     }
 
     fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<&Arc<P2Block>> {
-        let level = self.get_at_height(height)?;
+        let level = self.level_at_height(height)?;
         level.blocks.get(hash)
     }
 
@@ -148,13 +148,13 @@ impl P2Chain {
         if self.current_tip >= self.share_window as u64 {
             // our tip is more than the share window so its possible that we need to drop a block out of the pow window
             if let Some(level) = self
-                .get_at_height(self.current_tip.saturating_sub(self.share_window as u64))
+                .level_at_height(self.current_tip.saturating_sub(self.share_window as u64))
                 .cloned()
             {
                 let block = level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
                 self.decrease_total_chain_difficulty(block.target_difficulty)?;
                 for (height, block_hash) in &block.uncles {
-                    if let Some(link_level) = self.get_at_height(*height) {
+                    if let Some(link_level) = self.level_at_height(*height) {
                         let uncle_block = link_level.blocks.get(&block_hash).ok_or(Error::BlockNotFound)?;
                         self.decrease_total_chain_difficulty(uncle_block.target_difficulty)?;
                     }
@@ -185,7 +185,17 @@ impl P2Chain {
             }
             // now lets check the uncles
             for uncle in block.uncles.iter() {
-                if self.get_block_at_height(uncle.0, &uncle.1).is_none() {
+                if self.get_block_at_height(uncle.0, &uncle.1).is_some() {
+                    // Uncle cannot be in the main chain
+                    if let Some(level) = self.level_at_height(uncle.0) {
+                        if level.chain_block == uncle.1 {
+                            return Err(Error::UncleInMainChain {
+                                height: uncle.0,
+                                hash: uncle.1.clone(),
+                            });
+                        }
+                    }
+                } else {
                     missing_parents.push((uncle.0, uncle.1.clone()));
                 }
             }
@@ -291,8 +301,8 @@ impl P2Chain {
                 self.cached_shares = None;
                 // lets fix the chain
                 let mut current_block = block;
-                while self.get_at_height(current_block.height.saturating_sub(1)).is_some() {
-                    let parent_level = (self.get_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
+                while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
+                    let parent_level = (self.level_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
                     if current_block.prev_hash != parent_level.chain_block {
                         // safety check
                         let nextblock = parent_level.blocks.get(&current_block.prev_hash);
@@ -333,7 +343,7 @@ impl P2Chain {
         }
 
         // let see if we already have a block that builds on top of this
-        if let Some(next_level) = self.get_at_height(new_block_height + 1).cloned() {
+        if let Some(next_level) = self.level_at_height(new_block_height + 1).cloned() {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
@@ -349,6 +359,14 @@ impl P2Chain {
     pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
         let new_block_height = block.height;
         let block_hash = block.hash.clone();
+
+        // Uncle cannot be the same as prev_hash
+        if block.uncles.iter().any(|(_, hash)| hash == &block.prev_hash) {
+            return Err(Error::InvalidBlock {
+                reason: "Uncle cannot be the same as prev_hash".to_string(),
+            });
+        }
+
         // edge case no current chain, lets just add
         if self.get_tip().is_none() {
             let new_level = P2ChainLevel::new(block);
@@ -417,7 +435,7 @@ impl P2Chain {
             Some(height) => height,
             None => return None,
         };
-        let parent_level = match self.get_at_height(parent_height) {
+        let parent_level = match self.level_at_height(parent_height) {
             Some(level) => level,
             None => return None,
         };
@@ -425,7 +443,7 @@ impl P2Chain {
     }
 
     pub fn get_tip(&self) -> Option<&P2ChainLevel> {
-        self.get_at_height(self.current_tip)
+        self.level_at_height(self.current_tip)
     }
 
     pub fn get_height(&self) -> u64 {
@@ -474,14 +492,14 @@ mod test {
         // 0..9 blocks should have been trimmed out
 
         for i in 10..41 {
-            let level = chain.get_at_height(i).unwrap();
+            let level = chain.level_at_height(i).unwrap();
             assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
         }
 
-        let level = chain.get_at_height(10).unwrap();
+        let level = chain.level_at_height(10).unwrap();
         assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 10);
 
-        assert!(chain.get_at_height(0).is_none());
+        assert!(chain.level_at_height(0).is_none());
     }
 
     #[test]
@@ -530,13 +548,13 @@ mod test {
         }
 
         for i in 11..41 {
-            let level = chain.get_at_height(i).unwrap();
+            let level = chain.level_at_height(i).unwrap();
             let block = level.block_in_main_chain().unwrap();
             let parent = chain.get_parent_block(&block).unwrap();
             assert_eq!(parent.original_block.header.nonce, i - 1);
         }
 
-        let level = chain.get_at_height(10).unwrap();
+        let level = chain.level_at_height(10).unwrap();
         let block = level.block_in_main_chain().unwrap();
         assert!(chain.get_parent_block(&block).is_none());
     }
@@ -608,7 +626,7 @@ mod test {
             AccumulatedDifficulty::from_u128(145).unwrap() // 31+30+29+28+27
         );
 
-        let block_29 = chain.get_at_height(29).unwrap().block_in_main_chain().unwrap();
+        let block_29 = chain.level_at_height(29).unwrap().block_in_main_chain().unwrap();
         prev_hash = block_29.generate_hash();
         timestamp = block_29.timestamp;
 
@@ -701,7 +719,7 @@ mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 1 {
-                let prev_hash_uncle = chain.get_at_height(i - 2).unwrap().chain_block;
+                let prev_hash_uncle = chain.level_at_height(i - 2).unwrap().chain_block;
                 // lets create an uncle block
                 let block = P2Block::builder()
                     .with_timestamp(timestamp)
@@ -750,7 +768,7 @@ mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 1 {
-                let prev_hash_uncle = chain.get_at_height(i - 2).unwrap().chain_block;
+                let prev_hash_uncle = chain.level_at_height(i - 2).unwrap().chain_block;
                 // lets create an uncle block
                 let block = P2Block::builder()
                     .with_timestamp(timestamp)
@@ -779,7 +797,7 @@ mod test {
         let address = new_random_address();
         timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
         let mut uncles = Vec::new();
-        let prev_hash_uncle = chain.get_at_height(6).unwrap().chain_block;
+        let prev_hash_uncle = chain.level_at_height(6).unwrap().chain_block;
         // lets create an uncle block
         let block = P2Block::builder()
             .with_timestamp(timestamp)
@@ -790,7 +808,7 @@ mod test {
             .build();
         uncles.push((7, block.hash));
         chain.add_block_to_chain(block).unwrap();
-        prev_hash = chain.get_at_height(7).unwrap().chain_block;
+        prev_hash = chain.level_at_height(7).unwrap().chain_block;
         let block = P2Block::builder()
             .with_timestamp(timestamp)
             .with_height(8)
