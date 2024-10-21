@@ -26,6 +26,7 @@ use std::{
     sync::Arc,
 };
 
+use log::info;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
 
@@ -36,7 +37,7 @@ use crate::sharechain::{
     BLOCK_TARGET_TIME,
     DIFFICULTY_ADJUSTMENT_WINDOW,
 };
-// const LOG_TARGET: &str = "tari::p2pool::sharechain::chain";
+const LOG_TARGET: &str = "tari::p2pool::sharechain::chain";
 // this is the max we are allowed to go over the size
 pub const SAFETY_MARGIN: usize = 20;
 // this is the max extra lenght the chain can grow in front of our tip
@@ -158,14 +159,6 @@ impl P2Chain {
                         self.decrease_total_chain_difficulty(uncle_block.target_difficulty)?;
                     }
                 }
-                // for (hash, block) in level.blocks.iter() {
-                //     if *hash == level.chain_block {
-                //         dbg!("removeing difficulty");
-                //         // its the main block, so remove its difficulty
-                //         self.decrease_total_chain_difficulty(block.target_difficulty)?;
-                //
-                //     }
-                // }
             }
         }
         Ok(())
@@ -178,6 +171,7 @@ impl P2Chain {
             .get_block_at_height(new_block_height, &hash)
             .ok_or(Error::BlockNotFound)?
             .clone();
+        let algo = block.original_block.header.pow.pow_algo;
 
         // do we know of the parent
         // we should not check the chain start for parents
@@ -186,7 +180,7 @@ impl P2Chain {
                 .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
                 .is_none()
             {
-                // we dont know the parent, lets see if we know of it
+                // we dont know the parent
                 missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
             }
             // now lets check the uncles
@@ -218,7 +212,6 @@ impl P2Chain {
             // lets replace this
             block.verified = true;
             let _ = level.blocks.insert(hash, Arc::new(block));
-            // block.verified = true;
         }
 
         // is this block part of the main chain?
@@ -229,8 +222,10 @@ impl P2Chain {
                 .prev_hash
         {
             // easy this builds on the tip
+            info!(target: LOG_TARGET, "[{:?}] Block building on tip: {:?}", algo, new_block_height);
             self.set_new_tip(new_block_height, hash)?;
         } else {
+            info!(target: LOG_TARGET, "[{:?}] Block is not building on tip: {:?}", algo, new_block_height);
             // lets check if we need to reorg here
             let block = self
                 .get_block_at_height(new_block_height, &hash)
@@ -291,19 +286,9 @@ impl P2Chain {
                     .expect("Failed to create LWMA");
                 self.lwma
                     .add_front(block.original_block.header.timestamp, block.target_difficulty);
-                let chain_height = self.get_mut_at_height(block.height);
-                match chain_height {
-                    Some(level) => {
-                        level.chain_block = block.hash.clone();
-                        level.add_block(block.clone())?;
-                        self.cached_shares = None;
-                    },
-                    None => {
-                        let mut new_level = P2ChainLevel::new(block.clone());
-                        new_level.chain_block = block.hash.clone();
-                        self.levels.push_front(new_level);
-                    },
-                }
+                let chain_height = self.get_mut_at_height(block.height).ok_or(Error::BlockLevelNotFound)?;
+                chain_height.chain_block = block.hash.clone();
+                self.cached_shares = None;
                 // lets fix the chain
                 let mut current_block = block;
                 while self.get_at_height(current_block.height.saturating_sub(1)).is_some() {
@@ -352,6 +337,7 @@ impl P2Chain {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
+                    info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
                     // we have a parent here
                     self.verify_chain(next_level.height, block.0.clone())?;
                 }
