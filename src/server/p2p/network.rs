@@ -173,7 +173,7 @@ impl Default for Config {
             relay_server_enabled: false,
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
-            grey_list_clear_interval: Duration::from_secs(2 * 60),
+            grey_list_clear_interval: Duration::from_secs(20 * 60),
             sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
@@ -857,6 +857,9 @@ where S: ShareChain
                 },
                 _ => {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+                    self.network_peer_store
+                        .move_to_grey_list(peer, format!("Block failed validation: {}", error))
+                        .await;
                 },
             },
         };
@@ -1325,6 +1328,23 @@ where S: ShareChain
 
     async fn try_sync_from_best_peer(&mut self) {
         for algo in &[PowAlgorithm::RandomX, PowAlgorithm::Sha3x] {
+            // Find any blocks we are missing.
+            let chain = match algo {
+                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+            };
+
+            // let missing_blocks = match chain.missing_blocks().await.inspect_err(
+            //     |e| error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get missing blocks: {e:?}"),
+            // ) {
+            //     Ok(missing_blocks) => missing_blocks,
+            //     Err(_) => {
+            //         continue;
+            //     },
+            // };
+
+            // dbg!(&missing_blocks);
+
             let best_peers = self
                 .network_peer_store
                 .best_peers_to_sync(self.config.num_peers_to_sync, *algo);
@@ -1332,20 +1352,29 @@ where S: ShareChain
                 PowAlgorithm::RandomX => self.share_chain_random_x.tip_height().await.unwrap_or_default(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
             };
+            dbg!(self.swarm.local_peer_id());
+
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
 
             for record in best_peers {
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
                 let their_height = match algo {
                     PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
                     PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
                 };
                 if their_height > 0 {
                     let mut blocks_to_request = vec![];
-                    for i in (our_tip..their_height).rev().take(self.config.max_blocks_to_request) {
+                    for i in (our_tip..=their_height).rev().take(self.config.max_blocks_to_request) {
                         blocks_to_request.push((i, FixedHash::zero()));
                     }
 
-                    self.sync_share_chain(*algo, record.peer_id, blocks_to_request).await;
+                    // dbg!(blocks_to_request.last());
+
+                    if !blocks_to_request.is_empty() {
+                        self.sync_share_chain(*algo, record.peer_id, blocks_to_request).await;
+                    } else {
+                        info!(target: LOG_TARGET, "No need to sync, we are up to date");
+                    }
                 }
             }
         }

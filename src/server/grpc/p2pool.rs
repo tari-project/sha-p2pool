@@ -156,10 +156,10 @@ where S: ShareChain
         &self,
         request: Request<GetNewBlockRequest>,
     ) -> Result<Response<GetNewBlockResponse>, Status> {
+        let timer = Instant::now();
         let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT;
 
         let result = timeout(timeout_duration, async {
-            let timer = Instant::now();
             let grpc_req = request.into_inner();
 
             // extract pow algo
@@ -190,10 +190,13 @@ where S: ShareChain
                 .await
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
+            dbg!(&new_tip_block.height, &new_tip_block.hash);
             let shares = share_chain
                 .generate_shares(&new_tip_block)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
+
+            dbg!(&shares);
 
             let mut response = self
                 .client
@@ -295,9 +298,9 @@ where S: ShareChain
         .await;
 
         match result {
-            Ok(response) => response,
+            Ok(response) => response.inspect_err(|e| error!(target: LOG_TARGET, "get_new_block failed: {e:?}")),
             Err(e) => {
-                error!(target: LOG_TARGET, "get_new_block timed out: {e:?}");
+                error!(target: LOG_TARGET, "get_new_block timed out after {}ms: {e:?}", timer.elapsed().as_millis());
                 Err(Status::deadline_exceeded("get_new_block timed out"))
             },
         }
