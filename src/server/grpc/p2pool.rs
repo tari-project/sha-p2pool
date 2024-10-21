@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 
+use axum::response;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
@@ -16,6 +17,7 @@ use minotari_app_grpc::tari_rpc::{
     GetNewBlockRequest,
     GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest,
+    NewBlockCoinbase,
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
@@ -184,7 +186,7 @@ where S: ShareChain
             let coinbase_extra =
                 convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra).unwrap_or_default();
             let mut new_tip_block = (*share_chain
-                .generate_new_tip_block(&wallet_payment_address, coinbase_extra)
+                .generate_new_tip_block(&wallet_payment_address, coinbase_extra.clone())
                 .await
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();

@@ -178,7 +178,7 @@ impl Default for Config {
             is_seed_peer: false,
             debug_print_chain: false,
             num_peers_to_sync: 10,
-            max_blocks_to_request: 200,
+            max_blocks_to_request: 2500,
         }
     }
 }
@@ -663,6 +663,11 @@ where S: ShareChain
     }
 
     async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
+        // Don't add ourselves
+        if &peer == self.swarm.local_peer_id() {
+            return ControlFlow::Continue(());
+        }
+
         let their_randomx_height = payload.current_random_x_height;
         let their_sha3x_height = payload.current_sha3x_height;
         for addr in &payload.public_addresses() {
@@ -1327,19 +1332,19 @@ where S: ShareChain
                 PowAlgorithm::RandomX => self.share_chain_random_x.tip_height().await.unwrap_or_default(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
             };
+            // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
+
             for record in best_peers {
                 let their_height = match algo {
                     PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
                     PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
                 };
                 if their_height > 0 {
-                    dbg!(our_tip, their_height);
                     let mut blocks_to_request = vec![];
                     for i in (our_tip..their_height).rev().take(self.config.max_blocks_to_request) {
                         blocks_to_request.push((i, FixedHash::zero()));
                     }
 
-                    dbg!(blocks_to_request.len());
                     self.sync_share_chain(*algo, record.peer_id, blocks_to_request).await;
                 }
             }
