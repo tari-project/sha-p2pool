@@ -155,6 +155,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_debug_print_chain(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.debug_print_chain = config;
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }

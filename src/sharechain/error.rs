@@ -41,6 +41,8 @@ pub enum Error {
     BlockParentDoesNotExist { missing_parents: Vec<(u64, FixedHash)> },
     #[error("Missing block validation params!")]
     MissingBlockValidationParams,
+    #[error("Block is not an uncle of the main chain. Height: {height}, Hash: {hash}")]
+    UncleInMainChain { height: u64, hash: FixedHash },
 }
 
 #[derive(Error, Debug)]
