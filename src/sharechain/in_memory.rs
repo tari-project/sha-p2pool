@@ -431,6 +431,7 @@ impl ShareChain for InMemoryShareChain {
         let mut uncles = vec![];
         for height in new_height.saturating_sub(3)..new_height {
             let older_level = chain_read_lock.get_at_height(height).ok_or(Error::BlockLevelNotFound)?;
+            excluded_uncles.push(older_level.chain_block.clone());
             let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
             for uncle in chain_block.uncles.iter() {
                 excluded_uncles.push(uncle.1);
@@ -441,42 +442,6 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
         }
-        let mut log_parents = [FixedHash::zero(); 4];
-        log_parents[0] = if new_height >= 10 {
-            match chain_read_lock.get_at_height(new_height - 10) {
-                Some(level) => level.chain_block.clone(),
-                None => FixedHash::zero(),
-            }
-        } else {
-            FixedHash::zero()
-        };
-
-        log_parents[1] = if new_height >= 20 {
-            match chain_read_lock.get_at_height(new_height - 20) {
-                Some(level) => level.chain_block.clone(),
-                None => FixedHash::zero(),
-            }
-        } else {
-            FixedHash::zero()
-        };
-
-        log_parents[2] = if new_height >= 100 {
-            match chain_read_lock.get_at_height(new_height - 100) {
-                Some(level) => level.chain_block.clone(),
-                None => FixedHash::zero(),
-            }
-        } else {
-            FixedHash::zero()
-        };
-
-        log_parents[3] = if new_height >= 2160 {
-            match chain_read_lock.get_at_height(new_height - 2160) {
-                Some(level) => level.chain_block.clone(),
-                None => FixedHash::zero(),
-            }
-        } else {
-            FixedHash::zero()
-        };
 
         Ok(P2Block::builder()
             .with_timestamp(EpochTime::now())
