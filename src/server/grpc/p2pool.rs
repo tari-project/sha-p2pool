@@ -131,7 +131,7 @@ where S: ShareChain
                 for uncle in block.uncles.iter() {
                     new_blocks.push(uncle.clone());
                 }
-                let notify = NotifyNewTipBlock { algo: pow_algo.as_u64() ,new_blocks };
+                let notify = NotifyNewTipBlock::new(pow_algo, new_blocks);
                 let res = self
                     .p2p_client
                     .broadcast_block(notify)

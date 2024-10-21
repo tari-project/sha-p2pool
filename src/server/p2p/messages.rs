@@ -63,7 +63,7 @@ impl PeerInfo {
     ) -> Self {
         let timestamp = EpochTime::now();
         Self {
-            version: 6,
+            version: 7,
             current_sha3x_height,
             current_random_x_height,
             squad,
@@ -122,10 +122,25 @@ pub struct LocalShareChainSyncRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NotifyNewTipBlock {
+    pub version: u32,
     pub algo: u64,
     pub new_blocks: Vec<(u64, FixedHash)>,
 }
 impl_conversions!(NotifyNewTipBlock);
+
+impl NotifyNewTipBlock {
+    pub fn new(algo: PowAlgorithm, new_blocks: Vec<(u64, FixedHash)>) -> Self {
+        Self {
+            version: 1,
+            algo: algo.as_u64(),
+            new_blocks,
+        }
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        PowAlgorithm::try_from(self.algo).unwrap()
+    }
+}
 
 impl LocalShareChainSyncRequest {
     pub fn new(peer_id: PeerId, request: ShareChainSyncRequest) -> Self {

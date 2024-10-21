@@ -579,6 +579,14 @@ impl ShareChain for InMemoryShareChain {
         }
         Ok(res)
     }
+
+    async fn has_block(&self, height: u64, hash: &FixedHash) -> bool {
+        let chain_read_lock = self.p2_chain.read().await;
+        if let Some(level) = chain_read_lock.level_at_height(height) {
+            return level.blocks.contains_key(&hash);
+        }
+        false
+    }
 }
 
 #[cfg(test)]

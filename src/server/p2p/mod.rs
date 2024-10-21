@@ -19,5 +19,5 @@ mod relay_store;
 pub mod util;
 pub const MAX_SNOOZES: usize = 5;
 pub const MAX_SNOOZE_DURATION: Duration = Duration::from_secs(2); // 2 seconds, max 10 seconds of snoozing
-pub const MIN_PEER_INFO_VERSION: u64 = 6;
-pub const MIN_BLOCK_VERSION: u32 = 7;
+pub const MIN_PEER_INFO_VERSION: u64 = 7;
+pub const MIN_NOTIFY_VERSION: u32 = 1;

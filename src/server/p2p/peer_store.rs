@@ -95,6 +95,12 @@ impl PeerStore {
         }
     }
 
+    pub fn exists(&self, peer_id: &PeerId) -> bool {
+        self.whitelist_peers.contains_key(&peer_id.to_base58()) ||
+            self.greylist_peers.contains_key(&peer_id.to_base58()) ||
+            self.blacklist_peers.contains(&peer_id.to_base58())
+    }
+
     pub fn whitelist_peers(&self) -> &HashMap<String, PeerStoreRecord> {
         &self.whitelist_peers
     }
