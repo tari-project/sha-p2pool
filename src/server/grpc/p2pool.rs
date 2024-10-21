@@ -41,7 +41,7 @@ use crate::{
     server::{
         grpc::{error::Error, util, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
-        p2p::{client::ServiceClient, Squad},
+        p2p::{client::ServiceClient, messages::NotifyNewTipBlock, Squad},
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
@@ -125,9 +125,14 @@ where S: ShareChain
         match share_chain.submit_block(block.clone()).await {
             Ok(_) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
+                let mut new_blocks = vec![(block.height, block.hash.clone())];
+                for uncle in block.uncles.iter() {
+                    new_blocks.push(uncle.clone());
+                }
+                let notify = NotifyNewTipBlock::new(pow_algo, new_blocks);
                 let res = self
                     .p2p_client
-                    .broadcast_block(block.clone())
+                    .broadcast_block(notify)
                     .map_err(|error| Status::internal(error.to_string()));
                 if res.is_ok() {
                     info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
@@ -358,7 +363,6 @@ where S: ShareChain
             let tari_hash = tari_block.header.hash();
             tari_block.header.nonce = mined_nonce;
             tari_block.header.pow.pow_data = temp_pow_data;
-            //todo dont remove, just peek
             let mut p2pool_block = match pow_algo{
                 PowAlgorithm::Sha3x =>  self
                     .template_store_sha3x

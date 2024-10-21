@@ -133,4 +133,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 
     async fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
+
+    async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
 }
