@@ -668,8 +668,6 @@ where S: ShareChain
             return ControlFlow::Continue(());
         }
 
-        let their_randomx_height = payload.current_random_x_height;
-        let their_sha3x_height = payload.current_sha3x_height;
         for addr in &payload.public_addresses() {
             self.swarm.add_peer_address(peer, addr.clone());
         }
@@ -677,14 +675,14 @@ where S: ShareChain
 
         match add_status {
             AddPeerStatus::NewPeer => {
-                if let Ok(my_info) = self
+                if let Ok(_my_info) = self
                     .create_peer_info(self.swarm.external_addresses().cloned().collect())
                     .await
                     .inspect_err(|error| {
                         error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
                     })
                 {
-                    let local_peer_id = self.swarm.local_peer_id().clone();
+                    // let local_peer_id = self.swarm.local_peer_id().clone();
                     // TODO: Should we send them our details? The problem is that if we send too many of these, libp2p
                     // starts dropping requests with "libp2p_relay::priv_client::handler Dropping in-flight connect
                     // request because we are at capacity"
@@ -1329,7 +1327,7 @@ where S: ShareChain
     async fn try_sync_from_best_peer(&mut self) {
         for algo in &[PowAlgorithm::RandomX, PowAlgorithm::Sha3x] {
             // Find any blocks we are missing.
-            let chain = match algo {
+            let _chain = match algo {
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
             };
