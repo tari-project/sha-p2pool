@@ -153,8 +153,11 @@ pub struct Config {
     pub squad: Squad,
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
+    pub sync_interval: Duration,
     pub is_seed_peer: bool,
     pub debug_print_chain: bool,
+    pub num_peers_to_sync: usize,
+    pub max_blocks_to_request: usize,
 }
 
 impl Default for Config {
@@ -170,9 +173,12 @@ impl Default for Config {
             relay_server_enabled: false,
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
-            grey_list_clear_interval: Duration::from_secs(2 * 60),
+            grey_list_clear_interval: Duration::from_secs(20 * 60),
+            sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
+            num_peers_to_sync: 10,
+            max_blocks_to_request: 2500,
         }
     }
 }
@@ -584,7 +590,7 @@ where S: ShareChain
                         return;
                     }
                     if !self.config.is_seed_peer {
-                        self.add_peer_and_try_sync(payload, peer).await;
+                        self.add_peer(payload, peer).await;
                     }
                 },
                 Err(error) => {
@@ -602,7 +608,7 @@ where S: ShareChain
                             return;
                         }
                         if !self.config.is_seed_peer {
-                            self.add_peer_and_try_sync(payload, peer).await;
+                            self.add_peer(payload, peer).await;
                         }
                     },
                     Err(error) => {
@@ -656,7 +662,12 @@ where S: ShareChain
         }
     }
 
-    async fn add_peer_and_try_sync(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
+    async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
+        // Don't add ourselves
+        if &peer == self.swarm.local_peer_id() {
+            return ControlFlow::Continue(());
+        }
+
         let their_randomx_height = payload.current_random_x_height;
         let their_sha3x_height = payload.current_sha3x_height;
         for addr in &payload.public_addresses() {
@@ -674,13 +685,17 @@ where S: ShareChain
                     })
                 {
                     let local_peer_id = self.swarm.local_peer_id().clone();
-                    self.swarm
-                        .behaviour_mut()
-                        .direct_peer_exchange
-                        .send_request(&peer, DirectPeerInfoRequest {
-                            info: my_info,
-                            peer_id: local_peer_id.to_base58(),
-                        });
+                    // TODO: Should we send them our details? The problem is that if we send too many of these, libp2p
+                    // starts dropping requests with "libp2p_relay::priv_client::handler Dropping in-flight connect
+                    // request because we are at capacity"
+
+                    // self.swarm
+                    //     .behaviour_mut()
+                    //     .direct_peer_exchange
+                    //     .send_request(&peer, DirectPeerInfoRequest {
+                    //         info: my_info,
+                    //         peer_id: local_peer_id.to_base58(),
+                    //     });
                 }
             },
             AddPeerStatus::Existing => {},
@@ -702,24 +717,25 @@ where S: ShareChain
             return ControlFlow::Break(());
         }
 
-        debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing peer info from {peer:?} with heights: RandomX: {their_randomx_height}, Sha3x: {their_sha3x_height}");
+        // debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing peer info from {peer:?} with heights:
+        // RandomX: {their_randomx_height}, Sha3x: {their_sha3x_height}");
 
-        let our_height = self.share_chain_random_x.tip_height().await.unwrap_or_default();
-        if our_height < their_randomx_height {
-            self.network_peer_store.update_last_sync_attempt(peer);
-            self.sync_share_chain(PowAlgorithm::RandomX, peer, vec![(
-                their_randomx_height,
-                FixedHash::zero(),
-            )])
-            .await;
-        }
+        // let our_height = self.share_chain_random_x.tip_height().await.unwrap_or_default();
+        // if our_height < their_randomx_height {
+        //     self.network_peer_store.update_last_sync_attempt(peer);
+        //     self.sync_share_chain(PowAlgorithm::RandomX, peer, vec![(
+        //         their_randomx_height,
+        //         FixedHash::zero(),
+        //     )])
+        //     .await;
+        // }
 
-        let our_height = self.share_chain_sha3x.tip_height().await.unwrap_or_default();
-        if our_height < their_sha3x_height {
-            self.network_peer_store.update_last_sync_attempt(peer);
-            self.sync_share_chain(PowAlgorithm::Sha3x, peer, vec![(their_sha3x_height, FixedHash::zero())])
-                .await;
-        }
+        // let our_height = self.share_chain_sha3x.tip_height().await.unwrap_or_default();
+        // if our_height < their_sha3x_height {
+        //     self.network_peer_store.update_last_sync_attempt(peer);
+        //     self.sync_share_chain(PowAlgorithm::Sha3x, peer, vec![(their_sha3x_height, FixedHash::zero())])
+        //         .await;
+        // }
         ControlFlow::Continue(())
     }
 
@@ -773,13 +789,11 @@ where S: ShareChain
             }
         }
 
-        self.add_peer_and_try_sync(request.info, request.peer_id.parse().unwrap())
-            .await;
+        self.add_peer(request.info, request.peer_id.parse().unwrap()).await;
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        self.add_peer_and_try_sync(response.info, response.peer_id.parse().unwrap())
-            .await;
+        self.add_peer(response.info, response.peer_id.parse().unwrap()).await;
     }
 
     /// Handles share chain sync request (coming from other peer).
@@ -788,9 +802,6 @@ where S: ShareChain
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
-        dbg!("Trying to sync from user request");
-        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync request: {request:?}");
-
         info!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
         let share_chain = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -846,6 +857,9 @@ where S: ShareChain
                 },
                 _ => {
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+                    self.network_peer_store
+                        .move_to_grey_list(peer, format!("Block failed validation: {}", error))
+                        .await;
                 },
             },
         };
@@ -863,7 +877,7 @@ where S: ShareChain
         // }
         // self.sync_in_progress.store(true, Ordering::SeqCst);
 
-        info!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
+        debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
         if self.network_peer_store.is_blacklisted(&peer) {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is blacklisted, skipping sync");
@@ -875,7 +889,7 @@ where S: ShareChain
             // return;
         }
 
-        info!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
+        debug!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
         let _outbound_id = self
             .swarm
             .behaviour_mut()
@@ -1238,6 +1252,8 @@ where S: ShareChain
 
         let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
 
+        let mut sync_interval = tokio::time::interval(self.config.sync_interval);
+
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(30))
         } else {
@@ -1294,45 +1310,10 @@ where S: ShareChain
                         }
                     }
                 },
-
-                        //  if let Some((snoozes_left, block)) = res {
-                        //     let snooze_sender = self.snooze_block_tx.clone();
-                        //     let share_chain = match block.original_block_header.pow.pow_algo {
-                        //         PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-                        //         PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-                        //     };
-                        //  tokio::spawn(async move {
-                        //     warn!(target: LOG_TARGET, "Trying snoozed block again after {snoozes_left} snoozes left...");
-                        //     tokio::time::sleep(MAX_SNOOZE_DURATION).await;
-                        //     // self.sync_share_chain(
-                        //         // payload.original_block_header.pow.pow_algo,
-                        //         // Some(peer),
-                        //         // Some(payload.height.saturating_sub(num_missing_parents)),
-                        //     // )
-                        //     // .await;
-                        //     if let Ok((snoozed, _num_missing_parents)) = Service::<S>::try_add_propagated_block(&share_chain, block.clone()).await {
-                        //         if snoozed && snoozes_left > 1 {
-                        //             let _ = snooze_sender.send((snoozes_left - 1, block)).await;
-                        //         }
-                        //     } else {
-                        //         error!(target: LOG_TARGET, "Failed to add snoozed block to share chain");
-                        //     }
-                        //  });
-                        // } else {
-                        //     error!(target: LOG_TARGET, "Failed to receive snoozed block from channel. Sender dropped?");
-                        // }
-                // req = self.share_chain_sync_rx.recv() => {
-                //     dbg!("share chain sync rx");
-                //     match req {
-                //         Ok(request) => {
-                //             self.swarm.behaviour_mut().share_chain_sync
-                //                 .send_request(&request.peer_id, request.request);
-                //         }
-                //         Err(error) => {
-                //             error!("Failed to receive share chain sync request from channel: {error:?}");
-                //         }
-                //     }
-                // },
+                _ = sync_interval.tick() =>  {
+                    dbg!("Trying to sync");
+                    self.try_sync_from_best_peer().await;
+                }
                 _ = grey_list_clear_interval.tick() => {
                     self.network_peer_store.clear_grey_list();
                 },
@@ -1341,6 +1322,60 @@ where S: ShareChain
                     self.print_debug_chain_graph().await;
                  }
                 },
+            }
+        }
+    }
+
+    async fn try_sync_from_best_peer(&mut self) {
+        for algo in &[PowAlgorithm::RandomX, PowAlgorithm::Sha3x] {
+            // Find any blocks we are missing.
+            let chain = match algo {
+                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+            };
+
+            // let missing_blocks = match chain.missing_blocks().await.inspect_err(
+            //     |e| error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get missing blocks: {e:?}"),
+            // ) {
+            //     Ok(missing_blocks) => missing_blocks,
+            //     Err(_) => {
+            //         continue;
+            //     },
+            // };
+
+            // dbg!(&missing_blocks);
+
+            let best_peers = self
+                .network_peer_store
+                .best_peers_to_sync(self.config.num_peers_to_sync, *algo);
+            let our_tip = match algo {
+                PowAlgorithm::RandomX => self.share_chain_random_x.tip_height().await.unwrap_or_default(),
+                PowAlgorithm::Sha3x => self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
+            };
+            dbg!(self.swarm.local_peer_id());
+
+            // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
+
+            for record in best_peers {
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
+                let their_height = match algo {
+                    PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
+                    PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
+                };
+                if their_height > 0 {
+                    let mut blocks_to_request = vec![];
+                    for i in (our_tip..=their_height).rev().take(self.config.max_blocks_to_request) {
+                        blocks_to_request.push((i, FixedHash::zero()));
+                    }
+
+                    // dbg!(blocks_to_request.last());
+
+                    if !blocks_to_request.is_empty() {
+                        self.sync_share_chain(*algo, record.peer_id, blocks_to_request).await;
+                    } else {
+                        info!(target: LOG_TARGET, "No need to sync, we are up to date");
+                    }
+                }
             }
         }
     }
