@@ -7,6 +7,7 @@ use std::{
 };
 
 use libp2p::PeerId;
+use tari_core::proof_of_work::PowAlgorithm;
 
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
 
@@ -30,6 +31,7 @@ impl Default for PeerStoreConfig {
 /// A record in peer store that holds all needed info of a peer.
 #[derive(Clone, Debug)]
 pub(crate) struct PeerStoreRecord {
+    pub peer_id: PeerId,
     pub peer_info: PeerInfo,
     pub created: Instant,
     pub last_sync_attempt: Option<Instant>,
@@ -37,8 +39,9 @@ pub(crate) struct PeerStoreRecord {
 }
 
 impl PeerStoreRecord {
-    pub fn new(peer_info: PeerInfo) -> Self {
+    pub fn new(peer_id: PeerId, peer_info: PeerInfo) -> Self {
         Self {
+            peer_id,
             peer_info,
             last_sync_attempt: None,
             created: Instant::now(),
@@ -100,6 +103,26 @@ impl PeerStore {
         &self.greylist_peers
     }
 
+    pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
+        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
+        match algo {
+            PowAlgorithm::RandomX => {
+                peers.sort_by(|a, b| {
+                    a.peer_info
+                        .current_random_x_height
+                        .cmp(&b.peer_info.current_random_x_height)
+                });
+            },
+
+            PowAlgorithm::Sha3x => {
+                peers.sort_by(|a, b| a.peer_info.current_sha3x_height.cmp(&b.peer_info.current_sha3x_height));
+            },
+        }
+        peers.reverse();
+        peers.truncate(count);
+        peers.into_iter().map(|record| record.clone()).collect()
+    }
+
     pub fn update_last_sync_attempt(&mut self, peer_id: PeerId) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
@@ -135,7 +158,7 @@ impl PeerStore {
 
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let previous_sync_attempt = entry.last_sync_attempt;
-            let mut new_record = PeerStoreRecord::new(peer_info);
+            let mut new_record = PeerStoreRecord::new(peer_id, peer_info);
             new_record.last_sync_attempt = previous_sync_attempt;
             new_record.created = entry.created;
 
@@ -145,7 +168,7 @@ impl PeerStore {
         }
 
         self.whitelist_peers
-            .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_info));
+            .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
         let _ = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
