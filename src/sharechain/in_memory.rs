@@ -226,11 +226,8 @@ impl InMemoryShareChain {
             cur_block.miner_coinbase_extra.clone(),
         );
         for uncle in cur_block.uncles.iter() {
-            if let Some(uncle_level) = p2_chain
-                .level_at_height(uncle.0)
-            {
-                if let Some(uncle_block) = uncle_level.blocks
-                    .get(&uncle.1){
+            if let Some(uncle_level) = p2_chain.level_at_height(uncle.0) {
+                if let Some(uncle_block) = uncle_level.blocks.get(&uncle.1) {
                     update_insert(
                         &mut miners_to_shares,
                         uncle_block.miner_wallet_address.to_base58(),
@@ -242,7 +239,7 @@ impl InMemoryShareChain {
         }
         if cur_block.height == stop_height {}
         while cur_block.height > stop_height {
-            if p2_chain.get_parent_block(cur_block).is_none(){
+            if p2_chain.get_parent_block(cur_block).is_none() {
                 // we should not do this. this means we are constructing blocks with not valid shares
                 break;
             }
@@ -254,11 +251,8 @@ impl InMemoryShareChain {
                 cur_block.miner_coinbase_extra.clone(),
             );
             for uncle in cur_block.uncles.iter() {
-                if let Some(uncle_level) = p2_chain
-                    .level_at_height(uncle.0)
-                {
-                    if let Some(uncle_block) = uncle_level.blocks
-                        .get(&uncle.1){
+                if let Some(uncle_level) = p2_chain.level_at_height(uncle.0) {
+                    if let Some(uncle_block) = uncle_level.blocks.get(&uncle.1) {
                         update_insert(
                             &mut miners_to_shares,
                             uncle_block.miner_wallet_address.to_base58(),
