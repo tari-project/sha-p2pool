@@ -96,8 +96,8 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
-const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/3";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/3";
+const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/4";
+const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/4";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
@@ -811,6 +811,10 @@ where S: ShareChain
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
+        if response.info.version < MIN_PEER_INFO_VERSION {
+            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", response.peer_id);
+            return;
+        }
         self.add_peer(response.info, response.peer_id.parse().unwrap()).await;
     }
 
