@@ -63,7 +63,7 @@ impl PeerInfo {
     ) -> Self {
         let timestamp = EpochTime::now();
         Self {
-            version: 7,
+            version: 8,
             current_sha3x_height,
             current_random_x_height,
             squad,
