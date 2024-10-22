@@ -208,11 +208,11 @@ impl P2Chain {
             return Ok(());
         }
 
-        if !missing_parents.is_empty() {
-            return Err(Error::BlockParentDoesNotExist { missing_parents });
-        }
+        // if !missing_parents.is_empty() {
+        //     return Err(Error::BlockParentDoesNotExist { missing_parents });
+        // }
         drop(block);
-        {
+        if missing_parents.is_empty() {
             // lets mark as verified
             let level = self
                 .get_mut_at_height(new_block_height)
@@ -252,9 +252,9 @@ impl P2Chain {
                     missing_parents.push((uncle.0, uncle.1.clone()));
                 }
             }
-            if !missing_parents.is_empty() {
-                return Err(Error::BlockParentDoesNotExist { missing_parents });
-            }
+            // if !missing_parents.is_empty() {
+            //     return Err(Error::BlockParentDoesNotExist { missing_parents });
+            // }
             let mut current_counting_block = block.clone();
             let mut counter = 1;
             while let Some(parent) = self.get_parent_block(&current_counting_block) {
@@ -287,7 +287,10 @@ impl P2Chain {
                     break;
                 }
             }
-            if total_work > self.total_accumulated_tip_difficulty && counter >= self.share_window {
+            if total_work > self.total_accumulated_tip_difficulty &&
+                counter >= self.share_window &&
+                missing_parents.is_empty()
+            {
                 // we need to reorg the chain
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
@@ -376,7 +379,7 @@ impl P2Chain {
         }
 
         // edge case no current chain, lets just add
-        if self.get_tip().is_none() {
+        if self.levels.is_empty() {
             let new_level = P2ChainLevel::new(block);
             self.levels.push_front(new_level);
             return self.verify_chain(new_block_height, block_hash);
@@ -567,6 +570,48 @@ mod test {
 
         let level = chain.get_tip().unwrap();
         assert_eq!(chain.get_tip().unwrap().height, 5);
+    }
+
+    #[test]
+    fn test_sets_tip_when_full() {
+        // this test test if we can add blocks in rev order and when it gets 5 verified blocks it sets the tip
+        // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
+        // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
+        // window + 1 blocks in chain--
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut blocks = Vec::new();
+        for i in 0..7 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            blocks.push(block.clone());
+        }
+        chain.add_block_to_chain(blocks[6].clone()).unwrap_err();
+        assert!(chain.get_tip().is_none());
+        assert_eq!(chain.current_tip, 0);
+        assert_eq!(chain.levels.len(), 1);
+        assert_eq!(chain.levels[0].height, 6);
+
+        for i in (2..6).rev() {
+            chain.add_block_to_chain(blocks[i].clone()).unwrap_err();
+            assert!(chain.get_tip().is_none());
+            assert_eq!(chain.current_tip, 0);
+        }
+
+        chain.add_block_to_chain(blocks[1].clone()).unwrap_err();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 6);
     }
 
     #[test]
