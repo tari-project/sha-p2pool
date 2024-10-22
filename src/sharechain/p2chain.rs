@@ -535,7 +535,7 @@ mod test {
     }
 
     #[test]
-    fn does_ot_set_tip_unless_full_chain() {
+    fn test_does_not_set_tip_unless_full_chain() {
         let mut chain = P2Chain::new_empty(10, 5);
 
         let mut prev_hash = BlockHash::zero();
