@@ -533,6 +533,7 @@ mod test {
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
             assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
         }
     }
@@ -612,6 +613,78 @@ mod test {
 
         let level = chain.get_tip().unwrap();
         assert_eq!(chain.get_tip().unwrap().height, 6);
+    }
+
+    #[test]
+    fn test_dont_set_tip_on_single_high_height() {
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..5 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(chain.get_tip().unwrap().height, i);
+        }
+        // we do this so we can add a missing parent or 2
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(100)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(2000)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+
+        chain.add_block_to_chain(block.clone()).unwrap_err();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 4);
+
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(1000)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(20000)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+
+        chain.add_block_to_chain(block.clone()).unwrap_err();
+
+        assert!(chain.get_tip().is_none());
+        assert_eq!(chain.current_tip, 4);
     }
 
     #[test]
