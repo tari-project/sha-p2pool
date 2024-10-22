@@ -42,6 +42,8 @@ const LOG_TARGET: &str = "tari::p2pool::sharechain::chain";
 pub const SAFETY_MARGIN: usize = 20;
 // this is the max extra lenght the chain can grow in front of our tip
 pub const MAX_EXTRA_SYNC: usize = 2000;
+// this is the max bocks we store that are more than MAX_EXTRA_SYNC in front of our tip
+pub const MAX_SYNC_STORE: usize = 200;
 
 pub struct P2Chain {
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
@@ -51,6 +53,8 @@ pub struct P2Chain {
     total_accumulated_tip_difficulty: AccumulatedDifficulty,
     current_tip: u64,
     pub lwma: LinearWeightedMovingAverage,
+    sync_store: HashMap<FixedHash, P2Block>,
+    sync_store_fifo_list: VecDeque<FixedHash>,
 }
 
 impl P2Chain {
@@ -99,6 +103,8 @@ impl P2Chain {
             total_accumulated_tip_difficulty: AccumulatedDifficulty::min(),
             current_tip: 0,
             lwma,
+            sync_store: HashMap::new(),
+            sync_store_fifo_list: VecDeque::new(),
         }
     }
 
@@ -367,17 +373,9 @@ impl P2Chain {
         Ok(())
     }
 
-    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
+    fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
         let new_block_height = block.height;
         let block_hash = block.hash.clone();
-
-        // Uncle cannot be the same as prev_hash
-        if block.uncles.iter().any(|(_, hash)| hash == &block.prev_hash) {
-            return Err(Error::InvalidBlock {
-                reason: "Uncle cannot be the same as prev_hash".to_string(),
-            });
-        }
-
         // edge case no current chain, lets just add
         if self.levels.is_empty() {
             let new_level = P2ChainLevel::new(block);
@@ -439,6 +437,96 @@ impl P2Chain {
         }
 
         self.verify_chain(new_block_height, block_hash)
+    }
+
+    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
+        let new_block_height = block.height;
+        let block_hash = block.hash.clone();
+
+        // lets check where this is, do we need to store it in the sync store
+        if new_block_height > self.current_tip + MAX_EXTRA_SYNC as u64 {
+            if self.sync_store.len() > MAX_SYNC_STORE {
+                // lets remove the oldest block
+                let hash = self.sync_store_fifo_list.pop_back().unwrap();
+                self.sync_store.remove(&hash);
+            }
+            let p2_block = block.deref().clone();
+            self.sync_store.insert(block_hash.clone(), p2_block);
+            self.sync_store_fifo_list.push_front(block_hash.clone());
+
+            // lets see how long a chain we can build with this block
+            let mut current_block_hash = block.prev_hash.clone();
+            let mut blocks_to_add = vec![block.hash];
+
+            while let Some(parent) = self.sync_store.get(&current_block_hash) {
+                blocks_to_add.push(current_block_hash);
+                current_block_hash = parent.prev_hash.clone();
+            }
+            // lets go forward
+            current_block_hash = block.hash.clone();
+            'outer_loop: loop {
+                for orphan_block in self.sync_store.iter() {
+                    if orphan_block.1.prev_hash == current_block_hash {
+                        blocks_to_add.push(current_block_hash);
+                        current_block_hash = orphan_block.1.hash.clone();
+                        continue 'outer_loop;
+                    }
+                }
+                break 'outer_loop;
+            }
+
+            let mut missing_parents = Vec::new();
+            if blocks_to_add.len() > 150 {
+                // we have a potential long chain, lets see if we can do anything with it.
+                for block in blocks_to_add.iter() {
+                    let p2_block = Arc::new(self.sync_store.get(block).ok_or(Error::BlockNotFound)?.clone());
+                    match self.add_block(p2_block) {
+                        Err(Error::BlockParentDoesNotExist {
+                            missing_parents: mut missing,
+                        }) => missing_parents.append(&mut missing),
+                        Err(e) => return Err(e),
+                        Ok(_) => (),
+                    }
+                }
+            }
+
+            if self
+                .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
+                .is_none()
+            {
+                // we dont know the parent
+                missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
+            }
+            // now lets check the uncles
+            for uncle in block.uncles.iter() {
+                if self.get_block_at_height(uncle.0, &uncle.1).is_some() {
+                    // Uncle cannot be in the main chain
+                    if let Some(level) = self.level_at_height(uncle.0) {
+                        if level.chain_block == uncle.1 {
+                            return Err(Error::UncleInMainChain {
+                                height: uncle.0,
+                                hash: uncle.1.clone(),
+                            });
+                        }
+                    }
+                } else {
+                    missing_parents.push((uncle.0, uncle.1.clone()));
+                }
+            }
+
+            if !missing_parents.is_empty() {
+                return Err(Error::BlockParentDoesNotExist { missing_parents });
+            }
+        }
+
+        // Uncle cannot be the same as prev_hash
+        if block.uncles.iter().any(|(_, hash)| hash == &block.prev_hash) {
+            return Err(Error::InvalidBlock {
+                reason: "Uncle cannot be the same as prev_hash".to_string(),
+            });
+        }
+
+        self.add_block(block)
     }
 
     pub fn get_parent_block(&self, block: &P2Block) -> Option<&Arc<P2Block>> {
@@ -617,6 +705,7 @@ mod test {
 
     #[test]
     fn test_dont_set_tip_on_single_high_height() {
+        println!("hello?");
         let mut chain = P2Chain::new_empty(10, 5);
 
         let mut prev_hash = BlockHash::zero();
@@ -683,8 +772,8 @@ mod test {
 
         chain.add_block_to_chain(block.clone()).unwrap_err();
 
-        assert!(chain.get_tip().is_none());
-        assert_eq!(chain.current_tip, 4);
+        let level = chain.get_tip().unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 4);
     }
 
     #[test]
