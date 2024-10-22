@@ -203,8 +203,7 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
-        if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0)
-        {
+        if self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
             return Ok(());
         }
@@ -225,11 +224,12 @@ impl P2Chain {
         }
 
         // is this block part of the main chain?
-        let tip = self.get_tip().unwrap();
-        if tip.chain_block ==
-            self.get_block_at_height(new_block_height, &hash)
-                .ok_or(Error::BlockNotFound)?
-                .prev_hash
+
+        if self.get_tip().is_some() &&
+            self.get_tip().unwrap().chain_block ==
+                self.get_block_at_height(new_block_height, &hash)
+                    .ok_or(Error::BlockNotFound)?
+                    .prev_hash
         {
             // easy this builds on the tip
             info!(target: LOG_TARGET, "[{:?}] Block building on tip: {:?}", algo, new_block_height);
@@ -257,7 +257,6 @@ impl P2Chain {
             }
             let mut current_counting_block = block.clone();
             let mut counter = 1;
-
             while let Some(parent) = self.get_parent_block(&current_counting_block) {
                 if !parent.verified {
                     // we cannot count unverified blocks
@@ -288,8 +287,7 @@ impl P2Chain {
                     break;
                 }
             }
-
-            if total_work > self.total_accumulated_tip_difficulty {
+            if total_work > self.total_accumulated_tip_difficulty && counter >= self.share_window {
                 // we need to reorg the chain
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
@@ -299,6 +297,7 @@ impl P2Chain {
                 let chain_height = self.get_mut_at_height(block.height).ok_or(Error::BlockLevelNotFound)?;
                 chain_height.chain_block = block.hash.clone();
                 self.cached_shares = None;
+                self.current_tip = block.height;
                 // lets fix the chain
                 let mut current_block = block;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
@@ -349,8 +348,10 @@ impl P2Chain {
                 if block.1.prev_hash == hash {
                     info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
                     // we have a parent here
-                    match self.verify_chain(next_level.height, block.0.clone()){
-                        Err(Error::BlockParentDoesNotExist {missing_parents: mut missing}) => missing_parents.append(&mut missing),
+                    match self.verify_chain(next_level.height, block.0.clone()) {
+                        Err(Error::BlockParentDoesNotExist {
+                            missing_parents: mut missing,
+                        }) => missing_parents.append(&mut missing),
                         Err(e) => return Err(e),
                         Ok(_) => (),
                     }
@@ -534,6 +535,41 @@ mod test {
     }
 
     #[test]
+    fn does_ot_set_tip_unless_full_chain() {
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 1..5 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+        }
+        tari_block.header.nonce = 5;
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(5)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+        chain.add_block_to_chain(block.clone()).unwrap();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 5);
+    }
+
+    #[test]
     fn get_parent() {
         let mut chain = P2Chain::new_empty(10, 5);
 
@@ -573,14 +609,14 @@ mod test {
         let mut timestamp = EpochTime::now();
         let mut prev_hash = BlockHash::zero();
 
-        for i in 1..32 {
+        for i in 0..32 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let block = P2Block::builder()
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(i as u64).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(i as u64 + 1).unwrap())
                 .with_prev_hash(prev_hash)
                 .build();
 
@@ -591,7 +627,7 @@ mod test {
             let level = chain.get_tip().unwrap();
             assert_eq!(
                 level.block_in_main_chain().unwrap().target_difficulty,
-                Difficulty::from_u64(i as u64).unwrap()
+                Difficulty::from_u64(i as u64 + 1).unwrap()
             );
         }
     }
@@ -604,7 +640,7 @@ mod test {
         let mut prev_hash = BlockHash::zero();
 
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
-        for i in 1..32 {
+        for i in 0..32 {
             tari_block.header.nonce = i;
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
@@ -612,7 +648,7 @@ mod test {
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(i as u64).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
                 .with_tari_block(tari_block.clone())
                 .with_prev_hash(prev_hash)
                 .build();
@@ -624,13 +660,13 @@ mod test {
         let tip_hash = level.block_in_main_chain().unwrap().generate_hash();
         assert_eq!(
             level.block_in_main_chain().unwrap().target_difficulty,
-            Difficulty::from_u64(31).unwrap()
+            Difficulty::from_u64(10).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 31);
         assert_eq!(level.block_in_main_chain().unwrap().height, 31);
         assert_eq!(
             chain.total_accumulated_tip_difficulty,
-            AccumulatedDifficulty::from_u128(145).unwrap() // 31+30+29+28+27
+            AccumulatedDifficulty::from_u128(50).unwrap() // 31+30+29+28+27
         );
 
         let block_29 = chain.level_at_height(29).unwrap().block_in_main_chain().unwrap();
@@ -645,7 +681,7 @@ mod test {
             .with_timestamp(timestamp)
             .with_height(30)
             .with_miner_wallet_address(address.clone())
-            .with_target_difficulty(Difficulty::from_u64(30).unwrap())
+            .with_target_difficulty(Difficulty::from_u64(9).unwrap())
             .with_tari_block(tari_block.clone())
             .with_prev_hash(prev_hash)
             .build();
@@ -682,7 +718,7 @@ mod test {
         assert_eq!(level.block_in_main_chain().unwrap().height, 31);
         assert_eq!(
             chain.total_accumulated_tip_difficulty,
-            AccumulatedDifficulty::from_u128(146).unwrap() // 32+30+29+28+27
+            AccumulatedDifficulty::from_u128(71).unwrap() // 32+9+10+10+10
         );
     }
 
