@@ -214,6 +214,7 @@ impl InMemoryShareChain {
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = tip_level.height.saturating_sub(SHARE_WINDOW as u64 - 1);
+
         let mut cur_block = tip_level
             .blocks
             .get(&tip_level.chain_block)
@@ -225,21 +226,26 @@ impl InMemoryShareChain {
             cur_block.miner_coinbase_extra.clone(),
         );
         for uncle in cur_block.uncles.iter() {
-            let uncle_block = p2_chain
+            if let Some(uncle_level) = p2_chain
                 .level_at_height(uncle.0)
-                .ok_or_else(|| Error::UncleBlockNotFound)?
-                .blocks
-                .get(&uncle.1)
-                .ok_or_else(|| Error::UncleBlockNotFound)?;
-            update_insert(
-                &mut miners_to_shares,
-                uncle_block.miner_wallet_address.to_base58(),
-                UNCLE_REWARD_SHARE,
-                uncle_block.miner_coinbase_extra.clone(),
-            );
+            {
+                if let Some(uncle_block) = uncle_level.blocks
+                    .get(&uncle.1){
+                    update_insert(
+                        &mut miners_to_shares,
+                        uncle_block.miner_wallet_address.to_base58(),
+                        UNCLE_REWARD_SHARE,
+                        uncle_block.miner_coinbase_extra.clone(),
+                    );
+                }
+            }
         }
         if cur_block.height == stop_height {}
         while cur_block.height > stop_height {
+            if p2_chain.get_parent_block(cur_block).is_none(){
+                // we should not do this. this means we are constructing blocks with not valid shares
+                break;
+            }
             cur_block = p2_chain.get_parent_block(cur_block).ok_or(Error::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
@@ -248,18 +254,19 @@ impl InMemoryShareChain {
                 cur_block.miner_coinbase_extra.clone(),
             );
             for uncle in cur_block.uncles.iter() {
-                let uncle_block = p2_chain
+                if let Some(uncle_level) = p2_chain
                     .level_at_height(uncle.0)
-                    .ok_or_else(|| Error::UncleBlockNotFound)?
-                    .blocks
-                    .get(&uncle.1)
-                    .ok_or_else(|| Error::UncleBlockNotFound)?;
-                update_insert(
-                    &mut miners_to_shares,
-                    uncle_block.miner_wallet_address.to_base58(),
-                    UNCLE_REWARD_SHARE,
-                    uncle_block.miner_coinbase_extra.clone(),
-                );
+                {
+                    if let Some(uncle_block) = uncle_level.blocks
+                        .get(&uncle.1){
+                        update_insert(
+                            &mut miners_to_shares,
+                            uncle_block.miner_wallet_address.to_base58(),
+                            UNCLE_REWARD_SHARE,
+                            uncle_block.miner_coinbase_extra.clone(),
+                        );
+                    }
+                }
             }
         }
         p2_chain.cached_shares = Some(miners_to_shares.clone());
