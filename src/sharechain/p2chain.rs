@@ -171,6 +171,7 @@ impl P2Chain {
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
+        dbg!("Verify chain", new_block_height);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut missing_parents = Vec::new();
         let block = self
@@ -350,21 +351,26 @@ impl P2Chain {
             }
         }
 
+        let mut next_level_data = None;
+
         // let see if we already have a block that builds on top of this
-        if let Some(next_level) = self.level_at_height(new_block_height + 1).cloned() {
+        if let Some(next_level) = self.level_at_height(new_block_height + 1) {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
-                    info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
-                    // we have a parent here
-                    match self.verify_chain(next_level.height, block.0.clone()) {
-                        Err(Error::BlockParentDoesNotExist {
-                            missing_parents: mut missing,
-                        }) => missing_parents.append(&mut missing),
-                        Err(e) => return Err(e),
-                        Ok(_) => (),
-                    }
+                    next_level_data = Some((next_level.height, block.0.clone()));
                 }
+            }
+        }
+        if let Some(next_level) = next_level_data {
+            info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
+            // we have a parent here
+            match self.verify_chain(next_level.0, next_level.1) {
+                Err(Error::BlockParentDoesNotExist {
+                    missing_parents: mut missing,
+                }) => missing_parents.append(&mut missing),
+                Err(e) => return Err(e),
+                Ok(_) => (),
             }
         }
         if !missing_parents.is_empty() {
