@@ -40,7 +40,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 
 pub(crate) struct InMemoryShareChain {
-    p2_chain: Arc<RwLock<P2Chain>>,
+    p2_chain: Box<Arc<RwLock<P2Chain>>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
@@ -62,7 +62,7 @@ impl InMemoryShareChain {
         }
 
         Ok(Self {
-            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW))),
+            p2_chain: Box::new(Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW)))),
             pow_algo,
             block_validation_params,
             consensus_manager,
