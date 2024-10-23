@@ -181,7 +181,14 @@ impl P2Chain {
                         missing_parents.extend_from_slice(&missing_parents2);
                     }
                     for item in do_next_level {
-                        next_level.push_back(item);
+                        if next_level.contains(&item) {
+                            continue;
+                        }
+                        // Don't get into an infinite loop
+
+                        if item != (next_height, next_hash) {
+                            next_level.push_back(item);
+                        }
                     }
                 },
                 Err(e) => return Err(e),
