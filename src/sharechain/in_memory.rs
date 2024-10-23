@@ -137,6 +137,22 @@ impl InMemoryShareChain {
         Ok(curr_difficulty)
     }
 
+    /// Validating a new block.
+    async fn validate_block(&self, block: &P2Block) -> Result<(), ValidationError> {
+        if block.uncles.len() > UNCLE_LIMIT {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Too many uncles! {:?}", self.pow_algo, block.uncles.len());
+            return Err(ValidationError::TooManyUncles);
+        }
+        // let test the age of the uncles
+        for uncle in block.uncles.iter() {
+            if uncle.0 < block.height - 3 {
+                warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too old! {:?}", self.pow_algo, uncle.0);
+                return Err(ValidationError::UncleTooOld);
+            }
+        }
+        Ok(())
+    }
+
     /// Submits a new block to share chain.
     async fn submit_block_with_lock(
         &self,
@@ -170,6 +186,7 @@ impl InMemoryShareChain {
         }
 
         // validate
+        self.validate_block(&block).await?;
         let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
         let new_block = block.clone();
 

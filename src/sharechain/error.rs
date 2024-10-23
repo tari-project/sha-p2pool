@@ -47,6 +47,10 @@ pub enum Error {
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
+    #[error("Block contains uncles that are too old")]
+    UncleTooOld,
+    #[error("Block has too many uncles")]
+    TooManyUncles,
     #[error("Proof of work algorithm does not match chain algorithm")]
     InvalidPowAlgorithm,
     #[error("Number conversion error: {0}")]
