@@ -22,10 +22,11 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    io::empty,
     ops::Deref,
     sync::Arc,
 };
-use std::io::empty;
+
 use log::info;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
@@ -351,25 +352,28 @@ impl P2Chain {
         }
 
         // let see if we already have a block that builds on top of this
-        if let Some(next_level) = self.level_at_height(new_block_height + 1).cloned() {
+        let mut blocks_to_check = Vec::new();
+        if let Some(next_level) = self.level_at_height(new_block_height + 1) {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
-                if missing_parents.len() > 20{
-
+                if missing_parents.len() > 20 {
                     return Err(Error::BlockParentDoesNotExist { missing_parents });
                 }
                 if block.1.prev_hash == hash {
+                    // we have a parent here
                     info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
                     info!(target: LOG_TARGET, "[{:?}] Missing parents len {:?}", algo, missing_parents.len());
-                    // we have a parent here
-                    match self.verify_chain(next_level.height, block.0.clone()) {
-                        Err(Error::BlockParentDoesNotExist {
-                            missing_parents: mut missing,
-                        }) => missing_parents.append(&mut missing),
-                        Err(e) => return Err(e),
-                        Ok(_) => (),
-                    }
+                    blocks_to_check.push((next_level.height, block.0.clone()));
                 }
+            }
+        }
+        for block_to_check in blocks_to_check {
+            match self.verify_chain(block_to_check.0, block_to_check.1) {
+                Err(Error::BlockParentDoesNotExist {
+                    missing_parents: mut missing,
+                }) => missing_parents.append(&mut missing),
+                Err(e) => return Err(e),
+                Ok(_) => (),
             }
         }
         if !missing_parents.is_empty() {

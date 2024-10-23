@@ -62,7 +62,10 @@ impl InMemoryShareChain {
         }
 
         Ok(Self {
-            p2_chain: Box::new(Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW)))),
+            p2_chain: Box::new(Arc::new(RwLock::new(P2Chain::new_empty(
+                MAX_BLOCKS_COUNT,
+                SHARE_WINDOW,
+            )))),
             pow_algo,
             block_validation_params,
             consensus_manager,
