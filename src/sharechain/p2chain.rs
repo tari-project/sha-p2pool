@@ -171,9 +171,32 @@ impl P2Chain {
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
+        let missing_parents = vec![];
+        match self.verify_chain_inner(missing_parents, new_block_height, hash, 0) {
+            Ok((missing_parents, do_next_level)) => {
+                if !missing_parents.is_empty() {
+                    return Err(Error::BlockParentDoesNotExist { missing_parents });
+                }
+                if let Some((height, hash)) = do_next_level {
+                    self.verify_chain_inner(vec![], height, hash, 0)?;
+                }
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    fn verify_chain_inner(
+        &mut self,
+        mut missing_parents: Vec<(u64, FixedHash)>,
+        new_block_height: u64,
+        hash: FixedHash,
+        recursion_depth: usize,
+    ) -> Result<(Vec<(u64, FixedHash)>, Option<(u64, FixedHash)>), Error> {
         dbg!("Verify chain", new_block_height);
+        dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
-        let mut missing_parents = Vec::new();
+        // let mut missing_parents = Vec::new();
         let block = self
             .get_block_at_height(new_block_height, &hash)
             .ok_or(Error::BlockNotFound)?
@@ -212,7 +235,7 @@ impl P2Chain {
         // the newly added block == 0
         if self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
-            return Ok(());
+            return Ok((missing_parents, None));
         }
 
         // if !missing_parents.is_empty() {
@@ -365,18 +388,12 @@ impl P2Chain {
         if let Some(next_level) = next_level_data {
             info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
             // we have a parent here
-            match self.verify_chain(next_level.0, next_level.1) {
-                Err(Error::BlockParentDoesNotExist {
-                    missing_parents: mut missing,
-                }) => missing_parents.append(&mut missing),
-                Err(e) => return Err(e),
-                Ok(_) => (),
-            }
+            return Ok((missing_parents, Some(next_level)));
         }
         if !missing_parents.is_empty() {
             return Err(Error::BlockParentDoesNotExist { missing_parents });
         }
-        Ok(())
+        Ok((missing_parents, None))
     }
 
     fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
