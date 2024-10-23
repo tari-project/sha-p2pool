@@ -174,9 +174,7 @@ impl P2Chain {
         let mut next_level = Some((new_block_height, hash));
         let mut missing_parents = vec![];
         while let Some((next_height, next_hash)) = next_level {
-            let missing_parents2 = vec![];
-
-            match self.verify_chain_inner(missing_parents2, next_height, next_hash, 0) {
+            match self.verify_chain_inner(next_height, next_hash, 0) {
                 Ok((missing_parents2, do_next_level)) => {
                     if !missing_parents2.is_empty() {
                         missing_parents.extend_from_slice(&missing_parents2);
@@ -201,7 +199,6 @@ impl P2Chain {
 
     fn verify_chain_inner(
         &mut self,
-        mut missing_parents: Vec<(u64, FixedHash)>,
         new_block_height: u64,
         hash: FixedHash,
         recursion_depth: usize,
@@ -209,7 +206,7 @@ impl P2Chain {
         // dbg!("Verify chain", new_block_height);
         // dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
-        // let mut missing_parents = Vec::new();
+        let mut missing_parents = Vec::new();
         let block = self
             .get_block_at_height(new_block_height, &hash)
             .ok_or(Error::BlockNotFound)?
