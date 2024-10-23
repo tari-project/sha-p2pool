@@ -243,7 +243,7 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
-        if self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0 {
+        if self.get_tip().is_none() && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
             return Ok((missing_parents, None));
         }

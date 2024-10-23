@@ -1426,14 +1426,17 @@ where S: ShareChain
             file.write(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
                 .unwrap();
         }
+        let formatter = human_format::Formatter::new();
         let blocks = chain.all_blocks().await.expect("errored");
         for b in blocks {
             file.write(
                 format!(
-                    "B{} [label=\"{} - {}\"]\n",
+                    "B{} [label=\"{} - {} ({}) {}\"]\n",
                     &b.hash.to_hex()[0..8],
                     &b.height,
-                    &b.hash.to_hex()[0..8]
+                    &b.hash.to_hex()[0..8],
+                    if b.verified { "v" } else { "x" },
+                    formatter.format(b.target_difficulty.as_u64() as f64)
                 )
                 .as_bytes(),
             )
