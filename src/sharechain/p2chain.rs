@@ -370,6 +370,8 @@ impl P2Chain {
                                 current_block.original_block.header.timestamp,
                                 current_block.target_difficulty,
                             );
+                        } else {
+                            break;
                         }
                     }
                     if current_block.height == 0 {
