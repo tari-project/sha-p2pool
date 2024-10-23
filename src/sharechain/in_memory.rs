@@ -38,6 +38,8 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
+// The max allowed uncles per block
+pub const UNCLE_LIMIT: usize = 10;
 
 pub(crate) struct InMemoryShareChain {
     p2_chain: Box<Arc<RwLock<P2Chain>>>,
@@ -464,11 +466,39 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
         }
+        for uncle in &uncles {
+            if chain_read_lock.level_at_height(uncle.0).is_none() {
+                excluded_uncles.push(uncle.1.clone());
+                continue;
+            }
+            let level = chain_read_lock.level_at_height(uncle.0).unwrap();
+
+            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                let parent = match chain_read_lock.get_parent_block(uncle_block) {
+                    Some(parent) => parent,
+                    None => {
+                        excluded_uncles.push(uncle.1.clone());
+                        continue;
+                    },
+                };
+                if chain_read_lock
+                    .level_at_height(parent.height)
+                    .ok_or(Error::BlockLevelNotFound)?
+                    .chain_block !=
+                    parent.hash
+                {
+                    excluded_uncles.push(uncle.1.clone());
+                }
+            } else {
+                excluded_uncles.push(uncle.1.clone());
+            }
+        }
 
         // Remove excluded.
         for excluded in excluded_uncles.iter() {
             uncles.retain(|uncle| &uncle.1 != excluded);
         }
+        uncles.truncate(UNCLE_LIMIT);
 
         Ok(P2Block::builder()
             .with_timestamp(EpochTime::now())

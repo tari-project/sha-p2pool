@@ -171,21 +171,18 @@ impl P2Chain {
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
-        let mut next_level = Some((new_block_height, hash));
+        let mut next_level = VecDeque::new();
+        next_level.push_back((new_block_height, hash));
         let mut missing_parents = vec![];
-        while let Some((next_height, next_hash)) = next_level {
+        while let Some((next_height, next_hash)) = next_level.pop_front() {
             match self.verify_chain_inner(next_height, next_hash, 0) {
                 Ok((missing_parents2, do_next_level)) => {
                     if !missing_parents2.is_empty() {
                         missing_parents.extend_from_slice(&missing_parents2);
-                        //  return Err(Error::BlockParentDoesNotExist {
-                        //     missing_parents: missing_parents2,
-                        // });
                     }
-                    next_level = do_next_level;
-                    // if let Some((height, hash)) = do_next_level {
-                    // self.verify_chain_inner(vec![], height, hash, 0)?;
-                    // }
+                    for item in do_next_level {
+                        next_level.push_back(item);
+                    }
                 },
                 Err(e) => return Err(e),
             }
@@ -202,7 +199,7 @@ impl P2Chain {
         new_block_height: u64,
         hash: FixedHash,
         recursion_depth: usize,
-    ) -> Result<(Vec<(u64, FixedHash)>, Option<(u64, FixedHash)>), Error> {
+    ) -> Result<(Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
         // dbg!("Verify chain", new_block_height);
         // dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
@@ -245,7 +242,7 @@ impl P2Chain {
         // the newly added block == 0
         if self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
-            return Ok((missing_parents, None));
+            return Ok((missing_parents, Vec::new()));
         }
 
         // if !missing_parents.is_empty() {
@@ -384,26 +381,38 @@ impl P2Chain {
             }
         }
 
-        let mut next_level_data = None;
+        let mut next_level_data = Vec::new();
 
         // let see if we already have a block that builds on top of this
         if let Some(next_level) = self.level_at_height(new_block_height + 1) {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
-                    next_level_data = Some((next_level.height, block.0.clone()));
+                    next_level_data.push((next_level.height, block.0.clone()));
                 }
             }
         }
-        if let Some(next_level) = next_level_data {
+
+        // let search if this block is an uncle of some higher block
+        for i in new_block_height + 1..new_block_height + 4 {
+            if let Some(level) = self.level_at_height(i) {
+                for higher_block in level.blocks.iter() {
+                    for uncles in higher_block.1.uncles.iter() {
+                        next_level_data.push((higher_block.1.height, higher_block.1.hash.clone()));
+                    }
+                }
+            }
+        }
+
+        if !next_level_data.is_empty() {
             debug!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
             // we have a parent here
-            return Ok((missing_parents, Some(next_level)));
+            return Ok((missing_parents, next_level_data));
         }
         if !missing_parents.is_empty() {
             return Err(Error::BlockParentDoesNotExist { missing_parents });
         }
-        Ok((missing_parents, None))
+        Ok((missing_parents, next_level_data))
     }
 
     fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
@@ -731,6 +740,74 @@ mod test {
         }
 
         chain.add_block_to_chain(blocks[1].clone()).unwrap_err();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 6);
+    }
+
+    #[test]
+    fn test_sets_tip_when_full_with_uncles() {
+        // this test test if we can add blocks in rev order and when it gets 5 verified blocks it sets the tip
+        // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
+        // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
+        // window + 1 blocks in chain--
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut blocks = Vec::new();
+        for i in 0..6 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            blocks.push(block.clone());
+        }
+        tari_block.header.nonce = 55;
+        let address = new_random_address();
+        let uncle_block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(5)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(blocks[4].hash.clone())
+            .build();
+
+        tari_block.header.nonce = 6;
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(6)
+            .with_tari_block(tari_block.clone())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .with_uncles(vec![(5, uncle_block.hash.clone())])
+            .build();
+        prev_hash = block.generate_hash();
+        blocks.push(block.clone());
+
+        chain.add_block_to_chain(blocks[6].clone()).unwrap_err();
+        assert!(chain.get_tip().is_none());
+        assert_eq!(chain.current_tip, 0);
+        assert_eq!(chain.levels.len(), 1);
+        assert_eq!(chain.levels[0].height, 6);
+
+        for i in (2..6).rev() {
+            chain.add_block_to_chain(blocks[i].clone()).unwrap_err();
+            assert!(chain.get_tip().is_none());
+            assert_eq!(chain.current_tip, 0);
+        }
+
+        chain.add_block_to_chain(blocks[1].clone()).unwrap_err();
+
+        assert!(chain.get_tip().is_none());
+        chain.add_block_to_chain(uncle_block).unwrap();
 
         let level = chain.get_tip().unwrap();
         assert_eq!(chain.get_tip().unwrap().height, 6);

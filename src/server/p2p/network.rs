@@ -626,7 +626,7 @@ where S: ShareChain
                 //     return;
                 // }
                 match NotifyNewTipBlock::try_from(message) {
-                    Ok(mut payload) => {
+                    Ok(payload) => {
                         if payload.version < MIN_NOTIFY_VERSION {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                             return;
