@@ -128,6 +128,8 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
+        self.lwma
+            .add_front(block.original_block.header.timestamp, block.target_difficulty);
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
                 AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
@@ -207,8 +209,6 @@ impl P2Chain {
         hash: FixedHash,
         recursion_depth: usize,
     ) -> Result<(Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
-        // dbg!("Verify chain", new_block_height);
-        // dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut missing_parents = Vec::new();
         let block = self
@@ -244,13 +244,6 @@ impl P2Chain {
                 }
             }
         }
-        // edge case for first block
-        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
-        // the newly added block == 0
-        if self.get_tip().is_none() && new_block_height == 0 {
-            self.set_new_tip(new_block_height, hash)?;
-            return Ok((missing_parents, Vec::new()));
-        }
 
         // if !missing_parents.is_empty() {
         //     return Err(Error::BlockParentDoesNotExist { missing_parents });
@@ -265,6 +258,14 @@ impl P2Chain {
             // lets replace this
             block.verified = true;
             let _ = level.blocks.insert(hash, Arc::new(block));
+        }
+
+        // edge case for first block
+        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
+        // the newly added block == 0
+        if self.get_tip().is_none() && new_block_height == 0 {
+            self.set_new_tip(new_block_height, hash)?;
+            return Ok((missing_parents, Vec::new()));
         }
 
         // is this block part of the main chain?
