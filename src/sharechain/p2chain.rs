@@ -1227,4 +1227,62 @@ mod test {
             AccumulatedDifficulty::from_u128(99).unwrap() //(10+9)*3 +10+11*2
         );
     }
+
+    #[test]
+    fn rerog_less_than_share_window() {
+        let mut chain = P2Chain::new_empty(20, 15);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..10 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+            assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
+        }
+
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 90);
+
+        // lets create a new chain to reorg to
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..10 {
+            tari_block.header.nonce = i + 100;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+
+            assert_eq!(level.height, 9);
+            if i < 9 {
+                // less than 9 it has not reorged yet
+                assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 9);
+            } else {
+                // new tip, chain has reorged
+                assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 109);
+            }
+        }
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 100);
+    }
 }
