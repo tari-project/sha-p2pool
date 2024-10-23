@@ -26,7 +26,7 @@ use std::{
     sync::Arc,
 };
 
-use log::info;
+use log::{debug, info};
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
 
@@ -171,6 +171,40 @@ impl P2Chain {
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
+        let mut next_level = Some((new_block_height, hash));
+        let mut missing_parents = vec![];
+        while let Some((next_height, next_hash)) = next_level {
+            match self.verify_chain_inner(next_height, next_hash, 0) {
+                Ok((missing_parents2, do_next_level)) => {
+                    if !missing_parents2.is_empty() {
+                        missing_parents.extend_from_slice(&missing_parents2);
+                        //  return Err(Error::BlockParentDoesNotExist {
+                        //     missing_parents: missing_parents2,
+                        // });
+                    }
+                    next_level = do_next_level;
+                    // if let Some((height, hash)) = do_next_level {
+                    // self.verify_chain_inner(vec![], height, hash, 0)?;
+                    // }
+                },
+                Err(e) => return Err(e),
+            }
+        }
+        if !missing_parents.is_empty() {
+            return Err(Error::BlockParentDoesNotExist { missing_parents });
+        }
+
+        Ok(())
+    }
+
+    fn verify_chain_inner(
+        &mut self,
+        new_block_height: u64,
+        hash: FixedHash,
+        recursion_depth: usize,
+    ) -> Result<(Vec<(u64, FixedHash)>, Option<(u64, FixedHash)>), Error> {
+        // dbg!("Verify chain", new_block_height);
+        // dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut missing_parents = Vec::new();
         let block = self
@@ -211,7 +245,7 @@ impl P2Chain {
         // the newly added block == 0
         if self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
-            return Ok(());
+            return Ok((missing_parents, None));
         }
 
         // if !missing_parents.is_empty() {
@@ -241,7 +275,7 @@ impl P2Chain {
             info!(target: LOG_TARGET, "[{:?}] Block building on tip: {:?}", algo, new_block_height);
             self.set_new_tip(new_block_height, hash)?;
         } else {
-            info!(target: LOG_TARGET, "[{:?}] Block is not building on tip: {:?}", algo, new_block_height);
+            debug!(target: LOG_TARGET, "[{:?}] Block is not building on tip: {:?}", algo, new_block_height);
             // lets check if we need to reorg here
             let block = self
                 .get_block_at_height(new_block_height, &hash)
@@ -350,27 +384,26 @@ impl P2Chain {
             }
         }
 
+        let mut next_level_data = None;
+
         // let see if we already have a block that builds on top of this
-        if let Some(next_level) = self.level_at_height(new_block_height + 1).cloned() {
+        if let Some(next_level) = self.level_at_height(new_block_height + 1) {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
-                    info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
-                    // we have a parent here
-                    match self.verify_chain(next_level.height, block.0.clone()) {
-                        Err(Error::BlockParentDoesNotExist {
-                            missing_parents: mut missing,
-                        }) => missing_parents.append(&mut missing),
-                        Err(e) => return Err(e),
-                        Ok(_) => (),
-                    }
+                    next_level_data = Some((next_level.height, block.0.clone()));
                 }
             }
+        }
+        if let Some(next_level) = next_level_data {
+            debug!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
+            // we have a parent here
+            return Ok((missing_parents, Some(next_level)));
         }
         if !missing_parents.is_empty() {
             return Err(Error::BlockParentDoesNotExist { missing_parents });
         }
-        Ok(())
+        Ok((missing_parents, None))
     }
 
     fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), Error> {

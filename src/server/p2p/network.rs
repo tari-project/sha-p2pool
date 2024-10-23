@@ -641,14 +641,14 @@ where S: ShareChain
 
                         // Don't add unless we've already synced.
 
-                        info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
+                        debug!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
                         let algo = payload.algo();
                         let share_chain = match algo {
                             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                         };
                         if share_chain.tip_height().await.unwrap_or_default() == 0 {
-                            warn!(target: LOG_TARGET, squad = &self.config.squad; "Share chain tip height is None, skipping block until we have synced");
+                            debug!(target: LOG_TARGET, squad = &self.config.squad; "Share chain tip height is None, skipping block until we have synced");
                             return;
                         }
                         let mut missing_blocks = vec![];
@@ -907,7 +907,7 @@ where S: ShareChain
         }
 
         if !self.network_peer_store.is_whitelisted(&peer) {
-            warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
+            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
             // return;
         }
 
@@ -1420,8 +1420,12 @@ where S: ShareChain
             .open(format!("{}_blocks_{}.txt", prefix, time))
             .unwrap();
 
-        file.write(b"@startuml\n").unwrap();
+        // file.write(b"@startuml\n").unwrap();
         file.write(b"digraph B {\n").unwrap();
+        if let Some(tip) = chain.get_tip().await.unwrap() {
+            file.write(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
+                .unwrap();
+        }
         let blocks = chain.all_blocks().await.expect("errored");
         for b in blocks {
             file.write(

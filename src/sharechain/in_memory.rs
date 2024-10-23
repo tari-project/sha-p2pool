@@ -62,7 +62,10 @@ impl InMemoryShareChain {
         }
 
         Ok(Self {
-            p2_chain: Box::new(Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW)))),
+            p2_chain: Box::new(Arc::new(RwLock::new(P2Chain::new_empty(
+                MAX_BLOCKS_COUNT,
+                SHARE_WINDOW,
+            )))),
             pow_algo,
             block_validation_params,
             consensus_manager,
@@ -352,6 +355,16 @@ impl ShareChain for InMemoryShareChain {
         let bl = self.p2_chain.read().await;
         let tip_level = bl.get_height();
         Ok(tip_level)
+    }
+
+    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, Error> {
+        let bl = self.p2_chain.read().await;
+        let tip_level = bl.get_tip();
+        if let Some(tip_level) = tip_level {
+            Ok(Some((tip_level.height, tip_level.chain_block)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, Error> {
