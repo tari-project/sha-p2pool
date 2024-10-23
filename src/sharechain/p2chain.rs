@@ -128,6 +128,8 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
+        self.lwma
+            .add_front(block.original_block.header.timestamp, block.target_difficulty);
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
                 AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
@@ -207,8 +209,6 @@ impl P2Chain {
         hash: FixedHash,
         recursion_depth: usize,
     ) -> Result<(Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
-        // dbg!("Verify chain", new_block_height);
-        // dbg!(recursion_depth);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut missing_parents = Vec::new();
         let block = self
@@ -244,13 +244,6 @@ impl P2Chain {
                 }
             }
         }
-        // edge case for first block
-        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
-        // the newly added block == 0
-        if self.get_tip().is_none() && new_block_height == 0 {
-            self.set_new_tip(new_block_height, hash)?;
-            return Ok((missing_parents, Vec::new()));
-        }
 
         // if !missing_parents.is_empty() {
         //     return Err(Error::BlockParentDoesNotExist { missing_parents });
@@ -265,6 +258,14 @@ impl P2Chain {
             // lets replace this
             block.verified = true;
             let _ = level.blocks.insert(hash, Arc::new(block));
+        }
+
+        // edge case for first block
+        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
+        // the newly added block == 0
+        if self.get_tip().is_none() && new_block_height == 0 {
+            self.set_new_tip(new_block_height, hash)?;
+            return Ok((missing_parents, Vec::new()));
         }
 
         // is this block part of the main chain?
@@ -329,6 +330,12 @@ impl P2Chain {
                 counter += 1;
                 if counter >= self.share_window {
                     break;
+                }
+                if parent.height == 0 {
+                    // we cant count further next block will be non existing as we have the first block here no
+                    // lets change the counter to reflect max share window as this will be the max share window we can
+                    // have
+                    counter = self.share_window;
                 }
             }
             if total_work > self.total_accumulated_tip_difficulty &&
@@ -1220,5 +1227,63 @@ mod test {
             chain.total_accumulated_tip_difficulty,
             AccumulatedDifficulty::from_u128(99).unwrap() //(10+9)*3 +10+11*2
         );
+    }
+
+    #[test]
+    fn rerog_less_than_share_window() {
+        let mut chain = P2Chain::new_empty(20, 15);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..10 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+            assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
+        }
+
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 90);
+
+        // lets create a new chain to reorg to
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..10 {
+            tari_block.header.nonce = i + 100;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+
+            assert_eq!(level.height, 9);
+            if i < 9 {
+                // less than 9 it has not reorged yet
+                assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 9);
+            } else {
+                // new tip, chain has reorged
+                assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, 109);
+            }
+        }
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 100);
     }
 }

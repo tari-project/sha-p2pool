@@ -145,7 +145,7 @@ impl InMemoryShareChain {
         }
         // let test the age of the uncles
         for uncle in block.uncles.iter() {
-            if uncle.0 < block.height - 3 {
+            if uncle.0 < block.height.saturating_sub(3) {
                 warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too old! {:?}", self.pow_algo, uncle.0);
                 return Err(ValidationError::UncleTooOld);
             }
