@@ -25,7 +25,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-
+use std::io::empty;
 use log::info;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
@@ -354,8 +354,13 @@ impl P2Chain {
         if let Some(next_level) = self.level_at_height(new_block_height + 1).cloned() {
             // we have a height here, lets check the blocks
             for block in next_level.blocks.iter() {
+                if missing_parents.len() > 20{
+
+                    return Err(Error::BlockParentDoesNotExist { missing_parents });
+                }
                 if block.1.prev_hash == hash {
                     info!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
+                    info!(target: LOG_TARGET, "[{:?}] Missing parents len {:?}", algo, missing_parents.len());
                     // we have a parent here
                     match self.verify_chain(next_level.height, block.0.clone()) {
                         Err(Error::BlockParentDoesNotExist {
