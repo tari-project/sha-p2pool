@@ -330,6 +330,12 @@ impl P2Chain {
                 if counter >= self.share_window {
                     break;
                 }
+                if parent.height == 0 {
+                    // we cant count further next block will be non existing as we have the first block here no
+                    // lets change the counter to reflect max share window as this will be the max share window we can
+                    // have
+                    counter = self.share_window;
+                }
             }
             if total_work > self.total_accumulated_tip_difficulty &&
                 counter >= self.share_window &&
