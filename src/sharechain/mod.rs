@@ -106,6 +106,9 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, Error>;
 
+    /// Returns the tip of the chain.
+    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, Error>;
+
     /// Generate shares based on the previous blocks.
     async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, Error>;
 

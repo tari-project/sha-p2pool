@@ -1420,8 +1420,12 @@ where S: ShareChain
             .open(format!("{}_blocks_{}.txt", prefix, time))
             .unwrap();
 
-        file.write(b"@startuml\n").unwrap();
+        // file.write(b"@startuml\n").unwrap();
         file.write(b"digraph B {\n").unwrap();
+        if let Some(tip) = chain.get_tip().await.unwrap() {
+            file.write(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
+                .unwrap();
+        }
         let blocks = chain.all_blocks().await.expect("errored");
         for b in blocks {
             file.write(
