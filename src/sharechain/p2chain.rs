@@ -44,6 +44,8 @@ pub const SAFETY_MARGIN: usize = 20;
 pub const MAX_EXTRA_SYNC: usize = 2000;
 // this is the max bocks we store that are more than MAX_EXTRA_SYNC in front of our tip
 pub const MAX_SYNC_STORE: usize = 200;
+// this is the max missing parents we allow to process before we stop prossing a chain and wait for more parents
+pub const MAX_MISSING_PARENTS: usize = 20;
 
 pub struct P2Chain {
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
@@ -178,9 +180,13 @@ impl P2Chain {
         let mut missing_parents = vec![];
         while let Some((next_height, next_hash)) = next_level.pop_front() {
             match self.verify_chain_inner(next_height, next_hash, 0) {
-                Ok((missing_parents2, do_next_level)) => {
-                    if !missing_parents2.is_empty() {
-                        missing_parents.extend_from_slice(&missing_parents2);
+                Ok((new_missing_parents, do_next_level)) => {
+                    if !new_missing_parents.is_empty() {
+                        missing_parents.extend_from_slice(&new_missing_parents);
+                    }
+                    if missing_parents.len() > MAX_MISSING_PARENTS {
+                        missing_parents.truncate(MAX_MISSING_PARENTS);
+                        return Err(Error::BlockParentDoesNotExist { missing_parents });
                     }
                     for item in do_next_level {
                         if next_level.contains(&item) {
