@@ -98,10 +98,10 @@ impl BlockValidationParams {
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error>;
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<(), Error>;
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, Error>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, Error>;

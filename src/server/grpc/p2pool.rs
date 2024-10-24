@@ -123,21 +123,24 @@ where S: ShareChain
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
         match share_chain.submit_block(block.clone()).await {
-            Ok(_) => {
+            Ok(new_tip) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
                 let mut new_blocks = vec![(block.height, block.hash.clone())];
                 for uncle in block.uncles.iter() {
                     new_blocks.push(uncle.clone());
                 }
                 let notify = NotifyNewTipBlock::new(pow_algo, new_blocks);
-                let res = self
-                    .p2p_client
-                    .broadcast_block(notify)
-                    .map_err(|error| Status::internal(error.to_string()));
-                if res.is_ok() {
-                    info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
+                if new_tip {
+                    let res = self
+                        .p2p_client
+                        .broadcast_block(notify)
+                        .map_err(|error| Status::internal(error.to_string()));
+                    if res.is_ok() {
+                        info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
+                    }
+                    return res;
                 }
-                res
+                Ok(())
             },
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
