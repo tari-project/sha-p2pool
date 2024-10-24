@@ -800,7 +800,7 @@ where S: ShareChain
         channel: ResponseChannel<ShareChainSyncResponse>,
         request: ShareChainSyncRequest,
     ) {
-        info!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request: {request:?}");
+        info!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request of len: {}", request.missing_blocks().len());
         let share_chain = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
