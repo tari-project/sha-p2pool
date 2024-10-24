@@ -21,7 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::{hash_map, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     ops::Deref,
     sync::Arc,
 };
@@ -174,13 +174,17 @@ impl P2Chain {
         Ok(())
     }
 
-    fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
+    fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<bool, Error> {
         let mut next_level = VecDeque::new();
         next_level.push_back((new_block_height, hash));
         let mut missing_parents = HashMap::new();
+        let mut new_tip = false;
         while let Some((next_height, next_hash)) = next_level.pop_front() {
             match self.verify_chain_inner(next_height, next_hash) {
-                Ok((new_missing_parents, do_next_level)) => {
+                Ok((tip_change, new_missing_parents, do_next_level)) => {
+                    if tip_change {
+                        new_tip = true;
+                    }
                     for new_missing_parent in new_missing_parents {
                         if missing_parents.len() < MAX_MISSING_PARENTS {
                             missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
@@ -217,15 +221,16 @@ impl P2Chain {
             });
         }
 
-        Ok(())
+        Ok(new_tip)
     }
 
     fn verify_chain_inner(
         &mut self,
         new_block_height: u64,
         hash: FixedHash,
-    ) -> Result<(Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
+    ) -> Result<(bool, Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
         // we should validate what we can if a block is invalid, we should delete it.
+        let mut new_tip = false;
         let mut missing_parents = Vec::new();
         let block = self
             .get_block_at_height(new_block_height, &hash)
@@ -281,7 +286,7 @@ impl P2Chain {
         // the newly added block == 0
         if self.get_tip().is_none() && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
-            return Ok((missing_parents, Vec::new()));
+            return Ok((true, missing_parents, Vec::new()));
         }
 
         // is this block part of the main chain?
@@ -295,6 +300,7 @@ impl P2Chain {
             // easy this builds on the tip
             info!(target: LOG_TARGET, "[{:?}] Block building on tip: {:?}", algo, new_block_height);
             self.set_new_tip(new_block_height, hash)?;
+            new_tip = true;
         } else {
             debug!(target: LOG_TARGET, "[{:?}] Block is not building on tip: {:?}", algo, new_block_height);
             // lets check if we need to reorg here
@@ -358,6 +364,7 @@ impl P2Chain {
                 counter >= self.share_window &&
                 missing_parents.is_empty()
             {
+                new_tip = true;
                 // we need to reorg the chain
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
@@ -441,15 +448,15 @@ impl P2Chain {
         if !next_level_data.is_empty() {
             debug!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
             // we have a parent here
-            return Ok((missing_parents, next_level_data));
+            return Ok((new_tip, missing_parents, next_level_data));
         }
         if !missing_parents.is_empty() {
             return Err(Error::BlockParentDoesNotExist { missing_parents });
         }
-        Ok((missing_parents, next_level_data))
+        Ok((new_tip, missing_parents, next_level_data))
     }
 
-    fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
+    fn add_block(&mut self, block: Arc<P2Block>) -> Result<bool, Error> {
         let new_block_height = block.height;
         let block_hash = block.hash.clone();
         // edge case no current chain, lets just add
@@ -490,7 +497,7 @@ impl P2Chain {
                 if !self.is_full() {
                     while self.levels.back().expect("we already checked its not empty").height > block.height + 1 {
                         if self.is_full() {
-                            return Ok(());
+                            return Ok(false);
                         }
                         let level = P2ChainLevel::new_empty(
                             self.levels
@@ -503,7 +510,7 @@ impl P2Chain {
                     }
                     if self.levels.back().map(|level| level.height).unwrap_or(0) > block.height {
                         if self.is_full() {
-                            return Ok(());
+                            return Ok(false);
                         }
                         let level = P2ChainLevel::new(block);
                         self.levels.push_back(level);
@@ -515,9 +522,10 @@ impl P2Chain {
         self.verify_chain(new_block_height, block_hash)
     }
 
-    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<(), Error> {
+    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<bool, Error> {
         let new_block_height = block.height;
         let block_hash = block.hash.clone();
+        let mut new_tip = false;
 
         // lets check where this is, do we need to store it in the sync store
         if new_block_height > self.current_tip + MAX_EXTRA_SYNC as u64 {
@@ -561,7 +569,9 @@ impl P2Chain {
                             missing_parents: mut missing,
                         }) => missing_parents.append(&mut missing),
                         Err(e) => return Err(e),
-                        Ok(_) => (),
+                        Ok(_) => {
+                            new_tip = true;
+                        },
                     }
                 }
             }
@@ -593,6 +603,7 @@ impl P2Chain {
             if !missing_parents.is_empty() {
                 return Err(Error::BlockParentDoesNotExist { missing_parents });
             }
+            return Ok(new_tip);
         }
 
         // Uncle cannot be the same as prev_hash

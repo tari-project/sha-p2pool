@@ -88,10 +88,7 @@ use crate::{
             MIN_PEER_INFO_VERSION,
         },
     },
-    sharechain::{
-        p2block::{P2Block, CURRENT_CHAIN_ID},
-        ShareChain,
-    },
+    sharechain::{p2block::CURRENT_CHAIN_ID, ShareChain},
 };
 
 const PEER_INFO_TOPIC: &str = "peer_info";
@@ -756,29 +753,6 @@ where S: ShareChain
                     info: my_info,
                     peer_id: local_peer_id.to_base58(),
                 });
-        }
-    }
-
-    async fn try_add_propagated_block(
-        share_chain: &Arc<S>,
-        block: Arc<P2Block>,
-    ) -> Result<Option<Vec<(u64, FixedHash)>>, crate::sharechain::error::Error> {
-        match share_chain.submit_block(block.clone()).await {
-            Ok(_result) => {
-                // info!(target: LOG_TARGET, "New block added to local share chain via gossip: {}. Height: {}",
-                // &block.hash.to_hex(), &block.height);
-                Ok(None)
-            },
-            Err(error) => match error {
-                crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                    // let _ = self.snooze_block_tx.send((snoozes_left, block)).await;
-                    return Ok(Some(missing_parents));
-                },
-                _ => {
-                    error!(target: LOG_TARGET, "Could not add new block to local share chain: {error:?}");
-                    Err(error)
-                },
-            },
         }
     }
 

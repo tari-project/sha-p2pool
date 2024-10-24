@@ -160,13 +160,12 @@ impl InMemoryShareChain {
         block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() || block.height == 0 || syncing {
             let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
-            p2_chain.add_block_to_chain(block.clone())?;
-            return Ok(());
+            return p2_chain.add_block_to_chain(block.clone());
         }
 
         // this is safe as we already checked it does exist
@@ -181,7 +180,7 @@ impl InMemoryShareChain {
         if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
             if level.blocks.contains_key(&block.hash) {
                 info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
-                return Ok(());
+                return Ok(false);
             }
         }
 
@@ -191,14 +190,14 @@ impl InMemoryShareChain {
         let new_block = block.clone();
 
         // add block to chain
-        p2_chain.add_block_to_chain(new_block)?;
+        let new_tip = p2_chain.add_block_to_chain(new_block)?;
 
         // update coinbase extra cache
         let mut coinbase_extras_lock = self.coinbase_extras.write().await;
 
         coinbase_extras_lock.insert(block.miner_wallet_address.to_base58(), block.get_miner_coinbase_extra());
 
-        Ok(())
+        Ok(new_tip)
     }
 
     async fn find_coinbase_extra(&self, miner_wallet_address: &TariAddress) -> Option<Vec<u8>> {
@@ -294,7 +293,7 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<(), Error> {
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error> {
         if block.version < MIN_BLOCK_VERSION {
             return Err(Error::BlockValidation("Block version is too low".to_string()));
         }
@@ -314,8 +313,11 @@ impl ShareChain for InMemoryShareChain {
             p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
-        if let Ok(()) = &res {
-            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully", self.pow_algo, height);
+        if let Ok(false) = &res {
+            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, no tip change", self.pow_algo, height);
+        }
+        if let Ok(true) = &res {
+            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, tip changed", self.pow_algo, height);
         }
 
         if let Err(Error::BlockParentDoesNotExist { missing_parents }) = &res {
@@ -327,8 +329,9 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<(), Error> {
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, Error> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
+        let mut new_tip = false;
 
         let blocks = blocks.to_vec();
         let mut known_blocks_incoming = Vec::new();
@@ -352,8 +355,9 @@ impl ShareChain for InMemoryShareChain {
                 )
                 .await
             {
-                Ok(_) => {
+                Ok(tip_change) => {
                     info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully", self.pow_algo, height);
+                    new_tip = tip_change;
                 },
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
@@ -392,7 +396,7 @@ impl ShareChain for InMemoryShareChain {
                     .collect(),
             });
         }
-        Ok(())
+        Ok(new_tip)
     }
 
     async fn tip_height(&self) -> Result<u64, Error> {
