@@ -44,8 +44,8 @@ pub const SAFETY_MARGIN: usize = 20;
 pub const MAX_EXTRA_SYNC: usize = 2000;
 // this is the max bocks we store that are more than MAX_EXTRA_SYNC in front of our tip
 pub const MAX_SYNC_STORE: usize = 200;
-// this is the max missing parents we allow to process before we stop prossing a chain and wait for more parents
-pub const MAX_MISSING_PARENTS: usize = 20;
+// this is the max missing parents we allow to process before we stop processing a chain and wait for more parents
+pub const MAX_MISSING_PARENTS: usize = 100;
 
 pub struct P2Chain {
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
@@ -179,7 +179,7 @@ impl P2Chain {
         next_level.push_back((new_block_height, hash));
         let mut missing_parents = vec![];
         while let Some((next_height, next_hash)) = next_level.pop_front() {
-            match self.verify_chain_inner(next_height, next_hash, 0) {
+            match self.verify_chain_inner(next_height, next_hash) {
                 Ok((new_missing_parents, do_next_level)) => {
                     if !new_missing_parents.is_empty() {
                         missing_parents.extend_from_slice(&new_missing_parents);
@@ -213,7 +213,6 @@ impl P2Chain {
         &mut self,
         new_block_height: u64,
         hash: FixedHash,
-        recursion_depth: usize,
     ) -> Result<(Vec<(u64, FixedHash)>, Vec<(u64, FixedHash)>), Error> {
         // we should validate what we can if a block is invalid, we should delete it.
         let mut missing_parents = Vec::new();
@@ -420,7 +419,9 @@ impl P2Chain {
             if let Some(level) = self.level_at_height(i) {
                 for higher_block in level.blocks.iter() {
                     for uncles in higher_block.1.uncles.iter() {
-                        next_level_data.push((higher_block.1.height, higher_block.1.hash.clone()));
+                        if uncles.1 == hash {
+                            next_level_data.push((higher_block.1.height, higher_block.1.hash.clone()));
+                        }
                     }
                 }
             }
@@ -718,11 +719,10 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .with_prev_hash(prev_hash)
             .build();
-        prev_hash = block.generate_hash();
         chain.add_block_to_chain(block.clone()).unwrap();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(chain.get_tip().unwrap().height, 5);
+        assert_eq!(level.height, 5);
     }
 
     #[test]
@@ -764,7 +764,7 @@ mod test {
         chain.add_block_to_chain(blocks[1].clone()).unwrap_err();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(chain.get_tip().unwrap().height, 6);
+        assert_eq!(level.height, 6);
     }
 
     #[test]
@@ -811,7 +811,6 @@ mod test {
             .with_prev_hash(prev_hash)
             .with_uncles(vec![(5, uncle_block.hash.clone())])
             .build();
-        prev_hash = block.generate_hash();
         blocks.push(block.clone());
 
         chain.add_block_to_chain(blocks[6].clone()).unwrap_err();
@@ -832,7 +831,7 @@ mod test {
         chain.add_block_to_chain(uncle_block).unwrap();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(chain.get_tip().unwrap().height, 6);
+        assert_eq!(level.height, 6);
     }
 
     #[test]
@@ -856,7 +855,7 @@ mod test {
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
-            assert_eq!(chain.get_tip().unwrap().height, i);
+            assert_eq!(level.height, i);
         }
         // we do this so we can add a missing parent or 2
         let address = new_random_address();
@@ -881,7 +880,7 @@ mod test {
         chain.add_block_to_chain(block.clone()).unwrap_err();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(chain.get_tip().unwrap().height, 4);
+        assert_eq!(level.height, 4);
 
         let address = new_random_address();
         let block = P2Block::builder()
@@ -900,12 +899,11 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .with_prev_hash(prev_hash)
             .build();
-        prev_hash = block.generate_hash();
 
         chain.add_block_to_chain(block.clone()).unwrap_err();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(chain.get_tip().unwrap().height, 4);
+        assert_eq!(level.height, 4);
     }
 
     #[test]
