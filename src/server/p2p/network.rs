@@ -663,10 +663,12 @@ where S: ShareChain
                     Err(error) => {
                         // TODO: elevate to error
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "Can't deserialize broadcast block payload: {:?}", error);
-                        self.network_peer_store.move_to_grey_list(
-                            peer,
-                            format!("Node sent a block that could not be deserialized: {:?}", error),
-                        );
+                        self.network_peer_store
+                            .move_to_grey_list(
+                                peer,
+                                format!("Node sent a block that could not be deserialized: {:?}", error),
+                            )
+                            .await;
                     },
                 }
             },
