@@ -332,7 +332,7 @@ impl ShareChain for InMemoryShareChain {
 
         let blocks = blocks.to_vec();
         let mut known_blocks_incoming = Vec::new();
-        let mut missing_parents = Vec::new();
+        let mut missing_parents = HashMap::new();
         for block in blocks.iter() {
             known_blocks_incoming.push(block.hash.clone());
         }
@@ -358,14 +358,17 @@ impl ShareChain for InMemoryShareChain {
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
                     if let Error::BlockParentDoesNotExist {
-                        missing_parents: mut new_missing_parents,
+                        missing_parents: new_missing_parents,
                     } = e
                     {
-                        let missing_heights = missing_parents
-                            .iter()
-                            .map(|data: &(u64, FixedHash)| data.0)
-                            .collect::<Vec<u64>>();
-                        missing_parents.append(&mut new_missing_parents);
+                        let mut missing_heights = Vec::new();
+                        for new_missing_parent in new_missing_parents {
+                            if known_blocks_incoming.contains(&new_missing_parent.1) {
+                                continue;
+                            }
+                            missing_heights.push(new_missing_parent.0);
+                            missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
+                        }
 
                         info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
                     } else {
@@ -375,9 +378,6 @@ impl ShareChain for InMemoryShareChain {
                 },
             }
         }
-        for known_block in known_blocks_incoming.iter() {
-            missing_parents.retain(|data| data.1 != *known_block);
-        }
         let _ = self.stat_client.send_chain_changed(
             self.pow_algo,
             p2_chain_write_lock.get_height(),
@@ -385,7 +385,12 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
-            return Err(Error::BlockParentDoesNotExist { missing_parents });
+            return Err(Error::BlockParentDoesNotExist {
+                missing_parents: missing_parents
+                    .into_iter()
+                    .map(|(hash, height)| (height, hash))
+                    .collect(),
+            });
         }
         Ok(())
     }
