@@ -21,7 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{hash_map, HashMap, VecDeque},
     ops::Deref,
     sync::Arc,
 };
@@ -177,16 +177,22 @@ impl P2Chain {
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<(), Error> {
         let mut next_level = VecDeque::new();
         next_level.push_back((new_block_height, hash));
-        let mut missing_parents = vec![];
+        let mut missing_parents = HashMap::new();
         while let Some((next_height, next_hash)) = next_level.pop_front() {
             match self.verify_chain_inner(next_height, next_hash) {
                 Ok((new_missing_parents, do_next_level)) => {
-                    if !new_missing_parents.is_empty() {
-                        missing_parents.extend_from_slice(&new_missing_parents);
+                    for new_missing_parent in new_missing_parents {
+                        if missing_parents.len() < MAX_MISSING_PARENTS {
+                            missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
+                        }
                     }
-                    if missing_parents.len() > MAX_MISSING_PARENTS {
-                        missing_parents.truncate(MAX_MISSING_PARENTS);
-                        return Err(Error::BlockParentDoesNotExist { missing_parents });
+                    if missing_parents.len() >= MAX_MISSING_PARENTS {
+                        return Err(Error::BlockParentDoesNotExist {
+                            missing_parents: missing_parents
+                                .into_iter()
+                                .map(|(hash, height)| (height, hash))
+                                .collect(),
+                        });
                     }
                     for item in do_next_level {
                         if next_level.contains(&item) {
@@ -203,7 +209,12 @@ impl P2Chain {
             }
         }
         if !missing_parents.is_empty() {
-            return Err(Error::BlockParentDoesNotExist { missing_parents });
+            return Err(Error::BlockParentDoesNotExist {
+                missing_parents: missing_parents
+                    .into_iter()
+                    .map(|(hash, height)| (height, hash))
+                    .collect(),
+            });
         }
 
         Ok(())
