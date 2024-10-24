@@ -53,10 +53,13 @@ pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let res = rx.await.map_err(|e| {
+    let mut res = rx.await.map_err(|e| {
         error!(target: LOG_TARGET, "Failed to receive from oneshot: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    res.0
+        .sort_by(|a, b| a.peer_info.current_sha3x_height.cmp(&b.peer_info.current_sha3x_height));
 
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
         error!(target: LOG_TARGET, "handle_connections took too long: {}ms", timer.elapsed().as_millis());

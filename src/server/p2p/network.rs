@@ -158,6 +158,7 @@ pub struct Config {
     pub debug_print_chain: bool,
     pub num_peers_to_sync: usize,
     pub max_blocks_to_request: usize,
+    pub sync_job_enabled: bool,
 }
 
 impl Default for Config {
@@ -179,6 +180,7 @@ impl Default for Config {
             debug_print_chain: false,
             num_peers_to_sync: 10,
             max_blocks_to_request: 2500,
+            sync_job_enabled: true,
         }
     }
 }
@@ -204,9 +206,9 @@ pub enum P2pServiceQuery {
 
 #[derive(Serialize, Clone)]
 pub(crate) struct ConnectedPeerInfo {
-    peer_id: String,
-    peer_info: PeerInfo,
-    last_grey_list_reason: Option<String>,
+    pub peer_id: String,
+    pub peer_info: PeerInfo,
+    pub last_grey_list_reason: Option<String>,
     // peer_addresses: Vec<Multiaddr>,
     // is_pending: bol,
 }
@@ -1335,8 +1337,9 @@ where S: ShareChain
                     }
                 },
                 _ = sync_interval.tick() =>  {
-                    dbg!("Trying to sync");
-                    self.try_sync_from_best_peer().await;
+                    if self.config.sync_job_enabled {
+                        self.try_sync_from_best_peer().await;
+                    }
                 }
                 _ = grey_list_clear_interval.tick() => {
                     self.network_peer_store.clear_grey_list();
