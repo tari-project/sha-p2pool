@@ -9,7 +9,10 @@ use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{server::p2p::Error, sharechain::p2block::P2Block};
+use crate::{
+    server::{p2p::Error, PROTOCOL_VERSION},
+    sharechain::p2block::P2Block,
+};
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -63,7 +66,7 @@ impl PeerInfo {
     ) -> Self {
         let timestamp = EpochTime::now();
         Self {
-            version: 8,
+            version: PROTOCOL_VERSION,
             current_sha3x_height,
             current_random_x_height,
             squad,
@@ -115,14 +118,8 @@ pub struct DirectPeerInfoResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct LocalShareChainSyncRequest {
-    pub peer_id: PeerId,
-    pub request: ShareChainSyncRequest,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NotifyNewTipBlock {
-    pub version: u32,
+    pub version: u64,
     pub algo: u64,
     pub new_blocks: Vec<(u64, FixedHash)>,
 }
@@ -131,7 +128,7 @@ impl_conversions!(NotifyNewTipBlock);
 impl NotifyNewTipBlock {
     pub fn new(algo: PowAlgorithm, new_blocks: Vec<(u64, FixedHash)>) -> Self {
         Self {
-            version: 1,
+            version: PROTOCOL_VERSION,
             algo: algo.as_u64(),
             new_blocks,
         }
@@ -142,14 +139,9 @@ impl NotifyNewTipBlock {
     }
 }
 
-impl LocalShareChainSyncRequest {
-    pub fn new(peer_id: PeerId, request: ShareChainSyncRequest) -> Self {
-        Self { peer_id, request }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ShareChainSyncResponse {
+    version: u64,
     peer_id: PeerId,
     algo: u64,
     blocks: Vec<P2Block>,
@@ -158,6 +150,7 @@ pub struct ShareChainSyncResponse {
 impl ShareChainSyncResponse {
     pub fn new(peer_id: PeerId, algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
         Self {
+            version: PROTOCOL_VERSION,
             peer_id,
             algo: algo.as_u64(),
             blocks: blocks.iter().map(|block| (**block).clone()).collect(),

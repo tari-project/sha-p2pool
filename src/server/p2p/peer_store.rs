@@ -8,6 +8,7 @@ use std::{
 
 use libp2p::PeerId;
 use tari_core::proof_of_work::PowAlgorithm;
+use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
 
@@ -112,7 +113,8 @@ impl PeerStore {
     pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 30 minutes
-        peers.retain(|peer| peer.created > Instant::now() - Duration::from_secs(60 * 60 * 10));
+        let timestamp = EpochTime::now().as_u64() - 60 * 1;
+        peers.retain(|peer| peer.peer_info.timestamp > timestamp);
         match algo {
             PowAlgorithm::RandomX => {
                 peers.sort_by(|a, b| {

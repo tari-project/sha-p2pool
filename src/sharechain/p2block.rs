@@ -18,7 +18,7 @@ use tari_core::{
 use tari_script::script;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::{impl_conversions, sharechain::CHAIN_ID};
+use crate::{impl_conversions, server::PROTOCOL_VERSION, sharechain::CHAIN_ID};
 
 lazy_static! {
     pub static ref CURRENT_CHAIN_ID: String = {
@@ -32,7 +32,7 @@ lazy_static! {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct P2Block {
     #[serde(default)]
-    pub version: u32,
+    pub version: u64,
     pub hash: BlockHash,
     pub timestamp: EpochTime,
     pub prev_hash: BlockHash,
@@ -98,7 +98,7 @@ impl BlockBuilder {
         Self {
             use_specific_hash: false,
             block: P2Block {
-                version: 8,
+                version: PROTOCOL_VERSION,
                 hash: Default::default(),
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),

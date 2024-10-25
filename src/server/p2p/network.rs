@@ -29,6 +29,7 @@ use libp2p::{
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
     mdns::{self, tokio::Tokio},
+    memory_connection_limits,
     multiaddr::Protocol,
     noise,
     relay,
@@ -84,9 +85,8 @@ use crate::{
             relay_store::RelayStore,
             Error,
             LibP2PError,
-            MIN_NOTIFY_VERSION,
-            MIN_PEER_INFO_VERSION,
         },
+        PROTOCOL_VERSION,
     },
     sharechain::{p2block::CURRENT_CHAIN_ID, ShareChain},
 };
@@ -96,6 +96,7 @@ const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/4";
 const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/4";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
+const SYNC_REQUEST_LOG_TARGET: &str = "sync_request";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
@@ -176,7 +177,7 @@ impl Default for Config {
             is_seed_peer: false,
             debug_print_chain: false,
             num_peers_to_sync: 10,
-            max_blocks_to_request: 2500,
+            max_blocks_to_request: 20,
             sync_job_enabled: true,
         }
     }
@@ -194,6 +195,7 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
+    pub memory_limits: memory_connection_limits::Behaviour,
 }
 
 pub enum P2pServiceQuery {
@@ -352,9 +354,9 @@ where S: ShareChain
                 // gossipsub
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
-                    .fanout_ttl(Duration::from_secs(10))
-                    .max_ihave_length(1000) // Default is 5000
-                    .max_messages_per_rpc(Some(1000))
+                    // .fanout_ttl(Duration::from_secs(10))
+                    // .max_ihave_length(1000) // Default is 5000
+                    // .max_messages_per_rpc(Some(1000))
                     // We get a lot of messages, so 
                     .duplicate_cache_time(Duration::from_secs(1))
                     .build()
@@ -412,6 +414,7 @@ where S: ShareChain
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                     autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
+                    memory_limits: memory_connection_limits::Behaviour::with_max_bytes(1024*1024*1024), //1GB
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -580,7 +583,7 @@ where S: ShareChain
                 Ok(payload) => {
                     debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
                     debug!(target: LOG_TARGET, squad = &self.config.squad; "[NETWORK] New peer info: {peer:?} -> {payload:?}");
-                    if payload.version < MIN_PEER_INFO_VERSION {
+                    if payload.version != PROTOCOL_VERSION {
                         trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                         return;
                     }
@@ -589,7 +592,9 @@ where S: ShareChain
                         return;
                     }
                     if !self.config.is_seed_peer {
-                        self.add_peer(payload, peer).await;
+                        if self.add_peer(payload, peer.clone()).await {
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                        }
                     }
                 },
                 Err(error) => {
@@ -602,12 +607,14 @@ where S: ShareChain
                         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {peer:?} -> {payload:?}");
 
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {peer:?} -> {payload:?}");
-                        if payload.version < MIN_PEER_INFO_VERSION {
+                        if payload.version != PROTOCOL_VERSION {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                             return;
                         }
                         if !self.config.is_seed_peer {
-                            self.add_peer(payload, peer).await;
+                            if self.add_peer(payload, peer.clone()).await {
+                                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                            }
                         }
                     },
                     Err(error) => {
@@ -626,7 +633,7 @@ where S: ShareChain
                 // }
                 match NotifyNewTipBlock::try_from(message) {
                     Ok(payload) => {
-                        if payload.version < MIN_NOTIFY_VERSION {
+                        if payload.version != PROTOCOL_VERSION {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                             return;
                         }
@@ -679,10 +686,10 @@ where S: ShareChain
         }
     }
 
-    async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> ControlFlow<()> {
+    async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> bool {
         // Don't add ourselves
         if &peer == self.swarm.local_peer_id() {
-            return ControlFlow::Continue(());
+            return false;
         }
 
         for addr in &payload.public_addresses() {
@@ -692,47 +699,19 @@ where S: ShareChain
 
         match add_status {
             AddPeerStatus::NewPeer => {
-                // self.initiate_direct_peer_exchange(peer).await;
+                self.initiate_direct_peer_exchange(peer).await;
+                return true;
             },
             AddPeerStatus::Existing => {},
             AddPeerStatus::Greylisted => {
                 debug!(target: LOG_TARGET, "Added peer but it was grey listed");
-                return ControlFlow::Continue(());
             },
             AddPeerStatus::Blacklisted => {
                 info!(target: LOG_TARGET, "Added peer but it was black listed");
-                return ControlFlow::Continue(());
             },
         }
 
-        if last_sync_attempt
-            .map(|attempt| attempt.elapsed() > SYNC_TIMEOUT)
-            .unwrap_or(false)
-        {
-            debug!(target: LOG_TARGET, squad = &self.config.squad; "Sync already in progress");
-            return ControlFlow::Break(());
-        }
-
-        // debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing peer info from {peer:?} with heights:
-        // RandomX: {their_randomx_height}, Sha3x: {their_sha3x_height}");
-
-        // let our_height = self.share_chain_random_x.tip_height().await.unwrap_or_default();
-        // if our_height < their_randomx_height {
-        //     self.network_peer_store.update_last_sync_attempt(peer);
-        //     self.sync_share_chain(PowAlgorithm::RandomX, peer, vec![(
-        //         their_randomx_height,
-        //         FixedHash::zero(),
-        //     )])
-        //     .await;
-        // }
-
-        // let our_height = self.share_chain_sha3x.tip_height().await.unwrap_or_default();
-        // if our_height < their_sha3x_height {
-        //     self.network_peer_store.update_last_sync_attempt(peer);
-        //     self.sync_share_chain(PowAlgorithm::Sha3x, peer, vec![(their_sha3x_height, FixedHash::zero())])
-        //         .await;
-        // }
-        ControlFlow::Continue(())
+        false
     }
 
     async fn initiate_direct_peer_exchange(&mut self, peer: PeerId) {
@@ -785,15 +764,25 @@ where S: ShareChain
             }
         }
 
-        self.add_peer(request.info, request.peer_id.parse().unwrap()).await;
+        if self.add_peer(request.info, request.peer_id.parse().unwrap()).await {
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&request.peer_id.parse().unwrap());
+        }
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        if response.info.version < MIN_PEER_INFO_VERSION {
+        if response.info.version != PROTOCOL_VERSION {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", response.peer_id);
             return;
         }
-        self.add_peer(response.info, response.peer_id.parse().unwrap()).await;
+        if self.add_peer(response.info, response.peer_id.parse().unwrap()).await {
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&response.peer_id.parse().unwrap());
+        }
     }
 
     /// Handles share chain sync request (coming from other peer).
@@ -845,6 +834,7 @@ where S: ShareChain
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
         let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
@@ -888,6 +878,8 @@ where S: ShareChain
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
             // return;
         }
+
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending sync to {} for blocks {}", peer, missing_parents.iter().map(|a| a.0.to_string()).join(", "));
 
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
         let _outbound_id = self
@@ -1362,7 +1354,7 @@ where S: ShareChain
                     PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
                     PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
                 };
-                if their_height > 0 {
+                if their_height > our_tip {
                     let mut blocks_to_request = vec![];
                     dbg!(our_tip);
                     dbg!(their_height);

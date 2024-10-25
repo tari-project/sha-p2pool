@@ -24,10 +24,7 @@ use super::{
     UNCLE_REWARD_SHARE,
 };
 use crate::{
-    server::{
-        http::stats_collector::StatsBroadcastClient,
-        p2p::{Squad, MIN_BLOCK_VERSION},
-    },
+    server::{http::stats_collector::StatsBroadcastClient, p2p::Squad, PROTOCOL_VERSION},
     sharechain::{
         error::{Error, ValidationError},
         p2block::P2Block,
@@ -294,7 +291,7 @@ impl InMemoryShareChain {
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error> {
-        if block.version < MIN_BLOCK_VERSION {
+        if block.version != PROTOCOL_VERSION {
             return Err(Error::BlockValidation("Block version is too low".to_string()));
         }
         let mut p2_chain_write_lock = self.p2_chain.write().await;
@@ -341,7 +338,7 @@ impl ShareChain for InMemoryShareChain {
         }
 
         for block in blocks {
-            if block.version < MIN_BLOCK_VERSION {
+            if block.version != PROTOCOL_VERSION {
                 return Err(Error::BlockValidation("Block version is too low".to_string()));
             }
             let height = block.height;
