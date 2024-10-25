@@ -149,9 +149,9 @@ impl StatsCollector {
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or_else(|| EpochTime::now()).as_u64())
                                 .unwrap_or_default())),
-                                    self.randomx_chain_height.saturating_sub(self.randomx_chain_length.saturating_sub(1)),
+                                    self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
                                     self.randomx_chain_height,
-                                    self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length.saturating_sub(1)),
+                                    self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
                                     self.sha3x_chain_height,
                                     formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
             formatter.format(                            self.randomx_network_difficulty.as_u64() as f64),
