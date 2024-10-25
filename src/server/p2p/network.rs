@@ -8,7 +8,6 @@ use std::{
     hash::Hash,
     io::Write,
     num::NonZeroU32,
-    ops::ControlFlow,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -695,7 +694,7 @@ where S: ShareChain
         for addr in &payload.public_addresses() {
             self.swarm.add_peer_address(peer, addr.clone());
         }
-        let (add_status, last_sync_attempt) = self.network_peer_store.add(peer, payload).await;
+        let (add_status, _last_sync_attempt) = self.network_peer_store.add(peer, payload).await;
 
         match add_status {
             AddPeerStatus::NewPeer => {

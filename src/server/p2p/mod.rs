@@ -4,8 +4,6 @@
 //! P2p module contains all the peer-to-peer related implementations and communications.
 //! This module uses hardly `libp2p` to communicate between peers efficiently.
 
-use std::time::Duration;
-
 pub use error::*;
 pub use network::*;
 
