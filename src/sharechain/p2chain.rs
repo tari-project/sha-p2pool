@@ -28,7 +28,12 @@ use std::{
 
 use log::{debug, info};
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
+use tari_core::proof_of_work::{
+    lwma_diff::LinearWeightedMovingAverage,
+    AccumulatedDifficulty,
+    Difficulty,
+    DifficultyAdjustment,
+};
 
 use crate::sharechain::{
     error::Error,
@@ -130,7 +135,7 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
-        self.lwma.add_front(block.timestamp, block.target_difficulty);
+        self.lwma.add(block.timestamp, block.target_difficulty);
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
                 AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
@@ -368,7 +373,7 @@ impl P2Chain {
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
                     .expect("Failed to create LWMA");
-                self.lwma.add_front(block.timestamp, block.target_difficulty);
+                let _ = self.lwma.add(block.timestamp, block.target_difficulty);
                 let chain_height = self.get_mut_at_height(block.height).ok_or(Error::BlockLevelNotFound)?;
                 chain_height.chain_block = block.hash.clone();
                 self.cached_shares = None;
@@ -387,8 +392,7 @@ impl P2Chain {
                         let mut_parent_level = self.get_mut_at_height(current_block.height.saturating_sub(1)).unwrap();
                         mut_parent_level.chain_block = current_block.prev_hash.clone();
                         current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
+                        let _ = self.lwma.add(current_block.timestamp, current_block.target_difficulty);
                     } else {
                         if !self.lwma.is_full() {
                             // we still need more blocks to fill up the lwma
@@ -399,8 +403,7 @@ impl P2Chain {
 
                             current_block = nextblock.unwrap().clone();
 
-                            self.lwma
-                                .add_front(current_block.timestamp, current_block.target_difficulty);
+                            let _ = self.lwma.add(current_block.timestamp, current_block.target_difficulty);
                         } else {
                             break;
                         }
@@ -526,8 +529,9 @@ impl P2Chain {
         if new_block_height >= first_index + (self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC) as u64 {
             if self.sync_store.len() > MAX_SYNC_STORE {
                 // lets remove the oldest block
-                let hash = self.sync_store_fifo_list.pop_back().unwrap();
-                self.sync_store.remove(&hash);
+                if let Some(hash) = self.sync_store_fifo_list.pop_back() {
+                    self.sync_store.remove(&hash);
+                }
             }
             let p2_block = block.deref().clone();
             self.sync_store.insert(block_hash.clone(), p2_block);

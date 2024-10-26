@@ -259,9 +259,15 @@ where S: ShareChain
             new_tip_block.fix_hash();
 
             if let Some(miner_data) = response.miner_data.as_mut() {
-                let _ = self
-                    .stats_broadcast
-                    .send_network_difficulty(pow_algo, Difficulty::from_u64(miner_data.target_difficulty).unwrap());
+                match Difficulty::from_u64(miner_data.target_difficulty) {
+                    Ok(diff) => {
+                        let _ = self.stats_broadcast.send_network_difficulty(pow_algo, diff);
+                    },
+                    Err(e) => {
+                        error!(target: LOG_TARGET, "Invalid target difficulty: {e:?}");
+                    },
+                }
+
                 // what happens p2pool difficulty > base chain diff
                 if target_difficulty.as_u64() < miner_data.target_difficulty {
                     miner_data.target_difficulty = target_difficulty.as_u64();

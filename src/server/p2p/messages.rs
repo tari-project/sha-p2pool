@@ -78,7 +78,10 @@ impl PeerInfo {
     }
 
     pub fn public_addresses(&self) -> Vec<Multiaddr> {
-        self.public_addresses.iter().map(|addr| addr.parse().unwrap()).collect()
+        self.public_addresses
+            .iter()
+            .filter_map(|addr| addr.parse().ok())
+            .collect()
     }
 }
 
@@ -97,11 +100,80 @@ impl ShareChainSyncRequest {
     }
 
     pub fn algo(&self) -> PowAlgorithm {
-        PowAlgorithm::try_from(self.algo).unwrap()
+        PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
     }
 
     pub fn missing_blocks(&self) -> &[(u64, FixedHash)] {
         &self.missing_blocks
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatchUpSyncRequest {
+    algo: u64,
+    i_have: Vec<(u64, FixedHash)>,
+}
+
+impl CatchUpSyncRequest {
+    pub fn new(algo: PowAlgorithm, i_have: Vec<(u64, FixedHash)>) -> Self {
+        Self {
+            algo: algo.as_u64(),
+            i_have,
+        }
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
+    }
+
+    pub fn i_have(&self) -> &[(u64, FixedHash)] {
+        &self.i_have
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatchUpSyncResponse {
+    version: u64,
+    peer_id: PeerId,
+    algo: u64,
+    blocks: Vec<P2Block>,
+    // the tip is used to work out if we should continuing syncing from them
+    tip: (u64, FixedHash),
+}
+
+impl CatchUpSyncResponse {
+    pub fn new(algo: PowAlgorithm, peer_id: PeerId, blocks: &[Arc<P2Block>], tip: (u64, FixedHash)) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            algo: algo.as_u64(),
+            peer_id,
+            blocks: blocks.iter().map(|block| (**block).clone()).collect(),
+            tip,
+        }
+    }
+
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
+    }
+
+    pub fn tip_hash(&self) -> &FixedHash {
+        &self.tip.1
+    }
+
+    pub fn tip_height(&self) -> u64 {
+        self.tip.0
+    }
+
+    pub fn into_blocks(self) -> Vec<P2Block> {
+        let mut blocks = self.blocks;
+        for block in &mut blocks {
+            block.verified = false;
+        }
+        blocks
     }
 }
 
@@ -135,7 +207,7 @@ impl NotifyNewTipBlock {
     }
 
     pub fn algo(&self) -> PowAlgorithm {
-        PowAlgorithm::try_from(self.algo).unwrap()
+        PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
     }
 }
 
@@ -162,7 +234,7 @@ impl ShareChainSyncResponse {
     }
 
     pub fn algo(&self) -> PowAlgorithm {
-        PowAlgorithm::try_from(self.algo).unwrap()
+        PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
     }
 
     pub fn into_blocks(self) -> Vec<P2Block> {

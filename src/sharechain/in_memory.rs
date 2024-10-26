@@ -18,6 +18,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 use super::{
     MAIN_REWARD_SHARE,
     MAX_BLOCKS_COUNT,
+    MAX_BLOCKS_PER_INITIAL_SYNC,
     MIN_RANDOMX_SCALING_FACTOR,
     MIN_SHA3X_SCALING_FACTOR,
     SHARE_WINDOW,
@@ -513,26 +514,26 @@ impl ShareChain for InMemoryShareChain {
                 excluded_uncles.push(uncle.1.clone());
                 continue;
             }
-            let level = chain_read_lock.level_at_height(uncle.0).unwrap();
-
-            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
-                let parent = match chain_read_lock.get_parent_block(uncle_block) {
-                    Some(parent) => parent,
-                    None => {
+            if let Some(level) = chain_read_lock.level_at_height(uncle.0) {
+                if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                    let parent = match chain_read_lock.get_parent_block(uncle_block) {
+                        Some(parent) => parent,
+                        None => {
+                            excluded_uncles.push(uncle.1.clone());
+                            continue;
+                        },
+                    };
+                    if chain_read_lock
+                        .level_at_height(parent.height)
+                        .ok_or(Error::BlockLevelNotFound)?
+                        .chain_block !=
+                        parent.hash
+                    {
                         excluded_uncles.push(uncle.1.clone());
-                        continue;
-                    },
-                };
-                if chain_read_lock
-                    .level_at_height(parent.height)
-                    .ok_or(Error::BlockLevelNotFound)?
-                    .chain_block !=
-                    parent.hash
-                {
+                    }
+                } else {
                     excluded_uncles.push(uncle.1.clone());
                 }
-            } else {
-                excluded_uncles.push(uncle.1.clone());
             }
         }
 
@@ -554,7 +555,7 @@ impl ShareChain for InMemoryShareChain {
 
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
         let p2_chain_read_lock = self.p2_chain.read().await;
-        let mut blocks = Vec::new();
+        let mut blocks = Vec::with_capacity(requested_blocks.len());
 
         for block in requested_blocks {
             if let Some(level) = p2_chain_read_lock.level_at_height(block.0) {
@@ -570,6 +571,25 @@ impl ShareChain for InMemoryShareChain {
             }
         }
         Ok(blocks)
+    }
+
+    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
+        let p2_chain_read = self.p2_chain.read().await;
+
+        // Assume their blocks are in order highest first.
+        let mut split_height = 0;
+
+        // Go back and find the split in the chain
+        for their_block in their_blocks {
+            if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
+                if let Some(block) = level.blocks.get(&their_block.1) {
+                    split_height = block.height;
+                }
+            }
+        }
+
+        self.all_blocks(Some(split_height), 0, MAX_BLOCKS_PER_INITIAL_SYNC)
+            .await
     }
 
     async fn hash_rate(&self) -> Result<BigUint, Error> {
@@ -663,12 +683,30 @@ impl ShareChain for InMemoryShareChain {
     }
 
     // For debugging only
-    async fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+    async fn all_blocks(
+        &self,
+        start_height: Option<u64>,
+        page: usize,
+        page_size: usize,
+    ) -> Result<Vec<Arc<P2Block>>, Error> {
         let chain_read_lock = self.p2_chain.read().await;
-        let mut res = Vec::new();
+        let mut res = Vec::with_capacity(page_size);
+        let skip = page * page_size;
+        let mut num_skipped = 0;
+        // TODO: This is very inefficient, we should refactor this.
         for level in &chain_read_lock.levels {
+            if level.height < start_height.unwrap_or(0) {
+                continue;
+            }
             for block in level.blocks.values() {
+                if num_skipped < skip {
+                    num_skipped += 1;
+                    continue;
+                }
                 res.push(block.clone());
+                if res.len() >= page_size {
+                    break;
+                }
             }
         }
         Ok(res)

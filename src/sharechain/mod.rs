@@ -57,6 +57,8 @@ pub const BLOCK_TARGET_TIME: u64 = 10;
 pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 5; // i.e. 1/5 of the minimum difficulty
 pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1; // i.e. 1/5 of the minimum difficulty
 
+pub const MAX_BLOCKS_PER_INITIAL_SYNC: usize = 20;
+
 pub mod error;
 pub mod in_memory;
 pub mod p2block;
@@ -125,6 +127,8 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Returns the requested blocks from this chain
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
 
+    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
+
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).
     /// Returning number is the result in hash/second.
@@ -135,7 +139,12 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 
-    async fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
+    async fn all_blocks(
+        &self,
+        start_height: Option<u64>,
+        page: usize,
+        page_size: usize,
+    ) -> Result<Vec<Arc<P2Block>>, Error>;
 
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
 }
