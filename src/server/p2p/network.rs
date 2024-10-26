@@ -462,16 +462,6 @@ where S: ShareChain
         // get peer info
         let peer_info_squad_raw: Vec<u8> = self.create_peer_info(public_addresses).await?.try_into()?;
 
-        // broadcast peer info to network
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(
-                IdentTopic::new(Self::network_topic(PEER_INFO_TOPIC)),
-                peer_info_squad_raw.clone(),
-            )
-            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
-
         // broadcast peer info to squad
         self.swarm
             .behaviour_mut()
