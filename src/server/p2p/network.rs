@@ -1169,7 +1169,6 @@ where S: ShareChain
         if blocks.is_empty() {
             return;
         }
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
