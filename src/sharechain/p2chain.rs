@@ -130,7 +130,7 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
-        self.lwma.add_front(block.timestamp, block.target_difficulty);
+        self.lwma.add_back(block.timestamp, block.target_difficulty);
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
                 AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
@@ -643,7 +643,7 @@ mod test {
     use tari_common_types::types::BlockHash;
     use tari_core::{
         blocks::{Block, BlockHeader},
-        proof_of_work::Difficulty,
+        proof_of_work::{Difficulty, DifficultyAdjustment},
         transactions::aggregated_body::AggregateBody,
     };
     use tari_utilities::epoch_time::EpochTime;
@@ -1306,5 +1306,80 @@ mod test {
             }
         }
         assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 100);
+    }
+
+    #[test]
+    fn difficulty_go_up() {
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut timestamp = EpochTime::now();
+        let mut target_difficulty = Difficulty::min();
+
+        for i in 0..30 {
+            tari_block.header.nonce = i;
+            timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
+            let prev_target_difficulty = target_difficulty;
+            target_difficulty = chain
+                .lwma
+                .get_difficulty()
+                .unwrap_or(Difficulty::from_u64(100000).unwrap());
+            if i > 1 {
+                assert!(target_difficulty > prev_target_difficulty);
+            }
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(timestamp)
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_difficulty)
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+            assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
+        }
+    }
+    #[test]
+    fn difficulty_go_down() {
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut timestamp = EpochTime::now();
+        let mut target_difficulty = Difficulty::min();
+
+        for i in 0..30 {
+            tari_block.header.nonce = i;
+            timestamp = timestamp.checked_add(EpochTime::from(15)).unwrap();
+            let prev_target_difficulty = target_difficulty;
+            target_difficulty = chain
+                .lwma
+                .get_difficulty()
+                .unwrap_or(Difficulty::from_u64(100000).unwrap());
+            if i > 1 {
+                assert!(target_difficulty < prev_target_difficulty);
+            }
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(timestamp)
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_difficulty)
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+            assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
+        }
     }
 }
