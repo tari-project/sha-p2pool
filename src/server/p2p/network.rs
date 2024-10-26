@@ -1273,6 +1273,9 @@ where S: ShareChain
             for _ in 0..CATCH_UP_SYNC_BLOCKS_IN_I_HAVE {
                 if let Some(block) = share_chain.get_blocks(&[(height, hash)]).await?.first() {
                     i_have_blocks.push((height, block.hash.clone()));
+                    if height == 0 {
+                        break;
+                    }
                     height = block.height - 1;
                     hash = block.hash;
                 } else {

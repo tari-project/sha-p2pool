@@ -373,7 +373,7 @@ impl P2Chain {
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
                     .expect("Failed to create LWMA");
-                let _ = self.lwma.add(block.timestamp, block.target_difficulty);
+                let _ = self.lwma.add_front(block.timestamp, block.target_difficulty);
                 let chain_height = self.get_mut_at_height(block.height).ok_or(Error::BlockLevelNotFound)?;
                 chain_height.chain_block = block.hash.clone();
                 self.cached_shares = None;
@@ -392,7 +392,9 @@ impl P2Chain {
                         let mut_parent_level = self.get_mut_at_height(current_block.height.saturating_sub(1)).unwrap();
                         mut_parent_level.chain_block = current_block.prev_hash.clone();
                         current_block = nextblock.unwrap().clone();
-                        let _ = self.lwma.add(current_block.timestamp, current_block.target_difficulty);
+                        let _ = self
+                            .lwma
+                            .add_front(current_block.timestamp, current_block.target_difficulty);
                     } else {
                         if !self.lwma.is_full() {
                             // we still need more blocks to fill up the lwma
@@ -403,7 +405,9 @@ impl P2Chain {
 
                             current_block = nextblock.unwrap().clone();
 
-                            let _ = self.lwma.add(current_block.timestamp, current_block.target_difficulty);
+                            let _ = self
+                                .lwma
+                                .add_front(current_block.timestamp, current_block.target_difficulty);
                         } else {
                             break;
                         }
