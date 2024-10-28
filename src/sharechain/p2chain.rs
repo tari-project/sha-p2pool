@@ -26,7 +26,7 @@ use std::{
     sync::Arc,
 };
 
-use log::{debug, info};
+use log::{debug, error, info};
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{
     lwma_diff::LinearWeightedMovingAverage,
@@ -60,7 +60,7 @@ pub struct P2Chain {
     total_accumulated_tip_difficulty: AccumulatedDifficulty,
     current_tip: u64,
     pub lwma: LinearWeightedMovingAverage,
-    sync_store: HashMap<FixedHash, P2Block>,
+    sync_store: HashMap<FixedHash, Arc<P2Block>>,
     sync_store_fifo_list: VecDeque<FixedHash>,
 }
 
@@ -80,7 +80,7 @@ impl P2Chain {
         level.blocks.get(hash)
     }
 
-    pub fn get_mut_at_height(&mut self, height: u64) -> Option<&mut P2ChainLevel> {
+    pub fn level_at_height_mut(&mut self, height: u64) -> Option<&mut P2ChainLevel> {
         let tip = self.levels.front()?.height;
         if height > tip {
             return None;
@@ -154,7 +154,7 @@ impl P2Chain {
                 }
             }
         }
-        let level = self.get_mut_at_height(new_height).ok_or(Error::BlockLevelNotFound)?;
+        let level = self.level_at_height_mut(new_height).ok_or(Error::BlockLevelNotFound)?;
         level.chain_block = hash;
         self.current_tip = level.height;
 
@@ -245,23 +245,33 @@ impl P2Chain {
         // do we know of the parent
         // we should not check the chain start for parents
         if block.prev_hash != FixedHash::zero() && block.height != 0 {
+            let mut is_parent_missing = false;
+            let mut is_parent_in_main_chain = false;
             if self
                 .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
                 .is_none()
             {
+                is_parent_missing = true;
                 // we dont know the parent
                 missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
+            } else {
+                is_parent_in_main_chain = self
+                    .level_at_height(new_block_height.saturating_sub(1))
+                    .map(|level| level.chain_block == block.prev_hash)
+                    .unwrap_or(false);
             }
             // now lets check the uncles
             for uncle in block.uncles.iter() {
                 if self.get_block_at_height(uncle.0, &uncle.1).is_some() {
-                    // Uncle cannot be in the main chain
-                    if let Some(level) = self.level_at_height(uncle.0) {
-                        if level.chain_block == uncle.1 {
-                            return Err(Error::UncleInMainChain {
-                                height: uncle.0,
-                                hash: uncle.1.clone(),
-                            });
+                    // Uncle cannot be in the main chain if the parent is in the main chain
+                    if !is_parent_missing && is_parent_in_main_chain {
+                        if let Some(level) = self.level_at_height(uncle.0) {
+                            if level.chain_block == uncle.1 {
+                                return Err(Error::UncleInMainChain {
+                                    height: uncle.0,
+                                    hash: uncle.1.clone(),
+                                });
+                            }
                         }
                     }
                 } else {
@@ -273,16 +283,52 @@ impl P2Chain {
         // if !missing_parents.is_empty() {
         //     return Err(Error::BlockParentDoesNotExist { missing_parents });
         // }
-        drop(block);
         if missing_parents.is_empty() {
             // lets mark as verified
             let level = self
-                .get_mut_at_height(new_block_height)
+                .level_at_height(new_block_height)
                 .ok_or(Error::BlockLevelNotFound)?;
-            let mut block = level.blocks.get(&hash).ok_or(Error::BlockNotFound)?.deref().clone();
-            // lets replace this
-            block.verified = true;
-            let _ = level.blocks.insert(hash, Arc::new(block));
+            let block = level.blocks.get(&hash).ok_or(Error::BlockNotFound)?;
+            // 1. Block can only be verified once
+            // 2. Block is verified it if is the last block in the chain AND we are full.
+            // 3. otherwise, block can only be verified it's parents are verified and if it's uncles are verified
+
+            if !block.verified {
+                let verified = true;
+                // TODO: implement a block becomes verified if it is the last block in the chain
+
+                // if self.is_share_window_full() && self.last_share_window_block() == hash {
+                //     // we are full and this is the last block in the chain
+                //     verified = true;
+                // } else {
+                // we are not full or this is not the last block in the chain
+
+                // TODO: implement verified only if parents are verified
+                // verified = true;
+                // if block.height != 0 {
+                //     // we are not the first block
+                //     if let Some(parent) = self.get_parent_block(block) {
+                //         if !parent.verified {
+                //             verified = false;
+                //         }
+                //     }
+                // }
+                // for uncle in block.uncles.iter() {
+                //     if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                //         if !uncle_block.verified {
+                //             verified = false;
+                //         }
+                //     }
+                // }
+                // }
+                let mut block = block.deref().clone();
+                // lets replace this
+                block.verified = verified;
+                let level = self
+                    .level_at_height_mut(new_block_height)
+                    .ok_or(Error::BlockLevelNotFound)?;
+                let _ = level.blocks.insert(hash, Arc::new(block));
+            }
         }
 
         // edge case for first block
@@ -294,28 +340,33 @@ impl P2Chain {
         }
 
         // is this block part of the main chain?
+        let new_block = self
+            .get_block_at_height(new_block_height, &hash)
+            .ok_or(Error::BlockNotFound)?
+            .clone();
 
-        if self.get_tip().is_some() &&
-            self.get_tip().unwrap().chain_block ==
-                self.get_block_at_height(new_block_height, &hash)
-                    .ok_or(Error::BlockNotFound)?
-                    .prev_hash
-        {
-            // easy this builds on the tip
-            info!(target: LOG_TARGET, "[{:?}] Block building on tip: {:?}", algo, new_block_height);
-            self.set_new_tip(new_block_height, hash)?;
-            new_tip = true;
-        } else {
-            debug!(target: LOG_TARGET, "[{:?}] Block is not building on tip: {:?}", algo, new_block_height);
-            // lets check if we need to reorg here
-            let block = self
-                .get_block_at_height(new_block_height, &hash)
-                .ok_or(Error::BlockNotFound)?
-                .clone();
-            let mut total_work = AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
+        if self.get_tip().is_some() && self.get_tip().unwrap().chain_block == new_block.prev_hash {
+            // Can only become the new tip if it is verified
+            if new_block.verified {
+                // easy this builds on the tip
+                info!(target: LOG_TARGET, "[{:?}] New block added to tip, and is now the new tip: {:?}", algo, new_block_height);
+                self.set_new_tip(new_block_height, hash)?;
+                new_tip = true;
+            }
+        } else if new_block.verified {
+            let mut all_blocks_verified = true;
+            debug!(target: LOG_TARGET, "[{:?}] New block is not on the tip, checking for reorg: {:?}", algo, new_block_height);
+
+            let mut total_work = AccumulatedDifficulty::from_u128(new_block.target_difficulty.as_u64() as u128)
                 .expect("Difficulty will always fit into accumulated difficulty");
-            for uncle in block.uncles.iter() {
+
+            for uncle in new_block.uncles.iter() {
                 if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                    if !uncle_block.verified {
+                        // we cannot count unverified blocks
+                        all_blocks_verified = false;
+                        break;
+                    }
                     total_work = total_work
                         .checked_add_difficulty(uncle_block.target_difficulty)
                         .ok_or(Error::DifficultyOverflow)?;
@@ -323,13 +374,11 @@ impl P2Chain {
                     missing_parents.push((uncle.0, uncle.1.clone()));
                 }
             }
-            // if !missing_parents.is_empty() {
-            //     return Err(Error::BlockParentDoesNotExist { missing_parents });
-            // }
-            let mut current_counting_block = block.clone();
+            let mut current_counting_block = new_block.clone();
             let mut counter = 1;
             while let Some(parent) = self.get_parent_block(&current_counting_block) {
                 if !parent.verified {
+                    all_blocks_verified = false;
                     // we cannot count unverified blocks
                     break;
                 }
@@ -343,6 +392,7 @@ impl P2Chain {
                             .checked_add_difficulty(uncle_block.target_difficulty)
                             .ok_or(Error::DifficultyOverflow)?;
                         if !uncle_block.verified {
+                            all_blocks_verified = false;
                             // we cannot count unverified blocks
                             break;
                         }
@@ -366,6 +416,7 @@ impl P2Chain {
             }
             if total_work > self.total_accumulated_tip_difficulty &&
                 counter >= self.share_window &&
+                all_blocks_verified &&
                 missing_parents.is_empty()
             {
                 new_tip = true;
@@ -373,23 +424,32 @@ impl P2Chain {
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
                     .expect("Failed to create LWMA");
-                let _ = self.lwma.add_front(block.timestamp, block.target_difficulty);
-                let chain_height = self.get_mut_at_height(block.height).ok_or(Error::BlockLevelNotFound)?;
-                chain_height.chain_block = block.hash.clone();
+                let _ = self.lwma.add_front(new_block.timestamp, new_block.target_difficulty);
+                let chain_height = self
+                    .level_at_height_mut(new_block.height)
+                    .ok_or(Error::BlockLevelNotFound)?;
+                chain_height.chain_block = new_block.hash.clone();
                 self.cached_shares = None;
-                self.current_tip = block.height;
+                self.current_tip = new_block.height;
                 // lets fix the chain
-                let mut current_block = block;
+                let mut current_block = new_block;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                     let parent_level = (self.level_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
                     if current_block.prev_hash != parent_level.chain_block {
                         // safety check
                         let nextblock = parent_level.blocks.get(&current_block.prev_hash);
                         if nextblock.is_none() {
-                            return Err(Error::BlockNotFound);
+                            error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
+                            panic!(
+                                "FATAL: Reorging (block in chain) failed because parent block was not found and chain \
+                                 data is corrupted."
+                            );
+                            // return Err(Error::BlockNotFound);
                         }
                         // fix the main chain
-                        let mut_parent_level = self.get_mut_at_height(current_block.height.saturating_sub(1)).unwrap();
+                        let mut_parent_level = self
+                            .level_at_height_mut(current_block.height.saturating_sub(1))
+                            .unwrap();
                         mut_parent_level.chain_block = current_block.prev_hash.clone();
                         current_block = nextblock.unwrap().clone();
                         let _ = self
@@ -400,7 +460,11 @@ impl P2Chain {
                             // we still need more blocks to fill up the lwma
                             let nextblock = parent_level.blocks.get(&current_block.prev_hash);
                             if nextblock.is_none() {
-                                return Err(Error::BlockNotFound);
+                                error!(target: LOG_TARGET, "FATAL: Reorging (block not in chain) failed because parent block was not found and chain data is corrupted.");
+                                panic!(
+                                    "FATAL: Reorging (block not in chain) failed because parent block was not found \
+                                     and chain data is corrupted."
+                                );
                             }
 
                             current_block = nextblock.unwrap().clone();
@@ -447,7 +511,7 @@ impl P2Chain {
         }
 
         if !next_level_data.is_empty() {
-            debug!(target: LOG_TARGET, "[{:?}] Found block building on top of block: {:?}", algo, new_block_height);
+            debug!(target: LOG_TARGET, "[{:?}] Found link in chain with other blocks we have: {:?}", algo, new_block_height);
             // we have a parent here
             return Ok((new_tip, missing_parents, next_level_data));
         }
@@ -457,7 +521,7 @@ impl P2Chain {
         Ok((new_tip, missing_parents, next_level_data))
     }
 
-    fn add_block(&mut self, block: Arc<P2Block>) -> Result<bool, Error> {
+    fn add_block_inner(&mut self, block: Arc<P2Block>) -> Result<bool, Error> {
         let new_block_height = block.height;
         let block_hash = block.hash.clone();
         // edge case no current chain, lets just add
@@ -468,7 +532,14 @@ impl P2Chain {
         }
 
         // now lets add the block
-        match self.get_mut_at_height(new_block_height) {
+        // The process is:
+        // 1. If the height exists in level, then add the block to the level
+        // 2. Else, we need to create a new level.
+        //   a. If the height is higher than the current front, add empty levels so that there are no gaps
+        //   b. Then add the level
+        //   c. If the height is lower than the back and the chain is full, don't do anything
+        //   d. Otherwise, add empty levels at the back until we reach the block.
+        match self.level_at_height_mut(new_block_height) {
             Some(level) => {
                 level.add_block(block)?;
                 return self.verify_chain(new_block_height, block_hash);
@@ -537,8 +608,7 @@ impl P2Chain {
                     self.sync_store.remove(&hash);
                 }
             }
-            let p2_block = block.deref().clone();
-            self.sync_store.insert(block_hash.clone(), p2_block);
+            self.sync_store.insert(block_hash.clone(), block.clone());
             self.sync_store_fifo_list.push_front(block_hash.clone());
 
             // lets see how long a chain we can build with this block
@@ -566,8 +636,8 @@ impl P2Chain {
             if blocks_to_add.len() > 150 {
                 // we have a potential long chain, lets see if we can do anything with it.
                 for block in blocks_to_add.iter() {
-                    let p2_block = Arc::new(self.sync_store.get(block).ok_or(Error::BlockNotFound)?.clone());
-                    match self.add_block(p2_block) {
+                    let p2_block = self.sync_store.get(block).ok_or(Error::BlockNotFound)?.clone();
+                    match self.add_block_inner(p2_block) {
                         Err(Error::BlockParentDoesNotExist {
                             missing_parents: mut missing,
                         }) => missing_parents.append(&mut missing),
@@ -579,19 +649,19 @@ impl P2Chain {
                 }
             }
 
-            if self
-                .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
-                .is_none()
-            {
-                // we dont know the parent
+            let mut is_parent_in_main_chain = false;
+            if let Some(parent_block) = self.get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash) {
+                is_parent_in_main_chain =
+                    self.level_at_height(parent_block.height).unwrap().chain_block == block.prev_hash;
+            } else {
                 missing_parents.push((new_block_height.saturating_sub(1), block.prev_hash.clone()));
             }
             // now lets check the uncles
             for uncle in block.uncles.iter() {
                 if self.get_block_at_height(uncle.0, &uncle.1).is_some() {
-                    // Uncle cannot be in the main chain
                     if let Some(level) = self.level_at_height(uncle.0) {
-                        if level.chain_block == uncle.1 {
+                        if level.chain_block == uncle.1 && is_parent_in_main_chain {
+                            // Uncle in main chain is ok if this block is not on the main chain
                             return Err(Error::UncleInMainChain {
                                 height: uncle.0,
                                 hash: uncle.1.clone(),
@@ -616,7 +686,7 @@ impl P2Chain {
             });
         }
 
-        self.add_block(block)
+        self.add_block_inner(block)
     }
 
     pub fn get_parent_block(&self, block: &P2Block) -> Option<&Arc<P2Block>> {
@@ -644,10 +714,42 @@ impl P2Chain {
         let current_chain_length = self.current_tip.saturating_sub(first_index);
         usize::try_from(current_chain_length).expect("32 bit systems not supported")
     }
+
+    #[cfg(test)]
+    fn assert_share_window_verified(&self) {
+        let tip = self.get_tip().unwrap();
+        let mut current_block = tip.block_in_main_chain().unwrap().clone();
+        if !current_block.verified {
+            panic!("Tip block is not verified");
+        }
+        let mut counter = 1;
+        while let Some(parent) = self.get_parent_block(&current_block) {
+            if !parent.verified {
+                panic!("Parent block is not verified");
+            }
+            current_block = parent.clone();
+            for uncle in parent.uncles.iter() {
+                if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                    if !uncle_block.verified {
+                        panic!("Uncle block is not verified");
+                    }
+                }
+            }
+            counter += 1;
+            if counter >= self.share_window {
+                break;
+            }
+            if parent.height == 0 {
+                // edge case if there is less than the lwa size or share window in chain
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use digest::crypto_common::rand_core::block;
     use tari_common_types::types::BlockHash;
     use tari_core::{
         blocks::{Block, BlockHeader},
@@ -748,6 +850,9 @@ mod test {
 
         let level = chain.get_tip().unwrap();
         assert_eq!(level.height, 5);
+
+        // the whole chain must be verified
+        chain.assert_share_window_verified();
     }
 
     #[test]
@@ -790,6 +895,7 @@ mod test {
 
         let level = chain.get_tip().unwrap();
         assert_eq!(level.height, 6);
+        chain.assert_share_window_verified();
     }
 
     #[test]
@@ -1389,5 +1495,106 @@ mod test {
             assert_eq!(level.height, i);
             assert_eq!(level.block_in_main_chain().unwrap().original_block.header.nonce, i);
         }
+    }
+
+    #[test]
+    fn test_block_cannot_become_tip_if_missing_uncles() {
+        // This test adds a block to the tip, and then adds second block,
+        // but has an uncle that is not in the chain. This test checks that
+        // the tip is not set to the new block, because the uncle is missing.
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+
+        let block1 = P2Block::builder()
+            .with_height(0)
+            .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+            .with_prev_hash(prev_hash)
+            .build();
+        chain.add_block_to_chain(block1.clone()).unwrap();
+
+        assert_eq!(chain.current_tip, 0);
+        let block1_uncle = P2Block::builder()
+            .with_height(0)
+            .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+            .with_prev_hash(prev_hash)
+            .build();
+
+        let block2 = P2Block::builder()
+            .with_height(1)
+            .with_prev_hash(block1.hash)
+            .with_uncles(vec![(0, block1_uncle.hash)])
+            .build();
+        chain.add_block_to_chain(block2).unwrap_err();
+        // The tip should still be block 1 because block 2 is missing an uncle
+        assert_eq!(chain.current_tip, 0);
+    }
+
+    #[test]
+    fn test_only_reorg_to_chain_if_it_is_verified() {
+        let mut chain = P2Chain::new_empty(10, 5);
+        let prev_hash = BlockHash::zero();
+
+        let block = P2Block::builder()
+            .with_height(0)
+            .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+            .with_prev_hash(prev_hash)
+            .build();
+
+        chain.add_block_to_chain(block.clone()).unwrap();
+        let block2 = P2Block::builder()
+            .with_height(1)
+            .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+            .with_prev_hash(block.hash)
+            .build();
+
+        chain.add_block_to_chain(block2.clone()).unwrap();
+
+        let missing_uncle = P2Block::builder()
+            .with_height(0)
+            .with_target_difficulty(diff(111))
+            .with_prev_hash(prev_hash)
+            .build();
+
+        let unverified_uncle = P2Block::builder()
+            .with_height(1)
+            .with_target_difficulty(Difficulty::from_u64(100).unwrap()) // otherwise hash is the same
+            .with_prev_hash(missing_uncle.hash)
+            .build();
+
+        let block2b = P2Block::builder()
+            .with_height(1)
+            .with_target_difficulty(Difficulty::from_u64(11).unwrap())
+            .with_prev_hash(block.hash)
+            // .with_uncles(vec![(0, missing_uncle.hash)])
+            .build();
+
+        let block3b = P2Block::builder()
+            .with_height(2)
+            .with_target_difficulty(diff(100))
+            .with_prev_hash(block2b.hash)
+            .with_uncles(vec![(0, unverified_uncle.hash)])
+            .build();
+
+        assert_eq!(chain.current_tip, 1);
+        assert_eq!(chain.get_tip().unwrap().chain_block, block2.hash);
+
+        chain.add_block_to_chain(block3b).unwrap_err();
+
+        // Check that we don't reorg
+        assert_eq!(chain.current_tip, 1);
+        assert_eq!(chain.get_tip().unwrap().chain_block, block2.hash);
+
+        chain.add_block_to_chain(unverified_uncle).unwrap_err();
+
+        // Now add block 2b
+        chain.add_block_to_chain(block2b.clone()).unwrap_err();
+        // But chain tip should not be 3b because it is not verified
+        assert_eq!(chain.current_tip, 1);
+        assert_eq!(chain.get_tip().unwrap().chain_block, block2b.hash);
+    }
+
+    fn diff(i: u64) -> Difficulty {
+        Difficulty::from_u64(i).unwrap()
     }
 }

@@ -127,7 +127,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Returns the requested blocks from this chain
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
 
-    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
+    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)], limit: usize) -> Result<Vec<Arc<P2Block>>, Error>;
 
     /// Returns the estimated hash rate of the whole chain
     /// (including all blocks and not just strongest chain).

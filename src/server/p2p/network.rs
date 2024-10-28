@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
+use tari_utilities::hex::Hex;
 use convert_case::{Case, Casing};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
@@ -60,7 +60,6 @@ use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
-use tari_utilities::hex::Hex;
 use tokio::{
     fs::File,
     io::{self, AsyncReadExt, AsyncWriteExt},
@@ -1127,7 +1126,7 @@ where S: ShareChain
             PowAlgorithm::Sha3x => &self.share_chain_sha3x,
         };
 
-        let blocks = match share_chare.request_sync(request.i_have()).await {
+        let blocks = match share_chare.request_sync(request.i_have(), 20).await {
             Ok(blocks) => blocks,
             Err(error) => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get blocks from height: {error:?}");
@@ -1163,7 +1162,7 @@ where S: ShareChain
         let their_tip_hash = response.tip_hash().clone();
         let their_height = response.tip_height();
         let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
 
       
         if blocks.is_empty() {
@@ -1433,7 +1432,7 @@ where S: ShareChain
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
 
         let mut debug_chain_graph = if self.config.debug_print_chain {
-            tokio::time::interval(Duration::from_secs(30))
+            tokio::time::interval(Duration::from_secs(60))
         } else {
             // only once a day, but even then will be skipped
             tokio::time::interval(Duration::from_secs(60 * 60 * 24))
@@ -1591,8 +1590,11 @@ where S: ShareChain
 
         // file.write(b"@startuml\n").unwrap();
         file.write(b"digraph B {\n").unwrap();
+        file.write(b"node [shape=\"box\"]\n").unwrap();
         if let Some(tip) = chain.get_tip().await.unwrap() {
             file.write(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
+                .unwrap();
+            file.write(format!("B{} [style=\"bold,filled\" penwidth=2]\n", &tip.1.to_hex()[0..8]).as_bytes())
                 .unwrap();
         }
         let formatter = human_format::Formatter::new();

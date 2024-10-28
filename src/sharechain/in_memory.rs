@@ -297,7 +297,7 @@ impl ShareChain for InMemoryShareChain {
         }
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let height = block.height;
-        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo,height );
+        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block via submit (grpc): {:?}", self.pow_algo,height );
         let res = self
             .submit_block_with_lock(
                 &mut p2_chain_write_lock,
@@ -331,9 +331,13 @@ impl ShareChain for InMemoryShareChain {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let mut new_tip = false;
 
-        let blocks = blocks.to_vec();
+        let mut blocks = blocks.to_vec();
         let mut known_blocks_incoming = Vec::new();
         let mut missing_parents = HashMap::new();
+        if !blocks.is_sorted_by_key(|block| block.height) {
+            blocks.sort_by(|a, b| a.height.cmp(&b.height));
+            //  return Err(Error::BlockValidation("Blocks are not sorted by height".to_string()));
+        }
         for block in blocks.iter() {
             known_blocks_incoming.push(block.hash.clone());
         }
@@ -343,7 +347,7 @@ impl ShareChain for InMemoryShareChain {
                 return Err(Error::BlockValidation("Block version is too low".to_string()));
             }
             let height = block.height;
-            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block: {:?}", self.pow_algo, height);
+            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
@@ -573,7 +577,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(blocks)
     }
 
-    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
+    async fn request_sync(&self, their_blocks: &[(u64, FixedHash)], limit: usize) -> Result<Vec<Arc<P2Block>>, Error> {
         let p2_chain_read = self.p2_chain.read().await;
 
         // Assume their blocks are in order highest first.
@@ -588,8 +592,7 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
-        self.all_blocks(Some(split_height), 0, MAX_BLOCKS_PER_INITIAL_SYNC)
-            .await
+        self.all_blocks(Some(split_height), 0, limit).await
     }
 
     async fn hash_rate(&self) -> Result<BigUint, Error> {
@@ -705,7 +708,7 @@ impl ShareChain for InMemoryShareChain {
                 }
                 res.push(block.clone());
                 if res.len() >= page_size {
-                    break;
+                    return Ok(res);
                 }
             }
         }
