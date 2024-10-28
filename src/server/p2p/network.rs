@@ -368,7 +368,7 @@ where S: ShareChain
                     // .max_ihave_length(1000) // Default is 5000
                     // .max_messages_per_rpc(Some(1000))
                     // We get a lot of messages, so 
-                    .duplicate_cache_time(Duration::from_secs(1))
+                    //.duplicate_cache_time(Duration::from_secs(1))
                     .build()
                     .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
                 let gossipsub = gossipsub::Behaviour::new(

@@ -71,7 +71,6 @@ pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<
 }
 
 pub(crate) async fn handle_chain(State(_state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
-    let _timer = std::time::Instant::now();
     // let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
     //     error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
     //     StatusCode::INTERNAL_SERVER_ERROR
