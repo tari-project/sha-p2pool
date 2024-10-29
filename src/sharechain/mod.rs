@@ -54,8 +54,8 @@ pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 
 pub const BLOCK_TARGET_TIME: u64 = 10;
 
-pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 5; // i.e. 1/5 of the minimum difficulty
-pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1; // i.e. 1/5 of the minimum difficulty
+pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 1;
+pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1;
 
 pub const MAX_BLOCKS_PER_INITIAL_SYNC: usize = 20;
 
@@ -144,6 +144,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         start_height: Option<u64>,
         page: usize,
         page_size: usize,
+        main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, Error>;
 
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;

@@ -588,12 +588,15 @@ impl ShareChain for InMemoryShareChain {
         for their_block in their_blocks {
             if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
                 if let Some(block) = level.blocks.get(&their_block.1) {
-                    split_height = block.height;
+                    // Only split if the block is in the main chain
+                    if level.chain_block == block.hash {
+                        split_height = block.height;
+                    }
                 }
             }
         }
 
-        self.all_blocks(Some(split_height), 0, limit).await
+        self.all_blocks(Some(split_height), 0, limit, true).await
     }
 
     async fn hash_rate(&self) -> Result<BigUint, Error> {
@@ -692,25 +695,60 @@ impl ShareChain for InMemoryShareChain {
         start_height: Option<u64>,
         page: usize,
         page_size: usize,
+        main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, Error> {
         let chain_read_lock = self.p2_chain.read().await;
         let mut res = Vec::with_capacity(page_size);
         let skip = page * page_size;
         let mut num_skipped = 0;
+        let mut num_main_chain_blocks = 0;
         // TODO: This is very inefficient, we should refactor this.
         for level in chain_read_lock.levels.iter().rev() {
             if level.height < start_height.unwrap_or(0) {
                 continue;
             }
+
+            // // First add the block in the main chain
+            // if let Some(block) = level.block_in_main_chain() {
+            //     if num_skipped < skip {
+            //         num_skipped += 1;
+            //         continue;
+            //     }
+            //     res.push(block.clone());
+            //     if res.len() >= page_size {
+            //         return Ok(res);
+            //     }
+
+            // }
+
             for block in level.blocks.values() {
-                if num_skipped < skip {
-                    num_skipped += 1;
-                    continue;
+                if block.hash == level.chain_block {
+                    num_main_chain_blocks += 1;
+                    if main_chain_only {
+                        for uncle in &block.uncles {
+                            // num_skipped += 1;
+
+                            // Always include all the uncles, if we have them
+                            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                                // Uncles should never exist in the main chain, so we don't need to worry about
+                                // duplicates
+                                res.push(uncle_block.clone());
+                            }
+                        }
+                    }
                 }
+
                 res.push(block.clone());
-                if res.len() >= page_size {
+                // Always include at least 2 main chain blocks so that if we called
+                // this function with the starting mainchain block we can continue asking for more
+                // blocks
+                if res.len() >= page_size && (!main_chain_only || num_main_chain_blocks >= 2) {
                     return Ok(res);
                 }
+                // if num_skipped < skip {
+                //     num_skipped += 1;
+                //     continue;
+                // }
             }
         }
         Ok(res)

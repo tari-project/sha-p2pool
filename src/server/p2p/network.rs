@@ -647,6 +647,10 @@ where S: ShareChain
                                 self.initiate_direct_peer_exchange(peer).await;
                             }
 
+                            if payload.new_blocks.is_empty() {
+                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", peer);
+                                return;
+                            }
                             // Don't add unless we've already synced.
 
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
@@ -873,13 +877,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, missing_parents: Vec<(u64, FixedHash)>) {
-        // if self.sync_in_progress.load(Ordering::SeqCst) {
-        //     warn!(target: LOG_TARGET, "Sync already in progress...");
-        //     return;
-        // }
-        // self.sync_in_progress.store(true, Ordering::SeqCst);
-
+    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, mut missing_parents: Vec<(u64, FixedHash)>) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
         if self.network_peer_store.is_blacklisted(&peer) {
@@ -893,6 +891,21 @@ where S: ShareChain
         }
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "Sending sync to {} for blocks {}", peer, missing_parents.iter().map(|a| a.0.to_string()).join(", "));
+
+
+        if missing_parents.is_empty() {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "Sync called but with no missing parents.");
+            // panic!("Sync called but with no missing parents.");
+            return;
+        }
+        // Always ask for at least 20 blocks to avoid too many requests
+        if missing_parents.len() < 20 {
+           let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
+            // We checked it's less than 20 above
+            for i in 0..(20 - missing_parents.len()) {
+                missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
+            }
+        };
 
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
         let _outbound_id = self
@@ -1162,9 +1175,7 @@ where S: ShareChain
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
-                let must_continue_sync = share_chain.get_tip().await.inspect_err(|e| 
-                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get tip after sync: {}", e)
-                ).as_ref().map(|tip| tip.unwrap_or_default().1 != their_tip_hash && tip.unwrap_or_default().0 < their_height).unwrap_or(false);
+                let must_continue_sync = last_block_from_them.as_ref().map(|(h, hash)| *h <= their_height).unwrap_or(false);
                 if must_continue_sync && self.network_peer_store.num_catch_ups(&peer).unwrap_or(MAX_CATCH_UP_ATTEMPTS) < MAX_CATCH_UP_ATTEMPTS {
                     dbg!("Must continue sync");
                     dbg!(their_tip_hash);
@@ -1595,7 +1606,7 @@ where S: ShareChain
                 .unwrap();
         }
         let formatter = human_format::Formatter::new();
-        let blocks = chain.all_blocks(None, 0, 10000).await.expect("errored");
+        let blocks = chain.all_blocks(None, 0, 10000, false).await.expect("errored");
         for b in blocks {
             file.write(
                 format!(
