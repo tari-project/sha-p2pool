@@ -670,7 +670,7 @@ where S: ShareChain
                                 }
                                 missing_blocks.push(block.clone());
                             }
-                            self.sync_share_chain(algo, peer, missing_blocks).await;
+                            self.sync_share_chain(algo, peer, missing_blocks, true).await;
                         },
                         Err(error) => {
                             // TODO: elevate to error
@@ -859,7 +859,7 @@ where S: ShareChain
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                    self.sync_share_chain(algo, peer, missing_parents).await;
+                    self.sync_share_chain(algo, peer, missing_parents, false).await;
                     return;
                 },
                 _ => {
@@ -877,7 +877,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, mut missing_parents: Vec<(u64, FixedHash)>) {
+    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, mut missing_parents: Vec<(u64, FixedHash)>, is_from_new_block_notify: bool) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
         if self.network_peer_store.is_blacklisted(&peer) {
@@ -898,8 +898,9 @@ where S: ShareChain
             // panic!("Sync called but with no missing parents.");
             return;
         }
-        // Always ask for at least 20 blocks to avoid too many requests
-        if missing_parents.len() < 20 {
+        // Always ask for at least 20 blocks to avoid too many requests,
+        // Unless it's from new block notify, in which case we'll only want a single block in most cases
+        if !is_from_new_block_notify && missing_parents.len() < 20 {
            let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
             // We checked it's less than 20 above
             for i in 0..(20 - missing_parents.len()) {
@@ -1175,7 +1176,7 @@ where S: ShareChain
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
-                let must_continue_sync = last_block_from_them.as_ref().map(|(h, hash)| *h <= their_height).unwrap_or(false);
+                let must_continue_sync = last_block_from_them.as_ref().map(|(h, hash)| *h < their_height).unwrap_or(false);
                 if must_continue_sync && self.network_peer_store.num_catch_ups(&peer).unwrap_or(MAX_CATCH_UP_ATTEMPTS) < MAX_CATCH_UP_ATTEMPTS {
                     dbg!("Must continue sync");
                     dbg!(their_tip_hash);
@@ -1194,7 +1195,7 @@ where S: ShareChain
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                    self.sync_share_chain(algo, peer, missing_parents).await;
+                    self.sync_share_chain(algo, peer, missing_parents, false).await;
                     return;
                 },
                 _ => {
