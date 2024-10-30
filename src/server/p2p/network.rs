@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tari_utilities::hex::Hex;
+
 use convert_case::{Case, Casing};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
@@ -54,12 +54,12 @@ use log::{
     trace,
     warn,
 };
-use minotari_app_grpc::conversions::peer;
 use serde::{de, Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::PowAlgorithm;
+use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
+use tari_utilities::hex::Hex;
 use tokio::{
     fs::File,
     io::{self, AsyncReadExt, AsyncWriteExt},
@@ -479,9 +479,13 @@ where S: ShareChain
         let share_chain_random_x = self.share_chain_random_x.clone();
         let current_height_sha3x = share_chain_sha3x.tip_height().await.map_err(Error::ShareChain)?;
         let current_height_random_x = share_chain_random_x.tip_height().await.map_err(Error::ShareChain)?;
+        let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
+        let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
         let peer_info_squad_raw = PeerInfo::new(
             current_height_sha3x,
             current_height_random_x,
+            current_pow_sha3x,
+            current_pow_random_x,
             self.config.squad.as_string(),
             public_addresses,
             Some(self.config.user_agent.clone()),
@@ -877,7 +881,13 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, algo: PowAlgorithm, peer: PeerId, mut missing_parents: Vec<(u64, FixedHash)>, is_from_new_block_notify: bool) {
+    async fn sync_share_chain(
+        &mut self,
+        algo: PowAlgorithm,
+        peer: PeerId,
+        mut missing_parents: Vec<(u64, FixedHash)>,
+        is_from_new_block_notify: bool,
+    ) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
         if self.network_peer_store.is_blacklisted(&peer) {
@@ -892,7 +902,6 @@ where S: ShareChain
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "Sending sync to {} for blocks {}", peer, missing_parents.iter().map(|a| a.0.to_string()).join(", "));
 
-
         if missing_parents.is_empty() {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Sync called but with no missing parents.");
             // panic!("Sync called but with no missing parents.");
@@ -901,7 +910,7 @@ where S: ShareChain
         // Always ask for at least 20 blocks to avoid too many requests,
         // Unless it's from new block notify, in which case we'll only want a single block in most cases
         if !is_from_new_block_notify && missing_parents.len() < 20 {
-           let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
+            let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
             // We checked it's less than 20 above
             for i in 0..(20 - missing_parents.len()) {
                 missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
@@ -1138,15 +1147,24 @@ where S: ShareChain
             },
         };
 
-        let our_tip = share_chare.get_tip().await.inspect_err(|e| 
-            warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get tip after sync: {}", e)
-        ).as_ref().map(|tip| tip.unwrap_or_default()).unwrap_or_default();
+        let our_tip = share_chare
+            .get_tip()
+            .await
+            .inspect_err(
+                |e| warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get tip after sync: {}", e),
+            )
+            .as_ref()
+            .map(|tip| tip.unwrap_or_default())
+            .unwrap_or_default();
 
         if self
             .swarm
             .behaviour_mut()
             .catch_up_sync
-            .send_response(channel, CatchUpSyncResponse::new(request.algo(),our_peer_id , &blocks, our_tip))
+            .send_response(
+                channel,
+                CatchUpSyncResponse::new(request.algo(), our_peer_id, &blocks, our_tip),
+            )
             .is_err()
         {
             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
@@ -1155,7 +1173,7 @@ where S: ShareChain
 
     async fn handle_catch_up_sync_response(&mut self, response: CatchUpSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Catch up sync response: {response:?}");
-         let peer = response.peer_id().clone();
+        let peer = response.peer_id().clone();
 
         let timer = Instant::now();
         let algo = response.algo().clone();
@@ -1168,7 +1186,6 @@ where S: ShareChain
         let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
 
-      
         if blocks.is_empty() {
             return;
         }
@@ -1176,8 +1193,16 @@ where S: ShareChain
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
-                let must_continue_sync = last_block_from_them.as_ref().map(|(h, hash)| *h < their_height).unwrap_or(false);
-                if must_continue_sync && self.network_peer_store.num_catch_ups(&peer).unwrap_or(MAX_CATCH_UP_ATTEMPTS) < MAX_CATCH_UP_ATTEMPTS {
+                let must_continue_sync = last_block_from_them
+                    .as_ref()
+                    .map(|(h, hash)| *h < their_height)
+                    .unwrap_or(false);
+                if must_continue_sync &&
+                    self.network_peer_store
+                        .num_catch_ups(&peer)
+                        .unwrap_or(MAX_CATCH_UP_ATTEMPTS) <
+                        MAX_CATCH_UP_ATTEMPTS
+                {
                     dbg!("Must continue sync");
                     dbg!(their_tip_hash);
                     dbg!(share_chain.get_tip().await);
@@ -1188,8 +1213,7 @@ where S: ShareChain
                             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {error:?}");
                         },
                     }
-                }
-                else {
+                } else {
                     self.network_peer_store.reset_catch_up_attempts(&peer);
                 }
             },
@@ -1260,7 +1284,12 @@ where S: ShareChain
         // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
     }
 
-    async fn perform_catch_up_sync(&mut self, algo: PowAlgorithm, peer: PeerId, last_block_from_them: Option<(u64, FixedHash)>)-> Result<(), Error> {
+    async fn perform_catch_up_sync(
+        &mut self,
+        algo: PowAlgorithm,
+        peer: PeerId,
+        last_block_from_them: Option<(u64, FixedHash)>,
+    ) -> Result<(), Error> {
         let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -1558,21 +1587,34 @@ where S: ShareChain
             let best_peers = self
                 .network_peer_store
                 .best_peers_to_sync(self.config.num_peers_to_sync, *algo);
-            let our_tip = match algo {
-                PowAlgorithm::RandomX => self.share_chain_random_x.tip_height().await.unwrap_or_default(),
-                PowAlgorithm::Sha3x => self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
+            let (our_tip, our_pow) = match algo {
+                PowAlgorithm::RandomX => (
+                    self.share_chain_random_x.tip_height().await.unwrap_or_default(),
+                    self.share_chain_random_x.chain_pow().await,
+                ),
+                PowAlgorithm::Sha3x => (
+                    self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
+                    self.share_chain_sha3x.chain_pow().await,
+                ),
             };
 
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
 
             for record in best_peers {
-                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
-                let their_height = match algo {
-                    PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
-                    PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
+                let (their_height, their_pow) = match algo {
+                    PowAlgorithm::RandomX => (
+                        record.peer_info.current_random_x_height,
+                        AccumulatedDifficulty::from_u128(record.peer_info.current_random_x_pow).unwrap_or_default(),
+                    ),
+                    PowAlgorithm::Sha3x => (
+                        record.peer_info.current_sha3x_height,
+                        AccumulatedDifficulty::from_u128(record.peer_info.current_sha3x_pow).unwrap_or_default(),
+                    ),
                 };
-                if their_height > our_tip {
-                        let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e| 
+                if their_pow > our_pow {
+                    info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to sync from peer: {} with height{}", algo,record.peer_id, their_height);
+
+                    let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e|
                             warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {}", e)
                         );
                 }

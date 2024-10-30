@@ -28,7 +28,7 @@ use num::BigUint;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
-    proof_of_work::{randomx_factory::RandomXFactory, Difficulty},
+    proof_of_work::{randomx_factory::RandomXFactory, AccumulatedDifficulty, Difficulty},
 };
 
 use crate::{
@@ -148,4 +148,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     ) -> Result<Vec<Arc<P2Block>>, Error>;
 
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
+
+    async fn chain_pow(&self) -> AccumulatedDifficulty;
 }

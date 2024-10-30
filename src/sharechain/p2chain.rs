@@ -65,6 +65,10 @@ pub struct P2Chain {
 }
 
 impl P2Chain {
+    pub fn total_accumulated_tip_difficulty(&self) -> AccumulatedDifficulty {
+        self.total_accumulated_tip_difficulty
+    }
+
     pub fn level_at_height(&self, height: u64) -> Option<&P2ChainLevel> {
         let tip = self.levels.front()?.height;
         if height > tip {

@@ -4,13 +4,21 @@
 use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
+use libp2p::futures::AsyncReadExt;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
-    proof_of_work::{randomx_difficulty, sha3x_difficulty, Difficulty, DifficultyAdjustment, PowAlgorithm},
+    proof_of_work::{
+        randomx_difficulty,
+        sha3x_difficulty,
+        AccumulatedDifficulty,
+        Difficulty,
+        DifficultyAdjustment,
+        PowAlgorithm,
+    },
 };
 use tari_utilities::epoch_time::EpochTime;
 use tokio::sync::{RwLock, RwLockWriteGuard};
@@ -401,6 +409,11 @@ impl ShareChain for InMemoryShareChain {
         let bl = self.p2_chain.read().await;
         let tip_level = bl.get_height();
         Ok(tip_level)
+    }
+
+    async fn chain_pow(&self) -> AccumulatedDifficulty {
+        let bl = self.p2_chain.read().await;
+        bl.total_accumulated_tip_difficulty()
     }
 
     async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, Error> {
