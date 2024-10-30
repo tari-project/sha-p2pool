@@ -955,6 +955,22 @@ where S: ShareChain
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
             },
+            SwarmEvent::ConnectionClosed { peer_id, connection_id, endpoint, num_established, cause } => {
+                // Ignore dials where we can't get hold of the person
+                if !endpoint.is_dialer() {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection closed: {peer_id:?} -> {endpoint:?} ({num_established:?}) -> {cause:?}");
+                }
+            }
+            SwarmEvent::IncomingConnectionError { connection_id, local_addr, send_back_addr, error } =>
+            {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
+            },
+            SwarmEvent::ListenerError { listener_id, error } => {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Listener error: {listener_id:?} -> {error:?}");
+            },
+            SwarmEvent::ExternalAddrExpired { address, .. } => {
+                warn!(target: LOG_TARGET, squad = &self.config.squad; "External address has expired: {address:?}. TODO: Do we need to create a new one?");
+            },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
@@ -1453,7 +1469,7 @@ where S: ShareChain
 
         loop {
             select! {
-                biased;
+                // biased;
                 _ = &mut shutdown_signal => {
                     info!(target: LOG_TARGET,"Shutting down p2p service...");
                     return Ok(());
@@ -1566,12 +1582,12 @@ where S: ShareChain
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
 
             for record in best_peers {
-                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
                 let their_height = match algo {
                     PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
                     PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
                 };
                 if their_height > our_tip {
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
                         let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e| 
                             warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {}", e)
                         );

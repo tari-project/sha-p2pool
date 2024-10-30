@@ -7,12 +7,13 @@ use std::{
 };
 
 use libp2p::PeerId;
+use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
 
-// const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
+const LOG_TARGET: &str = "tari::p2pool::server::p2p::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
 
 #[derive(Copy, Clone, Debug)]
@@ -266,6 +267,7 @@ impl PeerStore {
         if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
             let record = self.whitelist_peers.remove(&peer_id.to_base58());
             if let Some(mut record) = record {
+                warn!(target: LOG_TARGET, "Greylisting peer {} because of: {}", peer_id, reason);
                 record.last_grey_list_reason = Some(reason.clone());
                 self.greylist_peers.insert(peer_id.to_base58(), record);
                 let _ = self.stats_broadcast_client.send_new_peer(
