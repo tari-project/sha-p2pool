@@ -118,13 +118,19 @@ impl ShareChainSyncRequest {
 pub struct CatchUpSyncRequest {
     algo: u64,
     i_have: Vec<(u64, FixedHash)>,
+    last_block_received: Option<(u64, FixedHash)>,
 }
 
 impl CatchUpSyncRequest {
-    pub fn new(algo: PowAlgorithm, i_have: Vec<(u64, FixedHash)>) -> Self {
+    pub fn new(
+        algo: PowAlgorithm,
+        i_have: Vec<(u64, FixedHash)>,
+        last_block_received: Option<(u64, FixedHash)>,
+    ) -> Self {
         Self {
             algo: algo.as_u64(),
             i_have,
+            last_block_received,
         }
     }
 
@@ -134,6 +140,10 @@ impl CatchUpSyncRequest {
 
     pub fn i_have(&self) -> &[(u64, FixedHash)] {
         &self.i_have
+    }
+
+    pub fn last_block_received(&self) -> Option<(u64, FixedHash)> {
+        self.last_block_received
     }
 }
 

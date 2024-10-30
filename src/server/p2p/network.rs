@@ -1150,7 +1150,10 @@ where S: ShareChain
             PowAlgorithm::Sha3x => &self.share_chain_sha3x,
         };
 
-        let blocks = match share_chare.request_sync(request.i_have(), 20).await {
+        let blocks = match share_chare
+            .request_sync(request.i_have(), 20, request.last_block_received())
+            .await
+        {
             Ok(blocks) => blocks,
             Err(error) => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get blocks from height: {error:?}");
@@ -1326,16 +1329,16 @@ where S: ShareChain
             }
         }
 
-        if let Some(last_block_synced) = last_block_from_them {
-            i_have_blocks.push(last_block_synced);
-        }
+        // if let Some(last_block_synced) = last_block_from_them {
+        // i_have_blocks.push(last_block_synced);
+        // }
 
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "));
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}, last block received {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "), last_block_from_them.map(|a| a.0.to_string()).unwrap_or_else(|| "None".to_string()));
 
-        self.swarm
-            .behaviour_mut()
-            .catch_up_sync
-            .send_request(&peer, CatchUpSyncRequest::new(algo, i_have_blocks));
+        self.swarm.behaviour_mut().catch_up_sync.send_request(
+            &peer,
+            CatchUpSyncRequest::new(algo, i_have_blocks, last_block_from_them),
+        );
 
         Ok(())
     }
