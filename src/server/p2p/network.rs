@@ -571,7 +571,6 @@ where S: ShareChain
         if self.config.is_seed_peer {
             return;
         }
-        self.subscribe(PEER_INFO_TOPIC, false);
         self.subscribe(PEER_INFO_TOPIC, true);
         self.subscribe(BLOCK_NOTIFY_TOPIC, true);
     }
@@ -674,7 +673,9 @@ where S: ShareChain
                                 }
                                 missing_blocks.push(block.clone());
                             }
-                            self.sync_share_chain(algo, peer, missing_blocks, true).await;
+                            if !missing_blocks.is_empty() {
+                                self.sync_share_chain(algo, peer, missing_blocks, true).await;
+                            }
                         },
                         Err(error) => {
                             // TODO: elevate to error
@@ -924,22 +925,6 @@ where S: ShareChain
             .share_chain_sync
             .send_request(&peer, ShareChainSyncRequest::new(algo, missing_parents));
         return;
-
-        // match self.squad_peer_store.tip_of_block_height(algo).await {
-        //     Some(result) => {
-        //         debug!(target: LOG_TARGET, squad = &self.config.squad; "Found highest known block height:
-        // {result:?}");         debug!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync
-        // request: {result:?}");         // we always send from_height as zero now, to not miss any blocks
-        //         info!(target: LOG_TARGET, "[{:?}] Syncing share chain...", algo);
-        //         self.swarm
-        //             .behaviour_mut()
-        //             .share_chain_sync
-        //             .send_request(&result.peer_id, ShareChainSyncRequest::new(algo, 0));
-        //     },
-        //     None => {
-        //         error!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Failed to get peer with highest share
-        // chain height!", algo)     },
-        // }
     }
 
     /// Main method to handle libp2p events.
@@ -1611,7 +1596,7 @@ where S: ShareChain
                         AccumulatedDifficulty::from_u128(record.peer_info.current_sha3x_pow).unwrap_or_default(),
                     ),
                 };
-                if their_pow > our_pow {
+           if their_pow > our_pow {
                     info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to sync from peer: {} with height{}", algo,record.peer_id, their_height);
 
                     let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e|
