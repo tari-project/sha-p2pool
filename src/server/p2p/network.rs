@@ -99,7 +99,7 @@ use crate::{
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
 const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/4";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
+const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/4";
 const CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL: &str = "/catch_up_sync/4";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const SYNC_REQUEST_LOG_TARGET: &str = "sync_request";
