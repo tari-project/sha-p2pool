@@ -23,12 +23,11 @@ use libp2p::{
     autonat::{self, NatStatus},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
+    gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
     mdns::{self, tokio::Tokio},
-    memory_connection_limits,
     multiaddr::Protocol,
     noise,
     relay,
@@ -867,6 +866,10 @@ where S: ShareChain
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
         let peer = response.peer_id().clone();
 
+        if response.version() != PROTOCOL_VERSION {
+            trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
+            return;
+        }
         let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;

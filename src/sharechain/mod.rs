@@ -57,8 +57,6 @@ pub const BLOCK_TARGET_TIME: u64 = 10;
 pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 1;
 pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1;
 
-pub const MAX_BLOCKS_PER_INITIAL_SYNC: usize = 20;
-
 pub mod error;
 pub mod in_memory;
 pub mod p2block;

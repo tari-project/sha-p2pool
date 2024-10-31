@@ -264,6 +264,10 @@ impl ShareChainSyncResponse {
         }
     }
 
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     pub fn peer_id(&self) -> &PeerId {
         &self.peer_id
     }

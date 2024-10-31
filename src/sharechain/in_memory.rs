@@ -595,7 +595,7 @@ impl ShareChain for InMemoryShareChain {
 
         // Assume their blocks are in order highest first.
         let mut split_height = 0;
-        let mut split_found = false;
+        // let mut split_found = false;
 
         if let Some(last_block_received) = last_block_received {
             if let Some(level) = p2_chain_read.level_at_height(last_block_received.0) {
@@ -603,7 +603,7 @@ impl ShareChain for InMemoryShareChain {
                     // Only split if the block is in the main chain
                     if level.chain_block == block.hash {
                         split_height = block.height;
-                        split_found = true;
+                        // split_found = true;
                     }
                 }
             }
