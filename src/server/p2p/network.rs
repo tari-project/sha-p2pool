@@ -1,6 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use core::sync;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -1248,6 +1249,7 @@ where S: ShareChain
         };
         let their_tip_hash = response.tip_hash().clone();
         let their_height = response.tip_height();
+        let their_pow = response.achieved_pow();
         let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
 
@@ -1258,10 +1260,8 @@ where S: ShareChain
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
-                let mut must_continue_sync = last_block_from_them
-                    .as_ref()
-                    .map(|(h, _hash)| *h < their_height)
-                    .unwrap_or(false);
+                let our_pow = share_chain.get_total_chain_pow().await;
+                let mut must_continue_sync = their_pow > our_pow.as_u128();
 
                 // Check if we have their tip in our chain.
                 if share_chain.has_block(their_height, &their_tip_hash).await {
@@ -1534,8 +1534,10 @@ where S: ShareChain
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
+        grey_list_clear_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
+        sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))

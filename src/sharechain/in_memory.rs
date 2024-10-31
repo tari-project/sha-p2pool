@@ -610,8 +610,9 @@ impl ShareChain for InMemoryShareChain {
         }
 
         let mut their_blocks = their_blocks.to_vec();
+        // Highest to lowest
         their_blocks.sort_by(|a, b| b.0.cmp(&a.0));
-        their_blocks.reverse();
+        // their_blocks.reverse();
 
         let mut split_height2 = 0;
         // Go back and find the split in the chain
@@ -808,6 +809,22 @@ pub mod test {
 
     use super::*;
 
+    pub fn new_chain() -> InMemoryShareChain {
+        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+        let share_chain = InMemoryShareChain::new(
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+            stats_broadcast_client,
+        )
+        .unwrap();
+        share_chain
+    }
+
     pub fn new_random_address() -> TariAddress {
         let mut rng = rand::thread_rng();
         let (_, view) = RistrettoPublicKey::random_keypair(&mut rng);
@@ -984,5 +1001,70 @@ pub mod test {
         }
         assert_eq!(counter_27, 3);
         assert_eq!(counter_23, 2);
+    }
+
+    #[tokio::test]
+    async fn test_request_sync_starts_from_highest_match() {
+        let chain = new_chain();
+        let mut blocks = Vec::new();
+        let mut prev_hash = BlockHash::zero();
+        for i in 0..10 {
+            let block = P2Block::builder()
+                .with_height(i)
+                .with_prev_hash(prev_hash)
+                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
+                .build();
+            prev_hash = block.generate_hash();
+            blocks.push(block);
+        }
+        chain.add_synced_blocks(&blocks).await.unwrap();
+        assert_eq!(chain.tip_height().await.unwrap(), 9);
+
+        let mut their_blocks = Vec::new();
+        their_blocks.push((3, blocks[3].hash.clone()));
+
+        let res = chain.request_sync(&their_blocks, 10, None).await.unwrap();
+        assert_eq!(res.len(), 7);
+        let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
+        assert_eq!(heights, vec![3, 4, 5, 6, 7, 8, 9]);
+
+        // if last block is higher, then we should start from the highest match
+        let res = chain
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .await
+            .unwrap();
+
+        assert_eq!(res.len(), 5);
+        let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
+        assert_eq!(heights, vec![5, 6, 7, 8, 9]);
+
+        // if there is a match in the middle, we should start from the highest match
+        their_blocks.push((7, blocks[7].hash.clone()));
+        let res = chain
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .await
+            .unwrap();
+
+        assert_eq!(res.len(), 3);
+        let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
+        assert_eq!(heights, vec![7, 8, 9]);
+
+        // Add an extra block in their blocks
+        let missing_block = P2Block::builder()
+            .with_height(11)
+            .with_prev_hash(prev_hash)
+            .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+            .build();
+        // prev_hash = block.generate_hash();
+        their_blocks.push((11, missing_block.hash.clone()));
+
+        let res = chain
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .await
+            .unwrap();
+
+        assert_eq!(res.len(), 3);
+        let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
+        assert_eq!(heights, vec![7, 8, 9]);
     }
 }
