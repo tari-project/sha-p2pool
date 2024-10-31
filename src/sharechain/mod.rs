@@ -99,6 +99,7 @@ impl BlockValidationParams {
 
 #[async_trait]
 pub(crate) trait ShareChain: Send + Sync + 'static {
+    async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error>;
 

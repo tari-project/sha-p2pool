@@ -129,8 +129,9 @@ where S: ShareChain
                 for uncle in block.uncles.iter() {
                     new_blocks.push(uncle.clone());
                 }
-                let notify = NotifyNewTipBlock::new(pow_algo, new_blocks);
                 if new_tip {
+                    let total_pow = share_chain.get_total_chain_pow().await;
+                    let notify = NotifyNewTipBlock::new(pow_algo, new_blocks, total_pow);
                     let res = self
                         .p2p_client
                         .broadcast_block(notify)

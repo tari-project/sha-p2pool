@@ -54,7 +54,7 @@ use log::{
     trace,
     warn,
 };
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
@@ -650,11 +650,11 @@ where S: ShareChain
                                 self.initiate_direct_peer_exchange(peer).await;
                             }
 
+                            // verify payload
                             if payload.new_blocks.is_empty() {
                                 warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", peer);
                                 return;
                             }
-                            // Don't add unless we've already synced.
 
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
                             let algo = payload.algo();
@@ -662,10 +662,17 @@ where S: ShareChain
                                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                             };
-                            if share_chain.tip_height().await.unwrap_or_default() == 0 {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Share chain tip height is None, skipping block until we have synced");
+
+                            let our_tip = share_chain.tip_height().await.unwrap_or(0);
+                            let our_pow = share_chain.get_total_chain_pow().await;
+                            if payload.total_accumulated_difficulty < our_pow.as_u128() &&
+                                payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0) <=
+                                    our_tip.saturating_sub(4)
+                            {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", peer);
                                 return;
                             }
+
                             let mut missing_blocks = vec![];
                             for block in &payload.new_blocks {
                                 if share_chain.has_block(block.0, &block.1).await {
@@ -951,7 +958,7 @@ where S: ShareChain
             },
             SwarmEvent::ConnectionClosed {
                 peer_id,
-                connection_id,
+                connection_id: _,
                 endpoint,
                 num_established,
                 cause,
@@ -1209,7 +1216,7 @@ where S: ShareChain
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 let must_continue_sync = last_block_from_them
                     .as_ref()
-                    .map(|(h, hash)| *h < their_height)
+                    .map(|(h, _hash)| *h < their_height)
                     .unwrap_or(false);
                 if must_continue_sync &&
                     self.network_peer_store
@@ -1601,15 +1608,9 @@ where S: ShareChain
             let best_peers = self
                 .network_peer_store
                 .best_peers_to_sync(self.config.num_peers_to_sync, *algo);
-            let (our_tip, our_pow) = match algo {
-                PowAlgorithm::RandomX => (
-                    self.share_chain_random_x.tip_height().await.unwrap_or_default(),
-                    self.share_chain_random_x.chain_pow().await,
-                ),
-                PowAlgorithm::Sha3x => (
-                    self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
-                    self.share_chain_sha3x.chain_pow().await,
-                ),
+            let our_pow = match algo {
+                PowAlgorithm::RandomX => self.share_chain_random_x.chain_pow().await,
+                PowAlgorithm::Sha3x => self.share_chain_sha3x.chain_pow().await,
             };
 
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::PowAlgorithm;
+use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::{
@@ -210,15 +210,22 @@ pub struct NotifyNewTipBlock {
     pub version: u64,
     pub algo: u64,
     pub new_blocks: Vec<(u64, FixedHash)>,
+    pub total_accumulated_difficulty: u128,
 }
 impl_conversions!(NotifyNewTipBlock);
 
 impl NotifyNewTipBlock {
-    pub fn new(algo: PowAlgorithm, new_blocks: Vec<(u64, FixedHash)>) -> Self {
+    pub fn new(
+        algo: PowAlgorithm,
+        new_blocks: Vec<(u64, FixedHash)>,
+        total_acculumted_difficulty: AccumulatedDifficulty,
+    ) -> Self {
+        let total_acculumted_difficulty = total_acculumted_difficulty.as_u128();
         Self {
             version: PROTOCOL_VERSION,
             algo: algo.as_u64(),
             new_blocks,
+            total_accumulated_difficulty: total_acculumted_difficulty,
         }
     }
 
