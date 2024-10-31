@@ -125,9 +125,9 @@ where S: ShareChain
         match share_chain.submit_block(block.clone()).await {
             Ok(new_tip) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                let mut new_blocks = vec![(block.height, block.hash.clone())];
+                let mut new_blocks = vec![(block.height, block.hash)];
                 for uncle in block.uncles.iter() {
-                    new_blocks.push(uncle.clone());
+                    new_blocks.push(*uncle);
                 }
                 let notify = NotifyNewTipBlock::new(pow_algo, new_blocks);
                 if new_tip {

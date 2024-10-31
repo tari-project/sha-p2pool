@@ -155,17 +155,29 @@ pub struct CatchUpSyncResponse {
     blocks: Vec<P2Block>,
     // the tip is used to work out if we should continuing syncing from them
     tip: (u64, FixedHash),
+    achieved_pow: Option<u128>,
 }
 
 impl CatchUpSyncResponse {
-    pub fn new(algo: PowAlgorithm, peer_id: PeerId, blocks: &[Arc<P2Block>], tip: (u64, FixedHash)) -> Self {
+    pub fn new(
+        algo: PowAlgorithm,
+        peer_id: PeerId,
+        blocks: &[Arc<P2Block>],
+        tip: (u64, FixedHash),
+        achieved_pow: u128,
+    ) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             algo: algo.as_u64(),
             peer_id,
             blocks: blocks.iter().map(|block| (**block).clone()).collect(),
             tip,
+            achieved_pow: Some(achieved_pow),
         }
+    }
+
+    pub fn achieved_pow(&self) -> u128 {
+        self.achieved_pow.unwrap_or_default()
     }
 
     pub fn peer_id(&self) -> &PeerId {

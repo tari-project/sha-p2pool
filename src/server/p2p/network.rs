@@ -111,6 +111,8 @@ const SYNC_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: usize = 150;
+// Time to start up and catch up before we start processing new tip messages
+const STARTUP_CATCH_UP_TIME: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -205,7 +207,6 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
-    pub memory_limits: memory_connection_limits::Behaviour,
 }
 
 pub enum P2pServiceQuery {
@@ -269,6 +270,7 @@ where S: ShareChain
     client_broadcast_block_tx: broadcast::Sender<NotifyNewTipBlock>,
     client_broadcast_block_rx: broadcast::Receiver<NotifyNewTipBlock>,
 
+    start_time: Instant,
     relay_store: Arc<RwLock<RelayStore>>,
 }
 
@@ -305,6 +307,7 @@ where S: ShareChain
             query_tx,
             query_rx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
+            start_time: Instant::now(),
         })
     }
 
@@ -431,7 +434,6 @@ where S: ShareChain
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                     autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
-                    memory_limits: memory_connection_limits::Behaviour::with_max_bytes(1024*1024*1024), //1GB
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -674,6 +676,10 @@ where S: ShareChain
                                 missing_blocks.push(block.clone());
                             }
                             if !missing_blocks.is_empty() {
+                                if self.start_time.elapsed() < STARTUP_CATCH_UP_TIME {
+                                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Still in startup catch up time, skipping block until we have synced");
+                                    return;
+                                }
                                 self.sync_share_chain(algo, peer, missing_blocks, true).await;
                             }
                         },
@@ -1171,13 +1177,15 @@ where S: ShareChain
             .map(|tip| tip.unwrap_or_default())
             .unwrap_or_default();
 
+        let our_achieved_pow = share_chare.chain_pow().await.as_u128();
+
         if self
             .swarm
             .behaviour_mut()
             .catch_up_sync
             .send_response(
                 channel,
-                CatchUpSyncResponse::new(request.algo(), our_peer_id, &blocks, our_tip),
+                CatchUpSyncResponse::new(request.algo(), our_peer_id, &blocks, our_tip, our_achieved_pow),
             )
             .is_err()
         {
@@ -1207,10 +1215,16 @@ where S: ShareChain
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
-                let must_continue_sync = last_block_from_them
+                let mut must_continue_sync = last_block_from_them
                     .as_ref()
                     .map(|(h, hash)| *h < their_height)
                     .unwrap_or(false);
+
+                // Check if we have their tip in our chain.
+                if share_chain.has_block(their_height, &their_tip_hash).await {
+                    must_continue_sync = false;
+                }
+
                 if must_continue_sync &&
                     self.network_peer_store
                         .num_catch_ups(&peer)
@@ -1219,7 +1233,6 @@ where S: ShareChain
                 {
                     dbg!("Must continue sync");
                     dbg!(their_tip_hash);
-                    dbg!(share_chain.get_tip().await);
                     self.network_peer_store.add_catch_up_attempt(&peer);
                     match self.perform_catch_up_sync(algo, peer, last_block_from_them).await {
                         Ok(_) => {},
@@ -1654,18 +1667,18 @@ where S: ShareChain
             .unwrap();
 
         // file.write(b"@startuml\n").unwrap();
-        file.write(b"digraph B {\n").unwrap();
-        file.write(b"node [shape=\"box\"]\n").unwrap();
+        file.write_all(b"digraph B {\n").unwrap();
+        file.write_all(b"node [shape=\"box\"]\n").unwrap();
         if let Some(tip) = chain.get_tip().await.unwrap() {
-            file.write(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
+            file.write_all(&format!("comment=\"{} - {}\"\n", tip.0, &tip.1.to_hex()[0..8]).into_bytes())
                 .unwrap();
-            file.write(format!("B{} [style=\"bold,filled\" penwidth=2]\n", &tip.1.to_hex()[0..8]).as_bytes())
+            file.write_all(format!("B{} [style=\"bold,filled\" penwidth=2]\n", &tip.1.to_hex()[0..8]).as_bytes())
                 .unwrap();
         }
         let formatter = human_format::Formatter::new();
         let blocks = chain.all_blocks(None, 0, 10000, false).await.expect("errored");
         for b in blocks {
-            file.write(
+            file.write_all(
                 format!(
                     "B{} [label=\"{} - {} ({}) {}\"]\n",
                     &b.hash.to_hex()[0..8],
@@ -1677,10 +1690,10 @@ where S: ShareChain
                 .as_bytes(),
             )
             .unwrap();
-            file.write(format!("B{} -> B{}\n", &b.hash.to_hex()[0..8], &b.prev_hash.to_hex()[0..8]).as_bytes())
+            file.write_all(format!("B{} -> B{}\n", &b.hash.to_hex()[0..8], &b.prev_hash.to_hex()[0..8]).as_bytes())
                 .unwrap();
             for u in b.uncles.iter().take(3) {
-                file.write(
+                file.write_all(
                     format!(
                         "B{} -> B{} [style=dotted]\n",
                         &b.hash.to_hex()[0..8],
@@ -1691,7 +1704,7 @@ where S: ShareChain
                 .unwrap();
             }
             if b.uncles.len() > 3 {
-                file.write(
+                file.write_all(
                     format!(
                         "B{} -> B{}others [style=dotted, label=\"{} others\"]\n",
                         &b.hash.to_hex()[0..8],
@@ -1704,7 +1717,7 @@ where S: ShareChain
             }
         }
 
-        file.write(b"}\n").unwrap();
+        file.write_all(b"}\n").unwrap();
     }
 
     async fn parse_seed_peers(&mut self) -> Result<HashMap<PeerId, Multiaddr>, Error> {

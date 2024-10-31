@@ -611,26 +611,26 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
-        if !split_found {
-            let mut their_blocks = their_blocks.to_vec();
-            their_blocks.sort_by(|a, b| b.0.cmp(&a.0));
-            their_blocks.reverse();
+        let mut their_blocks = their_blocks.to_vec();
+        their_blocks.sort_by(|a, b| b.0.cmp(&a.0));
+        their_blocks.reverse();
 
-            // Go back and find the split in the chain
-            for their_block in their_blocks {
-                if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
-                    if let Some(block) = level.blocks.get(&their_block.1) {
-                        // Only split if the block is in the main chain
-                        if level.chain_block == block.hash {
-                            split_height = block.height;
-                            break;
-                        }
+        let mut split_height2 = 0;
+        // Go back and find the split in the chain
+        for their_block in their_blocks {
+            if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
+                if let Some(block) = level.blocks.get(&their_block.1) {
+                    // Only split if the block is in the main chain
+                    if level.chain_block == block.hash {
+                        split_height2 = block.height;
+                        break;
                     }
                 }
             }
         }
 
-        self.all_blocks(Some(split_height), 0, limit, true).await
+        self.all_blocks(Some(cmp::max(split_height, split_height2)), 0, limit, true)
+            .await
     }
 
     async fn hash_rate(&self) -> Result<BigUint, Error> {
