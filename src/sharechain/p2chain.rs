@@ -28,12 +28,7 @@ use std::{
 
 use log::{debug, error, info};
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::{
-    lwma_diff::LinearWeightedMovingAverage,
-    AccumulatedDifficulty,
-    Difficulty,
-    DifficultyAdjustment,
-};
+use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
 
 use crate::sharechain::{
     error::Error,

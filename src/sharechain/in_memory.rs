@@ -4,7 +4,6 @@
 use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
-use libp2p::futures::AsyncReadExt;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use num::{BigUint, Zero};
@@ -26,7 +25,6 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 use super::{
     MAIN_REWARD_SHARE,
     MAX_BLOCKS_COUNT,
-    MAX_BLOCKS_PER_INITIAL_SYNC,
     MIN_RANDOMX_SCALING_FACTOR,
     MIN_SHA3X_SCALING_FACTOR,
     SHARE_WINDOW,
@@ -723,6 +721,11 @@ impl ShareChain for InMemoryShareChain {
         cmp::max(min, cmp::min(max, difficulty))
     }
 
+    async fn get_total_chain_pow(&self) -> AccumulatedDifficulty {
+        let chain_read_lock = self.p2_chain.read().await;
+        chain_read_lock.total_accumulated_tip_difficulty()
+    }
+
     // For debugging only
     async fn all_blocks(
         &self,
@@ -733,8 +736,8 @@ impl ShareChain for InMemoryShareChain {
     ) -> Result<Vec<Arc<P2Block>>, Error> {
         let chain_read_lock = self.p2_chain.read().await;
         let mut res = Vec::with_capacity(page_size);
-        let skip = page * page_size;
-        let mut num_skipped = 0;
+        let _skip = page * page_size;
+        let _num_skipped = 0;
         let mut num_main_chain_blocks = 0;
         // TODO: This is very inefficient, we should refactor this.
         for level in chain_read_lock.levels.iter().rev() {
