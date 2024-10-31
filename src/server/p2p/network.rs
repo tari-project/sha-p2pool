@@ -437,7 +437,9 @@ where S: ShareChain
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
-            .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
+            // In most cases libp2p will keep connections open that we need. Setting this higher 
+            // will make us keep connections open that we don't need.
+            // .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
             .build();
 
         dbg!("Check if we must set the kademlia mode");
