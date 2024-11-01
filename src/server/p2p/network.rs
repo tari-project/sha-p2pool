@@ -60,7 +60,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::{
     fs::File,
     io::{self, AsyncReadExt, AsyncWriteExt},
@@ -661,6 +661,11 @@ where S: ShareChain
                             if payload.version != PROTOCOL_VERSION {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
                                 return Ok(MessageAcceptance::Reject);
+                            }
+                            // lets check age
+                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", peer);
+                                return Ok(MessageAcceptance::Ignore);
                             }
                             let payload = Arc::new(payload);
                             debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");

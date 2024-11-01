@@ -224,6 +224,7 @@ pub struct NotifyNewTipBlock {
     pub algo: u64,
     pub new_blocks: Vec<(u64, FixedHash)>,
     pub total_accumulated_difficulty: u128,
+    pub timestamp: u64,
 }
 impl_conversions!(NotifyNewTipBlock);
 
@@ -235,12 +236,14 @@ impl NotifyNewTipBlock {
         total_acculumted_difficulty: AccumulatedDifficulty,
     ) -> Self {
         let total_acculumted_difficulty = total_acculumted_difficulty.as_u128();
+        let timestamp = EpochTime::now().as_u64();
         Self {
             version: PROTOCOL_VERSION,
             peer_id,
             algo: algo.as_u64(),
             new_blocks,
             total_accumulated_difficulty: total_acculumted_difficulty,
+            timestamp,
         }
     }
 
