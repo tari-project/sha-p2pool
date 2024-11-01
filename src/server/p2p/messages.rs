@@ -47,6 +47,7 @@ where T: Serialize {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PeerInfo {
     pub version: u64,
+    pub peer_id: Option<PeerId>,
     pub current_sha3x_height: u64,
     pub current_random_x_height: u64,
     pub current_sha3x_pow: u128,
@@ -60,6 +61,7 @@ pub struct PeerInfo {
 impl_conversions!(PeerInfo);
 impl PeerInfo {
     pub fn new(
+        peer_id: PeerId,
         current_sha3x_height: u64,
         current_random_x_height: u64,
         current_sha3x_pow: u128,
@@ -71,6 +73,7 @@ impl PeerInfo {
         let timestamp = EpochTime::now();
         Self {
             version: PROTOCOL_VERSION,
+            peer_id: Some(peer_id),
             current_sha3x_height,
             current_random_x_height,
             current_sha3x_pow,
