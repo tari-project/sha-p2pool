@@ -171,10 +171,10 @@ where S: ShareChain
         info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
 
         // this is stupid way of checking sync, but should atleast give as something to mine solo for a while and giving
-        // p2pool 10 mins to sync
+        // p2pool 4 mins to sync
         let sync_start = self.are_we_synced_with_p2pool.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(240)).await;
             info!(target: LOG_TARGET, "Setting as synced");
             sync_start.store(true, std::sync::atomic::Ordering::Relaxed);
         });
