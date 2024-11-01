@@ -185,7 +185,7 @@ impl Default for Config {
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(20 * 60),
-            sync_interval: Duration::from_secs(60),
+            sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
             num_peers_to_sync: 10,
