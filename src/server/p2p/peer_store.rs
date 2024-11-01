@@ -137,7 +137,7 @@ impl PeerStore {
 
     pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
-        // ignore all peers records that are older than 30 minutes
+        // ignore all peers records that are older than 1 minutes
         let timestamp = EpochTime::now().as_u64() - 60 * 1;
         peers.retain(|peer| peer.peer_info.timestamp > timestamp);
         match algo {

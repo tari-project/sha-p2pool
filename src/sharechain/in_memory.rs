@@ -595,7 +595,6 @@ impl ShareChain for InMemoryShareChain {
 
         // Assume their blocks are in order highest first.
         let mut split_height = 0;
-        // let mut split_found = false;
 
         if let Some(last_block_received) = last_block_received {
             if let Some(level) = p2_chain_read.level_at_height(last_block_received.0) {
@@ -603,7 +602,6 @@ impl ShareChain for InMemoryShareChain {
                     // Only split if the block is in the main chain
                     if level.chain_block == block.hash {
                         split_height = block.height;
-                        // split_found = true;
                     }
                 }
             }
@@ -628,7 +626,7 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
-        self.all_blocks(Some(cmp::max(split_height, split_height2)), 0, limit, true)
+        self.all_blocks(Some(cmp::max(split_height, split_height2)), limit, true)
             .await
     }
 
@@ -731,41 +729,29 @@ impl ShareChain for InMemoryShareChain {
     async fn all_blocks(
         &self,
         start_height: Option<u64>,
-        page: usize,
         page_size: usize,
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, Error> {
         let chain_read_lock = self.p2_chain.read().await;
         let mut res = Vec::with_capacity(page_size);
-        let _skip = page * page_size;
-        let _num_skipped = 0;
         let mut num_main_chain_blocks = 0;
-        // TODO: This is very inefficient, we should refactor this.
-        for level in chain_read_lock.levels.iter().rev() {
-            if level.height < start_height.unwrap_or(0) {
-                continue;
+        let mut level = if let Some(level) = chain_read_lock.level_at_height(start_height.unwrap_or(0)) {
+            level
+        } else {
+            // we dont have that block, see if twe have a higher lowest block than they are asking for and start there
+            if start_height.unwrap_or(0) < chain_read_lock.levels.front().map(|l| l.height).unwrap_or(0) {
+                chain_read_lock.levels.front().unwrap()
+            } else {
+                return Ok(res);
             }
+        };
 
-            // // First add the block in the main chain
-            // if let Some(block) = level.block_in_main_chain() {
-            //     if num_skipped < skip {
-            //         num_skipped += 1;
-            //         continue;
-            //     }
-            //     res.push(block.clone());
-            //     if res.len() >= page_size {
-            //         return Ok(res);
-            //     }
-
-            // }
-
+        loop {
             for block in level.blocks.values() {
                 if block.hash == level.chain_block {
                     num_main_chain_blocks += 1;
                     if main_chain_only {
                         for uncle in &block.uncles {
-                            // num_skipped += 1;
-
                             // Always include all the uncles, if we have them
                             if let Some(uncle_block) = level.blocks.get(&uncle.1) {
                                 // Uncles should never exist in the main chain, so we don't need to worry about
@@ -783,11 +769,12 @@ impl ShareChain for InMemoryShareChain {
                 if res.len() >= page_size && (!main_chain_only || num_main_chain_blocks >= 2) {
                     return Ok(res);
                 }
-                // if num_skipped < skip {
-                //     num_skipped += 1;
-                //     continue;
-                // }
             }
+            level = if let Some(new_level) = chain_read_lock.level_at_height(level.height + 1) {
+                new_level
+            } else {
+                break;
+            };
         }
         Ok(res)
     }

@@ -748,7 +748,6 @@ impl P2Chain {
 
 #[cfg(test)]
 mod test {
-    use digest::crypto_common::rand_core::block;
     use tari_common_types::types::BlockHash;
     use tari_core::{
         blocks::{Block, BlockHeader},
@@ -1503,7 +1502,7 @@ mod test {
         // the tip is not set to the new block, because the uncle is missing.
         let mut chain = P2Chain::new_empty(10, 5);
 
-        let mut prev_hash = BlockHash::zero();
+        let prev_hash = BlockHash::zero();
 
         let block1 = P2Block::builder()
             .with_height(0)

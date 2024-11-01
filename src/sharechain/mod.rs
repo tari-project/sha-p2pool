@@ -146,7 +146,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn all_blocks(
         &self,
         start_height: Option<u64>,
-        page: usize,
         page_size: usize,
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, Error>;
