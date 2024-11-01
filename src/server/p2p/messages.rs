@@ -220,6 +220,7 @@ pub struct DirectPeerInfoResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NotifyNewTipBlock {
     pub version: u64,
+    peer_id: PeerId,
     pub algo: u64,
     pub new_blocks: Vec<(u64, FixedHash)>,
     pub total_accumulated_difficulty: u128,
@@ -228,6 +229,7 @@ impl_conversions!(NotifyNewTipBlock);
 
 impl NotifyNewTipBlock {
     pub fn new(
+        peer_id: PeerId,
         algo: PowAlgorithm,
         new_blocks: Vec<(u64, FixedHash)>,
         total_acculumted_difficulty: AccumulatedDifficulty,
@@ -235,6 +237,7 @@ impl NotifyNewTipBlock {
         let total_acculumted_difficulty = total_acculumted_difficulty.as_u128();
         Self {
             version: PROTOCOL_VERSION,
+            peer_id,
             algo: algo.as_u64(),
             new_blocks,
             total_accumulated_difficulty: total_acculumted_difficulty,
@@ -243,6 +246,10 @@ impl NotifyNewTipBlock {
 
     pub fn algo(&self) -> PowAlgorithm {
         PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
+    }
+
+    pub fn peer_id(&self) -> &PeerId {
+        &self.peer_id
     }
 }
 

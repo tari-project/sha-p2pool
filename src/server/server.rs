@@ -81,6 +81,7 @@ where S: ShareChain
         )
         .await
         .map_err(Error::P2PService)?;
+        let local_peer_id = p2p_service.local_peer_id();
 
         let mut base_node_grpc_server = None;
         let mut p2pool_server = None;
@@ -95,6 +96,7 @@ where S: ShareChain
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
 
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
+                local_peer_id,
                 config.base_node_address.clone(),
                 p2p_service.client(),
                 share_chain_sha3x.clone(),

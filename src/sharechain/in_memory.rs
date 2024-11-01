@@ -424,6 +424,21 @@ impl ShareChain for InMemoryShareChain {
         }
     }
 
+    async fn get_tip_and_uncles(&self) -> Vec<(u64, FixedHash)> {
+        let mut res = Vec::new();
+        let bl = self.p2_chain.read().await;
+        let tip_level = bl.get_tip();
+        if let Some(tip_level) = tip_level {
+            res.push((tip_level.height, tip_level.chain_block));
+            tip_level.block_in_main_chain().inspect(|block| {
+                for uncle in block.uncles.iter() {
+                    res.push((uncle.0, uncle.1.clone()));
+                }
+            });
+        }
+        res
+    }
+
     async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, Error> {
         let mut chain_read_lock = self.p2_chain.read().await;
         // first check if there is a cached hashmap of shares

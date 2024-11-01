@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 
+use libp2p::PeerId;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     base_node_client::BaseNodeClient,
@@ -54,6 +55,7 @@ const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 pub(crate) struct ShaP2PoolGrpc<S>
 where S: ShareChain
 {
+    local_peer_id: PeerId,
     /// Base node client
     client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
     /// P2P service client
@@ -80,6 +82,7 @@ impl<S> ShaP2PoolGrpc<S>
 where S: ShareChain
 {
     pub async fn new(
+        local_peer_id: PeerId,
         base_node_address: String,
         p2p_client: ServiceClient,
         share_chain_sha3x: Arc<S>,
@@ -92,6 +95,7 @@ where S: ShareChain
         squad: Squad,
     ) -> Result<Self, Error> {
         Ok(Self {
+            local_peer_id,
             client: Arc::new(RwLock::new(
                 util::connect_base_node(base_node_address, shutdown_signal).await?,
             )),
@@ -131,7 +135,7 @@ where S: ShareChain
                 }
                 if new_tip {
                     let total_pow = share_chain.get_total_chain_pow().await;
-                    let notify = NotifyNewTipBlock::new(pow_algo, new_blocks, total_pow);
+                    let notify = NotifyNewTipBlock::new(self.local_peer_id.clone(), pow_algo, new_blocks, total_pow);
                     let res = self
                         .p2p_client
                         .broadcast_block(notify)
