@@ -4,7 +4,7 @@
 use std::{
     net::{AddrParseError, SocketAddr},
     str::FromStr,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use log::{error, info};
@@ -53,6 +53,7 @@ where S: ShareChain
     stats_collector: Option<StatsCollector>,
     shutdown_signal: ShutdownSignal,
     stats_broadcast_client: StatsBroadcastClient,
+    are_we_synced_with_p2pool: Arc<AtomicBool>,
 }
 
 impl<S> Server<S>
@@ -69,7 +70,7 @@ where S: ShareChain
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
         let network_peer_store = PeerStore::new(&config.peer_store, stats_broadcast_client.clone());
-
+        let are_we_synced_with_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
@@ -107,6 +108,7 @@ where S: ShareChain
                 genesis_block_hash,
                 stats_broadcast_client.clone(),
                 config.p2p_service.squad.clone(),
+                are_we_synced_with_p2pool.clone(),
             )
             .await
             .map_err(Error::Grpc)?;
@@ -135,6 +137,7 @@ where S: ShareChain
             stats_collector: Some(stats_collector),
             shutdown_signal,
             stats_broadcast_client,
+            are_we_synced_with_p2pool,
         })
     }
 
@@ -166,6 +169,15 @@ where S: ShareChain
 
     pub async fn start(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
+
+        // this is stupid way of checking sync, but should atleast give as something to mine solo for a while and giving
+        // p2pool 10 mins to sync
+        let sync_start = self.are_we_synced_with_p2pool.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(600)).await;
+            info!(target: LOG_TARGET, "Setting as synced");
+            sync_start.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
 
         if self.config.mining_enabled {
             // local base node and p2pool node grpc services
