@@ -1,7 +1,5 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
-
-use core::sync;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -14,7 +12,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use blake2::Blake2b;
 use convert_case::{Case, Casing};
+use digest::{consts::U32, generic_array::GenericArray, Digest};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
@@ -24,7 +24,7 @@ use libp2p::{
     autonat::{self, NatStatus},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
+    gossipsub::{self, Hasher, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
@@ -366,12 +366,19 @@ where S: ShareChain
                 // .with_behaviour(move |key_pair, relay_client| {
                 // gossipsub
 
+                let id_fn = |msg: &Message| {
+                    let mut hasher = Blake2b::new();
+                    hasher.update(&msg.data);
+                    let id : GenericArray<u8, U32> = hasher.finalize();
+                    MessageId::new(&id)
+                };
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     // .fanout_ttl(Duration::from_secs(10))
                     // .max_ihave_length(1000) // Default is 5000
                     // .max_messages_per_rpc(Some(1000))
                     // We get a lot of messages, so 
                     //.duplicate_cache_time(Duration::from_secs(1))
+                    .message_id_fn(id_fn)
                     .validate_messages()
                     .build()
                     .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
@@ -430,7 +437,7 @@ where S: ShareChain
                     identify: identify::Behaviour::new(identify::Config::new(
                         "/p2pool/1.0.0".to_string(),
                         key_pair.public(),
-                    )),
+                    ).with_push_listen_addr_updates(true)),
                     relay_server,
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
