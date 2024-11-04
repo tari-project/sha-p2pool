@@ -746,7 +746,7 @@ where S: ShareChain
                             if !missing_blocks.is_empty() {
                                 self.sync_share_chain(algo, message_peer, missing_blocks, true).await;
                             }
-                            return Ok(MessageAcceptance::Accept);
+                            return Ok(MessageAcceptance::Ignore);
                         },
                         Err(error) => {
                             // TODO: elevate to error
