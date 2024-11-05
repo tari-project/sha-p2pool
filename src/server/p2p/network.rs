@@ -9,13 +9,16 @@ use std::{
     io::Write,
     num::NonZeroU32,
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use blake2::Blake2b;
 use convert_case::{Case, Casing};
-use digest::{consts::U32, generic_array::GenericArray, Digest};
+use digest::{consts::U32, generic_array::GenericArray, typenum::Or, Digest};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
@@ -25,7 +28,7 @@ use libp2p::{
     autonat::{self, NatStatus},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
+    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, TopicHash},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
@@ -33,7 +36,7 @@ use libp2p::{
     multiaddr::Protocol,
     noise,
     relay,
-    request_response::{self, cbor, ResponseChannel},
+    request_response::{self, cbor, OutboundRequestId, ResponseChannel},
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
@@ -108,7 +111,8 @@ const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
 const PEER_INFO_LOGGING_LOG_TARGET: &str = "tari::p2pool::topics::peer_info";
 const NEW_TIP_NOTIFY_LOGGING_LOG_TARGET: &str = "tari::p2pool::topics::new_tip_notify";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
-
+// The amount of time between catch up syncs to the same peer
+const CATCHUP_SYNC_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
@@ -170,6 +174,7 @@ pub struct Config {
     pub num_peers_to_sync: usize,
     pub max_blocks_to_request: usize,
     pub sync_job_enabled: bool,
+    pub peer_list_folder: PathBuf,
 }
 
 impl Default for Config {
@@ -179,6 +184,7 @@ impl Default for Config {
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(60), // 1 minute should maybe even be longer
             stable_peer: true,
+            peer_list_folder: PathBuf::from("."),
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
@@ -189,7 +195,7 @@ impl Default for Config {
             sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
-            num_peers_to_sync: 10,
+            num_peers_to_sync: 2,
             max_blocks_to_request: 20,
             sync_job_enabled: true,
         }
@@ -430,7 +436,7 @@ where S: ShareChain
                             StreamProtocol::new(CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL),
                             request_response::ProtocolSupport::Full,
                         )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(90)), // 10 is the default
+                        request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
                     ),
                     kademlia: kad::Behaviour::new(
                         key_pair.public().to_peer_id(),
@@ -783,7 +789,7 @@ where S: ShareChain
         for addr in &payload.public_addresses() {
             self.swarm.add_peer_address(peer, addr.clone());
         }
-        let (add_status, _last_sync_attempt) = self.network_peer_store.add(peer, payload).await;
+        let add_status = self.network_peer_store.add(peer, payload).await;
 
         match add_status {
             AddPeerStatus::NewPeer => {
@@ -1121,7 +1127,13 @@ where S: ShareChain
                             });
                         },
                     },
-                    gossipsub::Event::Subscribed { .. } => {},
+                    gossipsub::Event::Subscribed { peer_id, topic } => {
+                        if topic.as_str() == &Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) {
+                            if !self.network_peer_store.exists(&peer_id) {
+                                self.initiate_direct_peer_exchange(&peer_id).await;
+                            }
+                        }
+                    },
                     gossipsub::Event::Unsubscribed { .. } => {},
                     gossipsub::Event::GossipsubNotSupported { .. } => {},
                 },
@@ -1166,15 +1178,11 @@ where S: ShareChain
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
                         },
-                        request_response::Message::Response {
-                            request_id: _request_id,
-                            response,
-                        } => {
+                        request_response::Message::Response { request_id, response } => {
                             self.handle_share_chain_sync_response(response).await;
                         },
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
-                        // Peers can be offline
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                         // Unlock the permit
                         self.network_peer_store
@@ -1209,6 +1217,7 @@ where S: ShareChain
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
                         // Unlock the permit
                         self.network_peer_store
                             .move_to_grey_list(peer, format!("Error during catch up sync:{}", error.to_string()))
@@ -1326,47 +1335,63 @@ where S: ShareChain
         let their_pow = response.achieved_pow();
         let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
-
         if blocks.is_empty() {
             return;
         }
+
+        // If any blocks are above their tip, greylist
+        for block in &blocks {
+            if block.height > their_height {
+                self.network_peer_store
+                    .move_to_grey_list(peer.clone(), format!("Block height above their tip: {}", block.height))
+                    .await;
+                warn!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] {} sent a block that was higher than their tip during catchup. ", algo,  peer);
+
+                return;
+            }
+        }
+
         let last_block_from_them = blocks.last().map(|b| (b.height, b.hash.clone()));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
-                info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
+                info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
                 let our_pow = share_chain.get_total_chain_pow().await;
                 let mut must_continue_sync = their_pow > our_pow.as_u128();
-
+                info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
                 // Check if we have their tip in our chain.
                 if share_chain.has_block(their_height, &their_tip_hash).await {
+                    info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} because we have their tip in our chain already", algo, peer);
                     must_continue_sync = false;
                 }
 
-                if must_continue_sync &&
-                    self.network_peer_store
-                        .num_catch_ups(&peer)
-                        .unwrap_or(MAX_CATCH_UP_ATTEMPTS) <
-                        MAX_CATCH_UP_ATTEMPTS
-                {
+                let num_catchups = self.network_peer_store.num_catch_ups(&peer);
+                info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] num catchups: {:?}", algo, num_catchups);
+                if must_continue_sync && num_catchups.map(|n| n < MAX_CATCH_UP_ATTEMPTS).unwrap_or(true) {
+                    info!(target: SYNC_REQUEST_LOG_TARGET, "Continue catch up for {}", peer);
                     self.network_peer_store.add_catch_up_attempt(&peer);
-                    match self.perform_catch_up_sync(algo, peer, last_block_from_them).await {
+                    match self
+                        .perform_catch_up_sync(algo, peer, last_block_from_them, their_height)
+                        .await
+                    {
                         Ok(_) => {},
                         Err(error) => {
                             error!(target: LOG_TARGET, squad = &self.config.squad; "Catchup synced blocks added Failed to perform catch up sync: {error:?}");
                         },
                     }
                 } else {
+                    info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
                     self.network_peer_store.reset_catch_up_attempts(&peer);
                 }
             },
             Err(error) => match error {
                 crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                    info!(target: LOG_TARGET, squad = &self.config.squad; "catchup sync Reporting missing blocks {}", missing_parents.len());
+                    // This should not happen though, catchup should return all blocks
+                    warn!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
                     self.sync_share_chain(algo, &peer, missing_parents, false).await;
                     return;
                 },
                 _ => {
-                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
+                    error!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
                     self.network_peer_store
                         .move_to_grey_list(peer, format!("Block failed validation: {}", error))
                         .await;
@@ -1432,11 +1457,28 @@ where S: ShareChain
         algo: PowAlgorithm,
         peer: PeerId,
         last_block_from_them: Option<(u64, FixedHash)>,
+        their_height: u64,
     ) -> Result<(), Error> {
         let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
+
+        if !self.network_peer_store.is_whitelisted(&peer) {
+            warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer is not whitelisted, will not try to catch up sync");
+            return Ok(());
+        }
+
+        // Only allow follow on catch up syncs if we've tried to sync from them recently
+        if last_block_from_them.is_none() &&
+            self.network_peer_store
+                .time_since_last_sync_attempt(&peer, algo)
+                .map(|d| d < CATCHUP_SYNC_TIMEOUT)
+                .unwrap_or(false)
+        {
+            warn!(target: SYNC_REQUEST_LOG_TARGET, "Already in progress with sync from {}", peer);
+            return Ok(());
+        }
 
         let mut i_have_blocks = Vec::with_capacity(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE);
         if let Some(tip) = share_chain.get_tip().await? {
@@ -1462,12 +1504,16 @@ where S: ShareChain
         // i_have_blocks.push(last_block_synced);
         // }
 
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}, last block received {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "), last_block_from_them.map(|a| a.0.to_string()).unwrap_or_else(|| "None".to_string()));
+        info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] Sending catch up sync to {} for blocks {}, last block received {}. Their height:{}", 
+            algo,
+        peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "), last_block_from_them.map(|a| a.0.to_string()).unwrap_or_else(|| "None".to_string()), their_height);
 
         self.swarm.behaviour_mut().catch_up_sync.send_request(
             &peer,
             CatchUpSyncRequest::new(algo, i_have_blocks, last_block_from_them),
         );
+
+        self.network_peer_store.update_last_sync_attempt(peer, algo);
 
         Ok(())
     }
@@ -1532,6 +1578,7 @@ where S: ShareChain
                     .build(),
             ) {
                 warn!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
+                return;
             }
 
             addresses.iter().for_each(|addr| {
@@ -1612,6 +1659,8 @@ where S: ShareChain
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
         sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut whitelist_save_interval = tokio::time::interval(Duration::from_secs(60));
+        whitelist_save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))
         } else {
@@ -1693,7 +1742,21 @@ where S: ShareChain
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Syncing took too long: {:?}", timer.elapsed());
                     }
-                }
+                },
+                _ = whitelist_save_interval.tick() => {
+                    let timer = Instant::now();
+                    match self.network_peer_store.save_whitelist(&self.config.peer_list_folder.join("whitelist_peers.json")).await{
+                        Ok(_) => {
+                            info!(target: LOG_TARGET, "Whitelist saved");
+                        },
+                        Err(e) => {
+                            error!(target: LOG_TARGET, "Failed to save whitelist: {e:?}");
+                        }
+                    }
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Saving whitelist took too long: {:?}", timer.elapsed());
+                    }
+                },
                 _ = grey_list_clear_interval.tick() => {
                     let timer = Instant::now();
                     self.network_peer_store.clear_grey_list();
@@ -1768,9 +1831,9 @@ where S: ShareChain
                     ),
                 };
                 if their_pow > our_pow {
-                    info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to perform catchup sync from peer: {} with height{}", algo,record.peer_id, their_height);
+                    info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to perform catchup sync from peer: {} with height {}", algo,record.peer_id, their_height);
 
-                    let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e|
+                    let _ = self.perform_catch_up_sync(*algo, record.peer_id, None, their_height).await.inspect_err(|e|
                             warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {}", e)
                         );
                 }
@@ -1998,6 +2061,20 @@ where S: ShareChain
 
         warn!(target: LOG_TARGET, "Starting main loop");
 
+        let _ = self
+            .network_peer_store
+            .load_whitelist(&self.config.peer_list_folder.join("whitelist_peers.json"))
+            .await
+            .inspect_err(|e| warn!(target: LOG_TARGET, "Failed to load whitelist: {e:?}"));
+
+        for (_peer_id, record) in self.network_peer_store.whitelist_peers() {
+            for address in record.peer_info.public_addresses() {
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&record.peer_id, address.clone());
+            }
+        }
         self.main_loop().await?;
         info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())

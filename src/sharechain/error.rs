@@ -49,6 +49,10 @@ pub enum Error {
 pub enum ValidationError {
     #[error("Block contains uncles that are too old")]
     UncleTooOld,
+    #[error("Block contains uncles on the same height or higher")]
+    UnclesOnSameHeightOrHigher,
+    #[error("Block contains uncles before the uncle start height")]
+    UnclesBeforeStartHeight,
     #[error("Block has too many uncles")]
     TooManyUncles,
     #[error("Proof of work algorithm does not match chain algorithm")]

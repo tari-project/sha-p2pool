@@ -43,7 +43,14 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 // The max allowed uncles per block
-pub const UNCLE_LIMIT: usize = 10;
+pub const UNCLE_LIMIT: usize = 3;
+// The relative age of an uncle, e.g. if the block is height 10, accept uncles heights 8 and 9, then MAX_UNCLE_AGE = 2
+pub const MAX_UNCLE_AGE: u64 = 2;
+
+// The height when uncles can start being added to the chain. This is to prevent chains with many uncles at
+// height 0, which the pool will create while waiting to sync to the chain.
+pub const UNCLE_START_HEIGHT: u64 = 10;
+pub const MAX_MISSING_PARENTS: usize = 10;
 
 pub(crate) struct InMemoryShareChain {
     p2_chain: Arc<RwLock<P2Chain>>,
@@ -144,11 +151,21 @@ impl InMemoryShareChain {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too many uncles! {:?}", self.pow_algo, block.uncles.len());
             return Err(ValidationError::TooManyUncles);
         }
+
+        if block.height < UNCLE_START_HEIGHT && !block.uncles.is_empty() {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Uncles before the uncle start height! {:?}", self.pow_algo, block.height);
+            return Err(ValidationError::UnclesBeforeStartHeight);
+        }
         // let test the age of the uncles
         for uncle in block.uncles.iter() {
-            if uncle.0 < block.height.saturating_sub(3) {
+            if uncle.0 < block.height.saturating_sub(MAX_UNCLE_AGE) {
                 warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too old! {:?}", self.pow_algo, uncle.0);
                 return Err(ValidationError::UncleTooOld);
+            }
+
+            if uncle.0 >= block.height {
+                warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too young! {:?}", self.pow_algo, uncle.0);
+                return Err(ValidationError::UnclesOnSameHeightOrHigher);
             }
         }
         Ok(())
@@ -300,7 +317,7 @@ impl ShareChain for InMemoryShareChain {
         }
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let height = block.height;
-        info!(target: LOG_TARGET, "[{:?}] ✅ adding Block via submit (grpc): {:?}", self.pow_algo,height );
+        debug!(target: LOG_TARGET, "[{:?}] ✅ adding Block via submit (grpc): {:?}", self.pow_algo,height );
         let res = self
             .submit_block_with_lock(
                 &mut p2_chain_write_lock,
@@ -323,7 +340,7 @@ impl ShareChain for InMemoryShareChain {
 
         if let Err(Error::BlockParentDoesNotExist { missing_parents }) = &res {
             let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
-            info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
         } else if let Err(e) = &res {
             warn!(target: LOG_TARGET, "Failed to add block from submit (height {}): {}", height, e);
         }
@@ -345,12 +362,12 @@ impl ShareChain for InMemoryShareChain {
             known_blocks_incoming.push(block.hash.clone());
         }
 
-        for block in blocks {
+        'outer: for block in blocks {
             if block.version != PROTOCOL_VERSION {
                 return Err(Error::BlockValidation("Block version is too low".to_string()));
             }
             let height = block.height;
-            info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
+            // info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
@@ -361,7 +378,7 @@ impl ShareChain for InMemoryShareChain {
                 .await
             {
                 Ok(tip_change) => {
-                    info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully", self.pow_algo, height);
+                    debug!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully. Tip changed: {}", self.pow_algo, height, tip_change);
                     new_tip = tip_change;
                 },
                 Err(e) => {
@@ -376,9 +393,12 @@ impl ShareChain for InMemoryShareChain {
                             }
                             missing_heights.push(new_missing_parent.0);
                             missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
+                            if missing_parents.len() > MAX_MISSING_PARENTS {
+                                break 'outer;
+                            }
                         }
 
-                        info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
+                        debug!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
                     } else {
                         warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
                         return Err(e);
@@ -393,6 +413,7 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents);
             return Err(Error::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()
@@ -754,8 +775,8 @@ impl ShareChain for InMemoryShareChain {
             level
         } else {
             // we dont have that block, see if twe have a higher lowest block than they are asking for and start there
-            if start_height.unwrap_or(0) < chain_read_lock.levels.front().map(|l| l.height).unwrap_or(0) {
-                chain_read_lock.levels.front().unwrap()
+            if start_height.unwrap_or(0) < chain_read_lock.levels.back().map(|l| l.height).unwrap_or(0) {
+                chain_read_lock.levels.back().unwrap()
             } else {
                 return Ok(res);
             }

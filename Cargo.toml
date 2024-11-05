@@ -47,6 +47,8 @@ libp2p = {version = "0.54.1", features = [
   "dcutr",
   "autonat",
   "memory-connection-limits",
+  "rsa",
+  "ecdsa",
 ]}
 log = {version = "0.4.21", features = ["kv"]}
 log4rs = "1.3.0"

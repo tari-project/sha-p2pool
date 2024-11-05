@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    char::MAX,
     collections::{HashMap, HashSet},
+    fs::File,
+    io::{BufReader, Write},
+    path::Path,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
+use anyhow::Error;
 use libp2p::PeerId;
 use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
@@ -15,6 +21,7 @@ use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::
 
 const LOG_TARGET: &str = "tari::p2pool::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
+const MAX_GREY_LISTINGS: u64 = 5;
 
 #[derive(Copy, Clone, Debug)]
 pub struct PeerStoreConfig {
@@ -36,7 +43,9 @@ pub(crate) struct PeerStoreRecord {
     pub peer_id: PeerId,
     pub peer_info: PeerInfo,
     pub created: Instant,
-    pub last_sync_attempt: Option<Instant>,
+    pub last_rx_sync_attempt: Option<Instant>,
+    pub last_sha3x_sync_attempt: Option<Instant>,
+    pub num_grey_listings: u64,
     pub last_grey_list_reason: Option<String>,
     pub catch_up_attempts: u64,
 }
@@ -46,7 +55,9 @@ impl PeerStoreRecord {
         Self {
             peer_id,
             peer_info,
-            last_sync_attempt: None,
+            last_rx_sync_attempt: None,
+            last_sha3x_sync_attempt: None,
+            num_grey_listings: 0,
             created: Instant::now(),
             last_grey_list_reason: None,
             catch_up_attempts: 0,
@@ -158,39 +169,70 @@ impl PeerStore {
         peers.into_iter().map(|record| record.clone()).collect()
     }
 
-    pub fn update_last_sync_attempt(&mut self, peer_id: PeerId) {
+    pub fn time_since_last_sync_attempt(&self, peer_id: &PeerId, algo: PowAlgorithm) -> Option<Duration> {
+        match algo {
+            PowAlgorithm::RandomX => self
+                .whitelist_peers
+                .get(&peer_id.to_base58())
+                .and_then(|record| record.last_rx_sync_attempt)
+                .map(|instant| instant.elapsed()),
+            PowAlgorithm::Sha3x => self
+                .whitelist_peers
+                .get(&peer_id.to_base58())
+                .and_then(|record| record.last_sha3x_sync_attempt)
+                .map(|instant| instant.elapsed()),
+        }
+    }
+
+    pub fn update_last_sync_attempt(&mut self, peer_id: PeerId, algo: PowAlgorithm) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
-            new_record.last_sync_attempt = Some(Instant::now());
+            match algo {
+                PowAlgorithm::RandomX => {
+                    new_record.last_rx_sync_attempt = Some(Instant::now());
+                },
+                PowAlgorithm::Sha3x => {
+                    new_record.last_sha3x_sync_attempt = Some(Instant::now());
+                },
+            }
             *entry = new_record;
         }
         if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
-            new_record.last_sync_attempt = Some(Instant::now());
+            match algo {
+                PowAlgorithm::RandomX => {
+                    new_record.last_rx_sync_attempt = Some(Instant::now());
+                },
+                PowAlgorithm::Sha3x => {
+                    new_record.last_sha3x_sync_attempt = Some(Instant::now());
+                },
+            }
             *entry = new_record;
         }
     }
 
     /// Add a new peer to store.
     /// If a peer already exists, just replaces it.
-    pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> (AddPeerStatus, Option<Instant>) {
+    pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
         if self.blacklist_peers.contains(&peer_id.to_base58()) {
-            return (AddPeerStatus::Blacklisted, None);
+            return AddPeerStatus::Blacklisted;
         }
 
         if let Some(grey) = self.greylist_peers.get(&peer_id.to_base58()) {
-            return (AddPeerStatus::Greylisted, grey.last_sync_attempt);
+            return AddPeerStatus::Greylisted;
         }
 
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
-            let previous_sync_attempt = entry.last_sync_attempt;
+            let previous_record = entry.clone();
             let mut new_record = PeerStoreRecord::new(peer_id, peer_info);
-            new_record.last_sync_attempt = previous_sync_attempt;
+            new_record.catch_up_attempts = previous_record.catch_up_attempts;
+            new_record.last_rx_sync_attempt = previous_record.last_rx_sync_attempt;
+            new_record.last_sha3x_sync_attempt = previous_record.last_sha3x_sync_attempt;
             new_record.created = entry.created;
 
             *entry = new_record;
             // self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
-            return (AddPeerStatus::Existing, previous_sync_attempt);
+            return AddPeerStatus::Existing;
         }
 
         self.whitelist_peers
@@ -205,12 +247,46 @@ impl PeerStore {
         // }
 
         // self.set_tip_of_block_heights().await;
-        (AddPeerStatus::NewPeer, None)
+        AddPeerStatus::NewPeer
+    }
+
+    pub async fn save_whitelist(&self, path: &Path) -> Result<(), Error> {
+        let mut file = File::create(path)?;
+        let whitelist = self
+            .whitelist_peers
+            .iter()
+            .map(|(peer_id, record)| (peer_id.clone(), record.peer_info.clone()))
+            .collect::<HashMap<String, PeerInfo>>();
+        let json = serde_json::to_string(&whitelist)?;
+        file.write_all(json.as_bytes())?;
+        Ok(())
+    }
+
+    pub async fn load_whitelist(&mut self, path: &Path) -> Result<(), Error> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let whitelist: HashMap<String, PeerInfo> = serde_json::from_reader(reader)?;
+        self.whitelist_peers = whitelist
+            .iter()
+            .filter_map(|(peer_id, peer_info)| {
+                if let Ok(p) = PeerId::from_str(&peer_id) {
+                    Some((peer_id.clone(), PeerStoreRecord::new(p, peer_info.clone())))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(())
     }
 
     pub fn clear_grey_list(&mut self) {
         for (peer_id, record) in self.greylist_peers.iter() {
-            self.whitelist_peers.insert(peer_id.clone(), record.clone());
+            if record.num_grey_listings >= MAX_GREY_LISTINGS {
+                warn!(target: LOG_TARGET, "Blacklisting peer {} because of: {}", peer_id, record.last_grey_list_reason.as_ref().unwrap_or(&"unknown".to_string()));
+                self.blacklist_peers.insert(peer_id.clone());
+            } else {
+                self.whitelist_peers.insert(peer_id.clone(), record.clone());
+            }
         }
         self.greylist_peers.clear();
         let _ = self.stats_broadcast_client.send_new_peer(
@@ -269,6 +345,7 @@ impl PeerStore {
             if let Some(mut record) = record {
                 warn!(target: LOG_TARGET, "Greylisting peer {} because of: {}", peer_id, reason);
                 record.last_grey_list_reason = Some(reason.clone());
+                record.num_grey_listings += 1;
                 self.greylist_peers.insert(peer_id.to_base58(), record);
                 let _ = self.stats_broadcast_client.send_new_peer(
                     self.whitelist_peers.len() as u64,
