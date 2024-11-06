@@ -26,6 +26,7 @@ use hickory_resolver::{
 use itertools::Itertools;
 use libp2p::{
     autonat::{self, NatStatus},
+    connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, TopicHash},
@@ -182,7 +183,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(60), // 1 minute should maybe even be longer
+            peer_info_publish_interval: Duration::from_secs(60 * 15),
             stable_peer: true,
             peer_list_folder: PathBuf::from("."),
             private_key_folder: PathBuf::from("."),
@@ -215,6 +216,7 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
+    pub connection_limits: connection_limits::Behaviour,
 }
 
 pub enum P2pServiceQuery {
@@ -450,6 +452,7 @@ where S: ShareChain
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                     autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
+                    connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established(config.max_connections)),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?

@@ -397,8 +397,6 @@ impl ShareChain for InMemoryShareChain {
                                 break 'outer;
                             }
                         }
-
-                        debug!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
                     } else {
                         warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
                         return Err(e);
@@ -413,7 +411,7 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents);
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.iter().map(|(_hash, height)| height.to_string()).collect::<Vec<String>>());
             return Err(Error::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()

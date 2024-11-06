@@ -22,6 +22,7 @@ pub struct Config {
     pub p2p_service: p2p::Config,
     pub mining_enabled: bool,
     pub http_server: http::server::Config,
+    pub max_connections: Option<u32>,
 }
 
 impl Default for Config {
@@ -35,6 +36,7 @@ impl Default for Config {
             p2p_service: p2p::Config::default(),
             mining_enabled: true,
             http_server: http::server::Config::default(),
+            max_connections: Some(100),
         }
     }
 }
@@ -95,6 +97,11 @@ impl ConfigBuilder {
 
     pub fn with_private_key_folder(&mut self, config: PathBuf) -> &mut Self {
         self.config.p2p_service.private_key_folder = config;
+        self
+    }
+
+    pub fn with_max_connections(&mut self, config: u32) -> &mut Self {
+        self.config.max_connections = Some(config);
         self
     }
 

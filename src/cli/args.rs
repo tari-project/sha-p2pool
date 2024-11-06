@@ -116,6 +116,9 @@ pub struct StartArgs {
 
     #[arg(long)]
     pub debug_print_chain: bool,
+
+    #[arg(long)]
+    pub max_connections: Option<u32>,
 }
 
 #[derive(Clone, Parser, Debug)]

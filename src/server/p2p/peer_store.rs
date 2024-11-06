@@ -63,6 +63,11 @@ impl PeerStoreRecord {
             catch_up_attempts: 0,
         }
     }
+
+    pub fn with_timestamp(mut self, timestamp: u64) -> Self {
+        self.peer_info.timestamp = timestamp;
+        self
+    }
 }
 
 /// Tip of height from known peers.
@@ -270,7 +275,10 @@ impl PeerStore {
             .iter()
             .filter_map(|(peer_id, peer_info)| {
                 if let Ok(p) = PeerId::from_str(&peer_id) {
-                    Some((peer_id.clone(), PeerStoreRecord::new(p, peer_info.clone())))
+                    Some((
+                        peer_id.clone(),
+                        PeerStoreRecord::new(p, peer_info.clone()).with_timestamp(EpochTime::now().as_u64()),
+                    ))
                 } else {
                     None
                 }
