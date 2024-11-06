@@ -119,6 +119,11 @@ pub struct StartArgs {
 
     #[arg(long)]
     pub max_connections: Option<u32>,
+
+    #[arg(long, default_value_t = false)]
+    pub randomx_disabled: bool,
+    #[arg(long, default_value_t = false)]
+    pub sha3x_disabled: bool,
 }
 
 #[derive(Clone, Parser, Debug)]

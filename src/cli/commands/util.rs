@@ -3,7 +3,6 @@
 
 use std::{collections::HashMap, env, fs, sync::Arc};
 
-use hickory_resolver::config;
 use libp2p::identity::Keypair;
 use log::info;
 use tari_common::{configuration::Network, initialize_logging};
@@ -72,6 +71,8 @@ pub async fn server(
     if let Some(max_connections) = args.max_connections {
         config_builder.with_max_connections(max_connections);
     }
+    config_builder.with_randomx_enabled(!args.randomx_disabled);
+    config_builder.with_sha3x_enabled(!args.sha3x_disabled);
 
     // try to extract env var based private key
     if let Ok(identity_cbor) = env::var("SHA_P2POOL_IDENTITY") {

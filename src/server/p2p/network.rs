@@ -176,6 +176,8 @@ pub struct Config {
     pub max_blocks_to_request: usize,
     pub sync_job_enabled: bool,
     pub peer_list_folder: PathBuf,
+    pub sha3x_enabled: bool,
+    pub randomx_enabled: bool,
 }
 
 impl Default for Config {
@@ -199,6 +201,8 @@ impl Default for Config {
             num_peers_to_sync: 2,
             max_blocks_to_request: 20,
             sync_job_enabled: true,
+            sha3x_enabled: true,
+            randomx_enabled: true,
         }
     }
 }
@@ -701,6 +705,14 @@ where S: ShareChain
                             // lets check age
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(10) {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                return Ok(MessageAcceptance::Ignore);
+                            }
+                            if payload.algo() == PowAlgorithm::RandomX && !self.config.randomx_enabled {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a RandomX block but RandomX is disabled, skipping", source_peer);
+                                return Ok(MessageAcceptance::Ignore);
+                            }
+                            if payload.algo() == PowAlgorithm::Sha3x && !self.config.sha3x_enabled {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a Sha3x block but Sha3x is disabled, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             let payload = Arc::new(payload);
@@ -1777,7 +1789,14 @@ where S: ShareChain
     }
 
     async fn try_sync_from_best_peer(&mut self) {
-        for algo in &[PowAlgorithm::RandomX, PowAlgorithm::Sha3x] {
+        let mut algos = vec![];
+        if self.config.sha3x_enabled {
+            algos.push(PowAlgorithm::Sha3x);
+        }
+        if self.config.randomx_enabled {
+            algos.push(PowAlgorithm::RandomX);
+        }
+        for algo in &algos {
             // Find any blocks we are missing.
             let _chain = match algo {
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),

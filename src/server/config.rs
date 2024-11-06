@@ -105,6 +105,16 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_sha3x_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.sha3x_enabled = config;
+        self
+    }
+
+    pub fn with_randomx_enabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.randomx_enabled = config;
+        self
+    }
+
     pub fn with_private_key(&mut self, config: Option<Keypair>) -> &mut Self {
         self.config.p2p_service.private_key = config;
         self
