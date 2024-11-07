@@ -37,7 +37,7 @@ use libp2p::{
     multiaddr::Protocol,
     noise,
     relay,
-    request_response::{self, cbor, OutboundRequestId, ResponseChannel},
+    request_response::{self, cbor, OutboundFailure, ResponseChannel},
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
@@ -1094,7 +1094,7 @@ where S: ShareChain
                 send_back_addr,
                 error,
             } => {
-                error!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
+                debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
             },
             SwarmEvent::ListenerError { listener_id, error } => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Listener error: {listener_id:?} -> {error:?}");
@@ -1232,7 +1232,14 @@ where S: ShareChain
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                        match error {
+                            OutboundFailure::DialFailure => {
+                                debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                            },
+                            _ => {
+                                warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                            },
+                        }
                         // Unlock the permit
                         self.network_peer_store
                             .move_to_grey_list(peer, format!("Error during catch up sync:{}", error.to_string()))
