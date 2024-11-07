@@ -45,7 +45,7 @@ const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 // The max allowed uncles per block
 pub const UNCLE_LIMIT: usize = 3;
 // The relative age of an uncle, e.g. if the block is height 10, accept uncles heights 8 and 9, then MAX_UNCLE_AGE = 2
-pub const MAX_UNCLE_AGE: u64 = 2;
+pub const MAX_UNCLE_AGE: u64 = 4;
 
 // The height when uncles can start being added to the chain. This is to prevent chains with many uncles at
 // height 0, which the pool will create while waiting to sync to the chain.
