@@ -762,10 +762,10 @@ where S: ShareChain
                             if !missing_blocks.is_empty() {
                                 self.sync_share_chain(algo, message_peer, missing_blocks, true).await;
                             }
-                            // if this timestamp is older than 20 seconds, we ignore it and dont pass it on
+                            // if this timestamp is older than 60 seconds, we reject it
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
-                                return Ok(MessageAcceptance::Ignore);
+                                return Ok(MessageAcceptance::Reject);
                             }
                             return Ok(MessageAcceptance::Accept);
                         },
