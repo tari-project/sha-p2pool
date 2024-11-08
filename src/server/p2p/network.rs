@@ -698,6 +698,11 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Reject);
                             }
                             // lets check age
+                            // if this timestamp is older than 60 seconds, we reject it
+                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                return Ok(MessageAcceptance::Reject);
+                            }
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(10) {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
@@ -762,11 +767,7 @@ where S: ShareChain
                             if !missing_blocks.is_empty() {
                                 self.sync_share_chain(algo, message_peer, missing_blocks, true).await;
                             }
-                            // if this timestamp is older than 60 seconds, we reject it
-                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
-                                return Ok(MessageAcceptance::Reject);
-                            }
+
                             return Ok(MessageAcceptance::Accept);
                         },
                         Err(error) => {
