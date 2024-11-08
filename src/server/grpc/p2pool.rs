@@ -145,7 +145,7 @@ where S: ShareChain
                 }
                 if new_tip {
                     let total_pow = share_chain.get_total_chain_pow().await;
-                    let notify = NotifyNewTipBlock::new(self.local_peer_id.clone(), pow_algo, new_blocks, total_pow);
+                    let notify = NotifyNewTipBlock::new(self.local_peer_id, pow_algo, new_blocks, total_pow);
                     let res = self
                         .p2p_client
                         .broadcast_block(notify)
@@ -234,7 +234,6 @@ where S: ShareChain
             // set target difficulty
             let miner_data = response
                 .miner_data
-                .clone()
                 .ok_or_else(|| Status::internal("missing miner data"))?;
 
             let grpc_block = response
@@ -297,14 +296,14 @@ where S: ShareChain
             match pow_algo {
                 PowAlgorithm::Sha3x => {
                     let mut write_lock = self.list_of_templates_sha3x.write().await;
-                    write_lock.push_back(tari_hash.clone());
+                    write_lock.push_back(tari_hash);
                     if write_lock.len() > MAX_STORED_TEMPLATES_SHA3X {
                         let _ = write_lock.pop_front();
                     }
                 },
                 PowAlgorithm::RandomX => {
                     let mut write_lock = self.list_of_templates_rx.write().await;
-                    write_lock.push_back(tari_hash.clone());
+                    write_lock.push_back(tari_hash);
                     if write_lock.len() > MAX_STORED_TEMPLATES_RX {
                         let _ = write_lock.pop_front();
                     }

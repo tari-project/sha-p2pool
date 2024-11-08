@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    char::MAX,
     collections::{HashMap, HashSet},
     fs::File,
     io::{BufReader, Write},
@@ -154,7 +153,7 @@ impl PeerStore {
     pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 1 minutes
-        let timestamp = EpochTime::now().as_u64() - 60 * 1;
+        let timestamp = EpochTime::now().as_u64() - 60;
         peers.retain(|peer| peer.peer_info.timestamp > timestamp);
         match algo {
             PowAlgorithm::RandomX => {
@@ -171,7 +170,7 @@ impl PeerStore {
         }
         peers.reverse();
         peers.truncate(count);
-        peers.into_iter().map(|record| record.clone()).collect()
+        peers.into_iter().cloned().collect()
     }
 
     pub fn time_since_last_sync_attempt(&self, peer_id: &PeerId, algo: PowAlgorithm) -> Option<Duration> {
@@ -223,7 +222,7 @@ impl PeerStore {
             return AddPeerStatus::Blacklisted;
         }
 
-        if let Some(grey) = self.greylist_peers.get(&peer_id.to_base58()) {
+        if let Some(_grey) = self.greylist_peers.get(&peer_id.to_base58()) {
             return AddPeerStatus::Greylisted;
         }
 
@@ -274,7 +273,7 @@ impl PeerStore {
         self.whitelist_peers = whitelist
             .iter()
             .filter_map(|(peer_id, peer_info)| {
-                if let Ok(p) = PeerId::from_str(&peer_id) {
+                if let Ok(p) = PeerId::from_str(peer_id) {
                     Some((
                         peer_id.clone(),
                         PeerStoreRecord::new(p, peer_info.clone()).with_timestamp(EpochTime::now().as_u64()),
@@ -375,6 +374,6 @@ impl PeerStore {
         if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(&peer_id.to_base58()) {
             return true;
         }
-        return false;
+        false
     }
 }

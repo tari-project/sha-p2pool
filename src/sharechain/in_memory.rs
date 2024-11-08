@@ -44,8 +44,8 @@ use crate::{
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 // The max allowed uncles per block
 pub const UNCLE_LIMIT: usize = 3;
-// The relative age of an uncle, e.g. if the block is height 10, accept uncles heights 8 and 9, then MAX_UNCLE_AGE = 2
-pub const MAX_UNCLE_AGE: u64 = 4;
+// The relative age of an uncle, e.g. if the block is height 10, accept uncles heights 7, 8 and 9, then MAX_UNCLE_AGE=3
+pub const MAX_UNCLE_AGE: u64 = 3;
 
 // The height when uncles can start being added to the chain. This is to prevent chains with many uncles at
 // height 0, which the pool will create while waiting to sync to the chain.
@@ -269,10 +269,10 @@ impl InMemoryShareChain {
         for uncle in cur_block.uncles.iter() {
             let uncle_block = p2_chain
                 .level_at_height(uncle.0)
-                .ok_or_else(|| Error::UncleBlockNotFound)?
+                .ok_or(Error::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
-                .ok_or_else(|| Error::UncleBlockNotFound)?;
+                .ok_or(Error::UncleBlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
                 uncle_block.miner_wallet_address.to_base58(),
@@ -280,7 +280,6 @@ impl InMemoryShareChain {
                 uncle_block.miner_coinbase_extra.clone(),
             );
         }
-        if cur_block.height == stop_height {}
         while cur_block.height > stop_height {
             cur_block = p2_chain.get_parent_block(cur_block).ok_or(Error::BlockNotFound)?;
             update_insert(
@@ -292,10 +291,10 @@ impl InMemoryShareChain {
             for uncle in cur_block.uncles.iter() {
                 let uncle_block = p2_chain
                     .level_at_height(uncle.0)
-                    .ok_or_else(|| Error::UncleBlockNotFound)?
+                    .ok_or(Error::UncleBlockNotFound)?
                     .blocks
                     .get(&uncle.1)
-                    .ok_or_else(|| Error::UncleBlockNotFound)?;
+                    .ok_or(Error::UncleBlockNotFound)?;
                 update_insert(
                     &mut miners_to_shares,
                     uncle_block.miner_wallet_address.to_base58(),
@@ -359,7 +358,7 @@ impl ShareChain for InMemoryShareChain {
             //  return Err(Error::BlockValidation("Blocks are not sorted by height".to_string()));
         }
         for block in blocks.iter() {
-            known_blocks_incoming.push(block.hash.clone());
+            known_blocks_incoming.push(block.hash);
         }
 
         'outer: for block in blocks {
@@ -411,7 +410,7 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.iter().map(|(_hash, height)| height.to_string()).collect::<Vec<String>>());
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.values().map(|height| height.to_string()));
             return Err(Error::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()
@@ -451,7 +450,7 @@ impl ShareChain for InMemoryShareChain {
             res.push((tip_level.height, tip_level.chain_block));
             tip_level.block_in_main_chain().inspect(|block| {
                 for uncle in block.uncles.iter() {
-                    res.push((uncle.0, uncle.1.clone()));
+                    res.push((uncle.0, uncle.1));
                 }
             });
         }
@@ -482,10 +481,10 @@ impl ShareChain for InMemoryShareChain {
         for uncle in new_tip_block.uncles.iter() {
             let uncle_block = chain_read_lock
                 .level_at_height(uncle.0)
-                .ok_or_else(|| Error::UncleBlockNotFound)?
+                .ok_or(Error::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
-                .ok_or_else(|| Error::UncleBlockNotFound)?;
+                .ok_or(Error::UncleBlockNotFound)?;
             miners_to_shares.insert(
                 uncle_block.miner_wallet_address.to_base58(),
                 (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
@@ -540,9 +539,9 @@ impl ShareChain for InMemoryShareChain {
         // 1. The uncle can only be a max of 3 blocks older than the new tip
         // 2. The uncle can only be an uncle once in the chain
         // 3. The uncle must link back to the main chain
-        let mut excluded_uncles = vec![];
-        let mut uncles = vec![];
-        for height in new_height.saturating_sub(3)..new_height {
+        let mut excluded_uncles: Vec<FixedHash> = vec![];
+        let mut uncles: Vec<(u64, FixedHash)> = vec![];
+        for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
             if let Some(older_level) = chain_read_lock.level_at_height(height) {
                 let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
                 // Blocks in the main chain can't be uncles
@@ -551,13 +550,13 @@ impl ShareChain for InMemoryShareChain {
                     excluded_uncles.push(uncle.1);
                 }
                 for block in older_level.blocks.iter() {
-                    uncles.push((height, block.0.clone()));
+                    uncles.push((height, *block.0));
                 }
             }
         }
         for uncle in &uncles {
             if chain_read_lock.level_at_height(uncle.0).is_none() {
-                excluded_uncles.push(uncle.1.clone());
+                excluded_uncles.push((*uncle.1).into());
                 continue;
             }
             if let Some(level) = chain_read_lock.level_at_height(uncle.0) {
@@ -565,7 +564,7 @@ impl ShareChain for InMemoryShareChain {
                     let parent = match chain_read_lock.get_parent_block(uncle_block) {
                         Some(parent) => parent,
                         None => {
-                            excluded_uncles.push(uncle.1.clone());
+                            excluded_uncles.push(uncle.1);
                             continue;
                         },
                     };
@@ -575,10 +574,10 @@ impl ShareChain for InMemoryShareChain {
                         .chain_block !=
                         parent.hash
                     {
-                        excluded_uncles.push(uncle.1.clone());
+                        excluded_uncles.push(uncle.1);
                     }
                 } else {
-                    excluded_uncles.push(uncle.1.clone());
+                    excluded_uncles.push(uncle.1);
                 }
             }
         }
@@ -772,7 +771,7 @@ impl ShareChain for InMemoryShareChain {
         let mut level = if let Some(level) = chain_read_lock.level_at_height(start_height.unwrap_or(0)) {
             level
         } else {
-            // we dont have that block, see if twe have a higher lowest block than they are asking for and start there
+            // we dont have that block, see if we have a higher lowest block than they are asking for and start there
             if start_height.unwrap_or(0) < chain_read_lock.levels.back().map(|l| l.height).unwrap_or(0) {
                 chain_read_lock.levels.back().unwrap()
             } else {
@@ -816,7 +815,7 @@ impl ShareChain for InMemoryShareChain {
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool {
         let chain_read_lock = self.p2_chain.read().await;
         if let Some(level) = chain_read_lock.level_at_height(height) {
-            return level.blocks.contains_key(&hash);
+            return level.blocks.contains_key(hash);
         }
         false
     }

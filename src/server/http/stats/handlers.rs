@@ -192,11 +192,11 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
 
 #[allow(clippy::too_many_lines)]
 async fn get_chain_stats(state: AppState, _algo: PowAlgorithm) -> Result<ChainStats, StatusCode> {
-    return Ok(ChainStats {
+    Ok(ChainStats {
         share_chain_height: 0,
         share_chain_length: 0,
         squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
-    });
+    })
     // return from cache if possible
     // let stats_cache = state.stats_cache.clone();
     // if let Some(stats) = stats_cache.stats(algo).await {

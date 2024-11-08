@@ -9,16 +9,13 @@ use std::{
     io::Write,
     num::NonZeroU32,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use blake2::Blake2b;
 use convert_case::{Case, Casing};
-use digest::{consts::U32, generic_array::GenericArray, typenum::Or, Digest};
+use digest::{consts::U32, generic_array::GenericArray, Digest};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
@@ -29,7 +26,7 @@ use libp2p::{
     connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, TopicHash},
+    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
@@ -502,7 +499,7 @@ where S: ShareChain
     }
 
     pub fn local_peer_id(&self) -> PeerId {
-        self.swarm.local_peer_id().clone()
+        *self.swarm.local_peer_id()
     }
 
     async fn create_peer_info(&mut self, public_addresses: Vec<Multiaddr>) -> Result<PeerInfo, Error> {
@@ -513,7 +510,7 @@ where S: ShareChain
         let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
         let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
         let peer_info_squad_raw = PeerInfo::new(
-            self.swarm.local_peer_id().clone(),
+            *self.swarm.local_peer_id(),
             current_height_sha3x,
             current_height_random_x,
             current_pow_sha3x,
@@ -676,10 +673,8 @@ where S: ShareChain
                             }
                             debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
 
-                            if !self.config.is_seed_peer {
-                                if self.add_peer(payload, source_peer.clone()).await {
-                                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
-                                }
+                            if !self.config.is_seed_peer && self.add_peer(payload, source_peer).await {
+                                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
                             }
                             return Ok(MessageAcceptance::Accept);
                         },
@@ -762,10 +757,15 @@ where S: ShareChain
                                 if share_chain.has_block(block.0, &block.1).await {
                                     continue;
                                 }
-                                missing_blocks.push(block.clone());
+                                missing_blocks.push(*block);
                             }
                             if !missing_blocks.is_empty() {
                                 self.sync_share_chain(algo, message_peer, missing_blocks, true).await;
+                            }
+                            // if this timestamp is older than 20 seconds, we ignore it and dont pass it on
+                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                return Ok(MessageAcceptance::Ignore);
                             }
                             return Ok(MessageAcceptance::Accept);
                         },
@@ -774,7 +774,7 @@ where S: ShareChain
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "Can't deserialize broadcast block payload: {:?}", error);
                             self.network_peer_store
                                 .move_to_grey_list(
-                                    source_peer.clone(),
+                                    source_peer,
                                     format!("Node sent a block that could not be deserialized: {:?}", error),
                                 )
                                 .await;
@@ -831,7 +831,7 @@ where S: ShareChain
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
             })
         {
-            let local_peer_id = self.swarm.local_peer_id().clone();
+            let local_peer_id = *self.swarm.local_peer_id();
             if peer == &local_peer_id {
                 return;
             }
@@ -860,7 +860,7 @@ where S: ShareChain
             return;
         }
 
-        let local_peer_id = self.swarm.local_peer_id().clone();
+        let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())
             .await
@@ -884,7 +884,7 @@ where S: ShareChain
 
         match request.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if self.add_peer(request.info, peer_id.clone()).await {
+                if self.add_peer(request.info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
             },
@@ -901,7 +901,7 @@ where S: ShareChain
         }
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if self.add_peer(response.info, peer_id.clone()).await {
+                if self.add_peer(response.info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
             },
@@ -922,7 +922,7 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let local_peer_id = self.swarm.local_peer_id().clone();
+        let local_peer_id = *self.swarm.local_peer_id();
         match share_chain.get_blocks(request.missing_blocks()).await {
             Ok(blocks) => {
                 if self
@@ -948,7 +948,7 @@ where S: ShareChain
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
-        let peer = response.peer_id().clone();
+        let peer = *response.peer_id();
 
         if response.version() != PROTOCOL_VERSION {
             trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
@@ -958,12 +958,12 @@ where S: ShareChain
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
         // }
-        let algo = response.algo().clone();
+        let algo = response.algo();
         let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
+        let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(new_tip) => {
@@ -1014,12 +1014,12 @@ where S: ShareChain
     ) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
 
-        if self.network_peer_store.is_blacklisted(&peer) {
+        if self.network_peer_store.is_blacklisted(peer) {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer is blacklisted, skipping sync");
             return;
         }
 
-        if !self.network_peer_store.is_whitelisted(&peer) {
+        if !self.network_peer_store.is_whitelisted(peer) {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
             // return;
         }
@@ -1051,7 +1051,6 @@ where S: ShareChain
             .behaviour_mut()
             .share_chain_sync
             .send_request(peer, ShareChainSyncRequest::new(algo, missing_parents));
-        return;
     }
 
     /// Main method to handle libp2p events.
@@ -1143,10 +1142,10 @@ where S: ShareChain
                         },
                     },
                     gossipsub::Event::Subscribed { peer_id, topic } => {
-                        if topic.as_str() == &Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) {
-                            if !self.network_peer_store.exists(&peer_id) {
-                                self.initiate_direct_peer_exchange(&peer_id).await;
-                            }
+                        if topic.as_str() == Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) &&
+                            !self.network_peer_store.exists(&peer_id)
+                        {
+                            self.initiate_direct_peer_exchange(&peer_id).await;
                         }
                     },
                     gossipsub::Event::Unsubscribed { .. } => {},
@@ -1193,7 +1192,10 @@ where S: ShareChain
                         } => {
                             self.handle_share_chain_sync_request(channel, request).await;
                         },
-                        request_response::Message::Response { request_id, response } => {
+                        request_response::Message::Response {
+                            request_id: _,
+                            response,
+                        } => {
                             self.handle_share_chain_sync_response(response).await;
                         },
                     },
@@ -1201,7 +1203,7 @@ where S: ShareChain
                         debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
                         // Unlock the permit
                         self.network_peer_store
-                            .move_to_grey_list(peer, format!("Error during share chain sync:{}", error.to_string()))
+                            .move_to_grey_list(peer, format!("Error during share chain sync:{}", error))
                             .await;
 
                         // Remove peer from peer store to try to sync from another peer,
@@ -1242,7 +1244,7 @@ where S: ShareChain
                         }
                         // Unlock the permit
                         self.network_peer_store
-                            .move_to_grey_list(peer, format!("Error during catch up sync:{}", error.to_string()))
+                            .move_to_grey_list(peer, format!("Error during catch up sync:{}", error))
                             .await;
 
                         // Remove peer from peer store to try to sync from another peer,
@@ -1299,7 +1301,7 @@ where S: ShareChain
         channel: ResponseChannel<CatchUpSyncResponse>,
         request: CatchUpSyncRequest,
     ) {
-        let our_peer_id = self.swarm.local_peer_id().clone();
+        let our_peer_id = *self.swarm.local_peer_id();
         let share_chare = match request.algo() {
             PowAlgorithm::RandomX => &self.share_chain_random_x,
             PowAlgorithm::Sha3x => &self.share_chain_sha3x,
@@ -1344,18 +1346,18 @@ where S: ShareChain
 
     async fn handle_catch_up_sync_response(&mut self, response: CatchUpSyncResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Catch up sync response: {response:?}");
-        let peer = response.peer_id().clone();
+        let peer = *response.peer_id();
 
         let timer = Instant::now();
-        let algo = response.algo().clone();
+        let algo = response.algo();
         let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let their_tip_hash = response.tip_hash().clone();
+        let their_tip_hash = *response.tip_hash();
         let their_height = response.tip_height();
         let their_pow = response.achieved_pow();
-        let blocks: Vec<_> = response.into_blocks().into_iter().map(|a| Arc::new(a)).collect();
+        let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
         if blocks.is_empty() {
             return;
@@ -1365,7 +1367,7 @@ where S: ShareChain
         for block in &blocks {
             if block.height > their_height {
                 self.network_peer_store
-                    .move_to_grey_list(peer.clone(), format!("Block height above their tip: {}", block.height))
+                    .move_to_grey_list(peer, format!("Block height above their tip: {}", block.height))
                     .await;
                 warn!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] {} sent a block that was higher than their tip during catchup. ", algo,  peer);
 
@@ -1373,7 +1375,7 @@ where S: ShareChain
             }
         }
 
-        let last_block_from_them = blocks.last().map(|b| (b.height, b.hash.clone()));
+        let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
@@ -1510,7 +1512,7 @@ where S: ShareChain
             let mut hash = tip_hash;
             for _ in 0..CATCH_UP_SYNC_BLOCKS_IN_I_HAVE {
                 if let Some(block) = share_chain.get_blocks(&[(height, hash)]).await?.first() {
-                    i_have_blocks.push((height, block.hash.clone()));
+                    i_have_blocks.push((height, block.hash));
                     if height == 0 {
                         break;
                     }
@@ -2096,7 +2098,7 @@ where S: ShareChain
             .await
             .inspect_err(|e| warn!(target: LOG_TARGET, "Failed to load whitelist: {e:?}"));
 
-        for (_peer_id, record) in self.network_peer_store.whitelist_peers() {
+        for record in self.network_peer_store.whitelist_peers().values() {
             for address in record.peer_info.public_addresses() {
                 self.swarm
                     .behaviour_mut()
