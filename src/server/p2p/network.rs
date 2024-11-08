@@ -453,7 +453,7 @@ where S: ShareChain
                     relay_client,
                     dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                     autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
-                    connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established(config.max_connections)),
+                    connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
@@ -1595,6 +1595,8 @@ where S: ShareChain
         lock.select_random_relay();
         if let Some(relay) = lock.selected_relay_mut() {
             let addresses = relay.addresses.clone();
+            let mut addresses = relay.addresses.clone();
+            addresses.truncate(8);
 
             if let Err(err) = self.swarm.dial(
                 DialOpts::peer_id(relay.peer_id)
@@ -1733,9 +1735,11 @@ where S: ShareChain
                 },
                 event = self.swarm.select_next_some() => {
                     let timer = Instant::now();
+                    let mut event_string = format!("{:?}", event);
+                    event_string.truncate(300);
                     self.handle_event(event).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
-                        warn!(target: LOG_TARGET, "Event handling took too long: {:?}", timer.elapsed());
+                        warn!(target: LOG_TARGET, "Event handling took too long: {:?} ({})", timer.elapsed(),event_string);
                     }
                  },
                 _ = publish_peer_info_interval.tick() => {

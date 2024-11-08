@@ -69,7 +69,8 @@ pub async fn server(
     config_builder.with_stable_peer(args.stable_peer);
     config_builder.with_private_key_folder(args.private_key_folder.clone());
     if let Some(max_connections) = args.max_connections {
-        config_builder.with_max_connections(max_connections);
+        config_builder.with_max_outgoing_connections(max_connections);
+        config_builder.with_max_incoming_connections(max_connections);
     }
     config_builder.with_randomx_enabled(!args.randomx_disabled);
     config_builder.with_sha3x_enabled(!args.sha3x_disabled);

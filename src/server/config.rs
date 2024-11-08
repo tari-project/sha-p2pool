@@ -22,7 +22,8 @@ pub struct Config {
     pub p2p_service: p2p::Config,
     pub mining_enabled: bool,
     pub http_server: http::server::Config,
-    pub max_connections: Option<u32>,
+    pub max_incoming_connections: Option<u32>,
+    pub max_outgoing_connections: Option<u32>,
 }
 
 impl Default for Config {
@@ -36,7 +37,8 @@ impl Default for Config {
             p2p_service: p2p::Config::default(),
             mining_enabled: true,
             http_server: http::server::Config::default(),
-            max_connections: Some(100),
+            max_incoming_connections: Some(100),
+            max_outgoing_connections: Some(100),
         }
     }
 }
@@ -100,8 +102,13 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_max_connections(&mut self, config: u32) -> &mut Self {
-        self.config.max_connections = Some(config);
+    pub fn with_max_incoming_connections(&mut self, config: u32) -> &mut Self {
+        self.config.max_incoming_connections = Some(config);
+        self
+    }
+
+    pub fn with_max_outgoing_connections(&mut self, config: u32) -> &mut Self {
+        self.config.max_outgoing_connections = Some(config);
         self
     }
 
