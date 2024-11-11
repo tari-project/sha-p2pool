@@ -128,7 +128,7 @@ where S: ShareChain
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: Arc<P2Block>) -> Result<(), Status> {
         if !self.are_we_synced_with_p2pool.load(Ordering::Relaxed) {
-            info!(target: LOG_TARGET, "We are not synced yet, not submitting blok atm");
+            info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
             return Ok(());
         }
         let pow_algo = block.original_block.header.pow.pow_algo;

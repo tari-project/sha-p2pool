@@ -3,11 +3,15 @@
 
 use std::collections::HashMap;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
 use log::{error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::PowAlgorithm;
-use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::oneshot;
 
 use super::{models::ChainStats, MAX_ACCEPTABLE_HTTP_TIMEOUT};
@@ -23,7 +27,6 @@ const LOG_TARGET: &str = "tari::p2pool::server::stats::get";
 
 #[derive(Serialize)]
 pub(crate) struct BlockResult {
-    chain_id: String,
     hash: String,
     timestamp: EpochTime,
     prev_hash: String,
@@ -32,7 +35,7 @@ pub(crate) struct BlockResult {
     sent_to_main_chain: bool,
     target_difficulty: u64,
     candidate_block_height: u64,
-    candidate_block_prev_hash: String,
+    // candidate_block_prev_hash: String,
     algo: String,
 }
 
@@ -70,35 +73,87 @@ pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<
     }))
 }
 
-pub(crate) async fn handle_chain(State(_state): State<AppState>) -> Result<Json<Vec<BlockResult>>, StatusCode> {
-    // let chain = state.share_chain_sha3x.blocks(0).await.map_err(|error| {
-    //     error!(target: LOG_TARGET, "Failed to get blocks of share chain: {error:?}");
-    //     StatusCode::INTERNAL_SERVER_ERROR
-    // })?;
+pub(crate) async fn handle_chain(
+    Query(params): Query<HashMap<String, String>>,
+    // algo: PowAlgorithm,
+    // height: u64,
+    // count: u64,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<BlockResult>>, StatusCode> {
+    let timer = std::time::Instant::now();
+    let pow_algo = match params.get("algo") {
+        Some(algo) => match algo.to_lowercase().as_str() {
+            "sha3x" => PowAlgorithm::Sha3x,
+            "randomx" => PowAlgorithm::RandomX,
+            _ => {
+                error!(target: LOG_TARGET, "Invalid algo: {algo}");
+                return Err(StatusCode::BAD_REQUEST);
+            },
+        },
+        None => {
+            error!(target: LOG_TARGET, "Missing algo");
+            return Err(StatusCode::BAD_REQUEST);
+        },
+    };
+    let height = match params.get("height") {
+        Some(height) => match height.parse::<u64>() {
+            Ok(height) => height,
+            Err(e) => {
+                error!(target: LOG_TARGET, "Invalid height: {e:?}");
+                return Err(StatusCode::BAD_REQUEST);
+            },
+        },
+        None => 0u64,
+    };
+    let count = match params.get("count") {
+        Some(count) => match count.parse::<usize>() {
+            Ok(count) => count,
+            Err(e) => {
+                error!(target: LOG_TARGET, "Invalid count: {e:?}");
+                return Err(StatusCode::BAD_REQUEST);
+            },
+        },
+        None => 20,
+    };
+    let (tx, rx) = oneshot::channel();
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetChain {
+            pow_algo,
+            height,
+            count,
+            response: tx,
+        })
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get chain: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    // let result = chain
-    //     .iter()
-    //     .map(|block| BlockResult {
-    //         chain_id: block.chain_id.clone(),
-    //         hash: block.hash.to_hex(),
-    //         timestamp: block.timestamp,
-    //         prev_hash: block.prev_hash.to_hex(),
-    //         height: block.height,
-    //         // original_block_header: block.original_block_header().clone(),
-    //         miner_wallet_address: block.miner_wallet_address.as_ref().map(|a| a.to_base58()),
-    //         sent_to_main_chain: block.sent_to_main_chain,
-    //         achieved_difficulty: block.achieved_difficulty.as_u64(),
-    //         candidate_block_prev_hash: block.original_block_header.prev_hash.to_hex(),
-    //         candidate_block_height: block.original_block_header.height,
-    //         algo: block.original_block_header.pow.pow_algo.to_string(),
-    //     })
-    //     .collect();
-    todo!();
+    let mut res = rx.await.map_err(|e| {
+        error!(target: LOG_TARGET, "Failed to receive from oneshot: {e:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
-    // error!(target: LOG_TARGET, "handle_chain took too long: {}ms", timer.elapsed().as_millis());
-    // }
-    // Ok(Json())
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_chain took too long: {}ms", timer.elapsed().as_millis());
+    }
+
+    let mut return_value = Vec::with_capacity(res.len());
+    for block in res.iter_mut() {
+        return_value.push(BlockResult {
+            hash: block.hash.to_hex(),
+            timestamp: block.timestamp,
+            prev_hash: block.prev_hash.to_hex(),
+            height: block.height,
+            miner_wallet_address: block.miner_wallet_address.to_base58(),
+            sent_to_main_chain: block.sent_to_main_chain,
+            target_difficulty: block.target_difficulty.as_u64(),
+            candidate_block_height: block.original_block.header.height,
+            algo: pow_algo.to_string().to_lowercase(),
+        });
+    }
+    Ok(Json(return_value))
 }
 
 pub(crate) async fn handle_miners_with_shares(

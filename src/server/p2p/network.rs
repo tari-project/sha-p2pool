@@ -26,7 +26,7 @@ use libp2p::{
     connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
+    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, Version},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
@@ -103,9 +103,9 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
-const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/4";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/4";
-const CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL: &str = "/catch_up_sync/4";
+const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/5";
+const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
+const CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL: &str = "/catch_up_sync/5";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const SYNC_REQUEST_LOG_TARGET: &str = "sync_request";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
@@ -238,6 +238,9 @@ struct SendCatchUpSyncRequest {
 
 #[derive(NetworkBehaviour)]
 pub struct ServerNetworkBehaviour {
+    // This must be the first behaviour otherwise you end up with a debug-assert failing in
+    // req-resp
+    pub connection_limits: connection_limits::Behaviour,
     pub mdns: Toggle<mdns::Behaviour<Tokio>>,
     pub gossipsub: gossipsub::Behaviour,
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
@@ -249,12 +252,17 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
-    pub connection_limits: connection_limits::Behaviour,
 }
 
 pub enum P2pServiceQuery {
     GetConnectionInfo(oneshot::Sender<ConnectionInfo>),
     GetConnectedPeers(oneshot::Sender<(Vec<ConnectedPeerInfo>, Vec<ConnectedPeerInfo>)>),
+    GetChain {
+        pow_algo: PowAlgorithm,
+        height: u64,
+        count: usize,
+        response: oneshot::Sender<Vec<Arc<P2Block>>>,
+    },
 }
 
 #[derive(Serialize, Clone)]
@@ -1493,6 +1501,19 @@ where S: ShareChain
 
         let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
 
+        // Do not disconnect from relays
+        if !is_relay &&
+            !info
+                .protocols
+                .iter()
+                .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
+        {
+            warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
+            self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+            let _res = self.swarm.disconnect_peer_id(peer_id);
+            return;
+        }
+
         // adding peer to kademlia and gossipsub
         for addr in info.listen_addrs {
             // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
@@ -1706,6 +1727,25 @@ where S: ShareChain
                     });
                 }
                 let _ = reply.send((white_list_res, grey_list_res));
+            },
+            P2pServiceQuery::GetChain {
+                pow_algo,
+                height,
+                count,
+                response,
+            } => {
+                let share_chain = match pow_algo {
+                    PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
+                    PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+                };
+                let blocks = match share_chain.all_blocks(Some(height), count, true).await {
+                    Ok(blocks) => blocks,
+                    Err(e) => {
+                        error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get blocks from height: {e:?}");
+                        vec![]
+                    },
+                };
+                let _ = response.send(blocks);
             },
         }
     }
