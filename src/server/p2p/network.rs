@@ -9,7 +9,7 @@ use std::{
     io::Write,
     num::NonZeroU32,
     path::PathBuf,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -26,7 +26,7 @@ use libp2p::{
     connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
-    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, Version},
+    gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
     identify::{self, Info},
     identity::Keypair,
     kad::{self, store::MemoryStore, Event},
@@ -178,6 +178,7 @@ pub struct Config {
     pub peer_list_folder: PathBuf,
     pub sha3x_enabled: bool,
     pub randomx_enabled: bool,
+    pub event_delay_before_start: u32,
 }
 
 impl Default for Config {
@@ -203,6 +204,7 @@ impl Default for Config {
             sync_job_enabled: true,
             sha3x_enabled: true,
             randomx_enabled: true,
+            event_delay_before_start: 10,
         }
     }
 }
@@ -336,6 +338,7 @@ where S: ShareChain
 
     start_time: Instant,
     relay_store: Arc<RwLock<RelayStore>>,
+    are_we_synced_with_p2pool: Arc<AtomicBool>,
 }
 
 impl<S> Service<S>
@@ -349,6 +352,7 @@ where S: ShareChain
         share_chain_random_x: Arc<S>,
         network_peer_store: PeerStore,
         shutdown_signal: ShutdownSignal,
+        are_we_synced_with_p2pool: Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         let swarm = Self::new_swarm(config).await?;
 
@@ -375,6 +379,7 @@ where S: ShareChain
             query_rx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
             start_time: Instant::now(),
+            are_we_synced_with_p2pool,
         })
     }
 
@@ -1222,78 +1227,82 @@ where S: ShareChain
                     },
                     request_response::Event::ResponseSent { .. } => {},
                 },
-                ServerNetworkBehaviourEvent::ShareChainSync(event) => match event {
-                    request_response::Event::Message { peer: _peer, message } => match message {
-                        request_response::Message::Request {
-                            request_id: _request_id,
-                            request,
-                            channel,
-                        } => {
-                            self.handle_share_chain_sync_request(channel, request).await;
+                ServerNetworkBehaviourEvent::ShareChainSync(event) => {
+                    match event {
+                        request_response::Event::Message { peer: _peer, message } => match message {
+                            request_response::Message::Request {
+                                request_id: _request_id,
+                                request,
+                                channel,
+                            } => {
+                                self.handle_share_chain_sync_request(channel, request).await;
+                            },
+                            request_response::Message::Response {
+                                request_id: _,
+                                response,
+                            } => {
+                                self.handle_share_chain_sync_response(response).await;
+                            },
                         },
-                        request_response::Message::Response {
-                            request_id: _,
-                            response,
-                        } => {
-                            self.handle_share_chain_sync_response(response).await;
-                        },
-                    },
-                    request_response::Event::OutboundFailure { peer, error, .. } => {
-                        debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                        // Unlock the permit
-                        self.network_peer_store
-                            .move_to_grey_list(peer, format!("Error during share chain sync:{}", error))
-                            .await;
+                        request_response::Event::OutboundFailure { peer, error, .. } => {
+                            debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                            // Unlock the permit
+                            self.network_peer_store
+                                .move_to_grey_list(peer, format!("Error during share chain sync:{}", error))
+                                .await;
 
-                        // Remove peer from peer store to try to sync from another peer,
-                        // if the peer goes online/accessible again, the peer store will have it again.
-                        // self.network_peer_store.remove(&peer).await;
-                    },
-                    request_response::Event::InboundFailure { peer, error, .. } => {
-                        error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    },
-                    request_response::Event::ResponseSent { .. } => {},
+                            // Remove peer from peer store to try to sync from another peer,
+                            // if the peer goes online/accessible again, the peer store will have it again.
+                            // self.network_peer_store.remove(&peer).await;
+                        },
+                        request_response::Event::InboundFailure { peer, error, .. } => {
+                            error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                        },
+                        request_response::Event::ResponseSent { .. } => {},
+                    };
                 },
-                ServerNetworkBehaviourEvent::CatchUpSync(event) => match event {
-                    request_response::Event::Message { peer: _peer, message } => match message {
-                        request_response::Message::Request {
-                            request_id: _request_id,
-                            request,
-                            channel,
-                        } => {
-                            self.handle_catch_up_sync_request(channel, request).await;
-                        },
-                        request_response::Message::Response {
-                            request_id: _request_id,
-                            response,
-                        } => {
-                            self.handle_catch_up_sync_response(response).await;
-                        },
-                    },
-                    request_response::Event::OutboundFailure { peer, error, .. } => {
-                        // Peers can be offline
-                        debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                        match error {
-                            OutboundFailure::DialFailure => {
-                                debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                ServerNetworkBehaviourEvent::CatchUpSync(event) => {
+                    match event {
+                        request_response::Event::Message { peer: _peer, message } => match message {
+                            request_response::Message::Request {
+                                request_id: _request_id,
+                                request,
+                                channel,
+                            } => {
+                                self.handle_catch_up_sync_request(channel, request).await;
                             },
-                            _ => {
-                                warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                            request_response::Message::Response {
+                                request_id: _request_id,
+                                response,
+                            } => {
+                                self.handle_catch_up_sync_response(response).await;
                             },
-                        }
-                        // Unlock the permit
-                        self.network_peer_store
-                            .move_to_grey_list(peer, format!("Error during catch up sync:{}", error))
-                            .await;
+                        },
+                        request_response::Event::OutboundFailure { peer, error, .. } => {
+                            // Peers can be offline
+                            debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                            match error {
+                                OutboundFailure::DialFailure => {
+                                    debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                },
+                                _ => {
+                                    warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                },
+                            }
+                            // Unlock the permit
+                            self.network_peer_store
+                                .move_to_grey_list(peer, format!("Error during catch up sync:{}", error))
+                                .await;
 
-                        // Remove peer from peer store to try to sync from another peer,
-                        // if the peer goes online/accessible again, the peer store will have it again.
-                        // self.network_peer_store.remove(&peer).await;
-                    },
-                    request_response::Event::InboundFailure { peer, error, .. } => {
-                        error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES inbound failure: {peer:?} -> {error:?}");
-                    },
-                    request_response::Event::ResponseSent { .. } => {},
+                            // Remove peer from peer store to try to sync from another peer,
+                            // if the peer goes online/accessible again, the peer store will have it again.
+                            // self.network_peer_store.remove(&peer).await;
+                        },
+                        request_response::Event::InboundFailure { peer, error, .. } => {
+                            error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                        },
+                        request_response::Event::ResponseSent { .. } => {},
+                    };
                 },
                 ServerNetworkBehaviourEvent::Kademlia(event) => match event {
                     Event::RoutingUpdated { peer, addresses, .. } => {
@@ -1796,6 +1805,9 @@ where S: ShareChain
                 self.network_peer_store.add_catch_up_attempt(&peer);
             },
             InnerRequest::ResetCatchUpAttempts(peer) => {
+                // this only gets called after sync completes. So lets make sure we can mine since we completed a sync
+                self.are_we_synced_with_p2pool
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 self.network_peer_store.reset_catch_up_attempts(&peer);
             },
             InnerRequest::PerformCatchUpSync(perform_catch_up_sync) => {
@@ -1968,23 +1980,14 @@ where S: ShareChain
         if self.config.randomx_enabled {
             algos.push(PowAlgorithm::RandomX);
         }
+
+        let mut peer_with_better_pow = false;
         for algo in &algos {
             // Find any blocks we are missing.
             let _chain = match algo {
                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
             };
-
-            // let missing_blocks = match chain.missing_blocks().await.inspect_err(
-            //     |e| error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get missing blocks: {e:?}"),
-            // ) {
-            //     Ok(missing_blocks) => missing_blocks,
-            //     Err(_) => {
-            //         continue;
-            //     },
-            // };
-
-            // dbg!(&missing_blocks);
 
             let mut best_peers = self
                 .network_peer_store
@@ -2008,6 +2011,9 @@ where S: ShareChain
 
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
             if best_peers.is_empty() {
+                // We set this to true here so we dont mark our selves as synced with the network, if we dont have
+                // peers, we dont have a network
+                peer_with_better_pow = true;
                 info!(target: LOG_TARGET, squad = &self.config.squad; "No peers found to try and sync to");
             } else {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Found {} peers to try and sync to", best_peers.len());
@@ -2025,6 +2031,7 @@ where S: ShareChain
                     ),
                 };
                 if their_pow > our_pow {
+                    peer_with_better_pow = true;
                     info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to perform catchup sync from peer: {} with height {}", algo,record.peer_id, their_height);
 
                     let perform_catch_up_sync = PerformCatchUpSync {
@@ -2039,6 +2046,12 @@ where S: ShareChain
                         .await;
                 }
             }
+        }
+
+        // there are not any peers with better pow than us
+        if !peer_with_better_pow {
+            self.are_we_synced_with_p2pool
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
