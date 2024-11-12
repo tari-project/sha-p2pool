@@ -677,11 +677,13 @@ where S: ShareChain
         let source_peer = message.source;
         if let Some(source_peer) = source_peer {
             let topic = message.topic.to_string();
+            dbg!(&topic);
             match topic {
                 topic if topic == Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) => {
                     match messages::PeerInfo::try_from(message) {
                         Ok(payload) => {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {source_peer:?} -> {payload:?}");
+                            dbg!(&payload);
                             if payload.version != PROTOCOL_VERSION {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
@@ -729,41 +731,42 @@ where S: ShareChain
                     // }
                     match NotifyNewTipBlock::try_from(message) {
                         Ok(payload) => {
+                            dbg!(&payload);
                             if payload.version != PROTOCOL_VERSION {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
                             // lets check age
                             // if this timestamp is older than 60 seconds, we reject it
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(10) {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             if payload.algo() == PowAlgorithm::RandomX && !self.config.randomx_enabled {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a RandomX block but RandomX is disabled, skipping", source_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a RandomX block but RandomX is disabled, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             if payload.algo() == PowAlgorithm::Sha3x && !self.config.sha3x_enabled {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a Sha3x block but Sha3x is disabled, skipping", source_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a Sha3x block but Sha3x is disabled, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             let payload = Arc::new(payload);
                             let message_peer = payload.peer_id();
                             if message_peer.to_string() != source_peer.to_string() {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
                             }
-                            debug!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
+                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
                             let _ = self.swarm
                                 .behaviour_mut()
                                 .peer_sync
                                 .add_want_peers(vec![source_peer.clone()])
                                 .await.inspect_err(|error| {
-                                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {error:?}");
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {error:?}");
                                 });
                             // If we don't have this peer, try do peer exchange
                             if !self.network_peer_store.exists(message_peer) {
@@ -772,11 +775,11 @@ where S: ShareChain
 
                             // verify payload
                             if payload.new_blocks.is_empty() {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", message_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", message_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
 
-                            debug!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
                             let algo = payload.algo();
                             let share_chain = match algo {
                                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -789,14 +792,24 @@ where S: ShareChain
                                 payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0) <=
                                     our_tip.saturating_sub(4)
                             {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", message_peer);
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", message_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
                             // if payload.
-                            if payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0) > our_tip.saturating_add(2)
-                            {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is too far ahead, skipping", message_peer);
+                            let max_payload_height = payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0);
+                            if max_payload_height > our_tip.saturating_add(2) {
+                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is too far ahead, we need to initiate chatchup sync", message_peer);
+                                let perform_catch_up_sync = PerformCatchUpSync {
+                                    algo,
+                                    peer: *message_peer,
+                                    last_block_from_them: None,
+                                    their_height: max_payload_height,
+                                };
+                                let _ = self
+                                    .inner_request_tx
+                                    .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync))
+                                    .await;
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
@@ -1083,7 +1096,7 @@ where S: ShareChain
         }
 
         if !self.network_peer_store.is_whitelisted(&peer) {
-            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
+            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
             // return;
         }
 
@@ -1421,21 +1434,6 @@ where S: ShareChain
         let num_catchups = self.network_peer_store.num_catch_ups(&peer);
 
         tokio::spawn(async move {
-            // If any blocks are above their tip, greylist
-            for block in &blocks {
-                if block.height > their_height {
-                    let _ = tx
-                        .send(InnerRequest::GreyListPeer(
-                            peer,
-                            format!("Block height above their tip: {}", block.height),
-                        ))
-                        .await;
-                    warn!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] {} sent a block that was higher than their tip during catchup. ", algo,  peer);
-
-                    return;
-                }
-            }
-
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(result) => {
