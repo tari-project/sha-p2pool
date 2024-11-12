@@ -539,54 +539,57 @@ impl ShareChain for InMemoryShareChain {
         // 1. The uncle can only be a max of 3 blocks older than the new tip
         // 2. The uncle can only be an uncle once in the chain
         // 3. The uncle must link back to the main chain
+        // 4. The chain height must be above 5
         let mut excluded_uncles: Vec<FixedHash> = vec![];
         let mut uncles: Vec<(u64, FixedHash)> = vec![];
-        for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
-            if let Some(older_level) = chain_read_lock.level_at_height(height) {
-                let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
-                // Blocks in the main chain can't be uncles
-                excluded_uncles.push(chain_block.hash);
-                for uncle in chain_block.uncles.iter() {
-                    excluded_uncles.push(uncle.1);
-                }
-                for block in older_level.blocks.iter() {
-                    uncles.push((height, *block.0));
-                }
-            }
-        }
-        for uncle in &uncles {
-            if chain_read_lock.level_at_height(uncle.0).is_none() {
-                excluded_uncles.push((*uncle.1).into());
-                continue;
-            }
-            if let Some(level) = chain_read_lock.level_at_height(uncle.0) {
-                if let Some(uncle_block) = level.blocks.get(&uncle.1) {
-                    let parent = match chain_read_lock.get_parent_block(uncle_block) {
-                        Some(parent) => parent,
-                        None => {
-                            excluded_uncles.push(uncle.1);
-                            continue;
-                        },
-                    };
-                    if chain_read_lock
-                        .level_at_height(parent.height)
-                        .ok_or(Error::BlockLevelNotFound)?
-                        .chain_block !=
-                        parent.hash
-                    {
+        if new_height >= UNCLE_START_HEIGHT {
+            for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
+                if let Some(older_level) = chain_read_lock.level_at_height(height) {
+                    let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
+                    // Blocks in the main chain can't be uncles
+                    excluded_uncles.push(chain_block.hash);
+                    for uncle in chain_block.uncles.iter() {
                         excluded_uncles.push(uncle.1);
                     }
-                } else {
-                    excluded_uncles.push(uncle.1);
+                    for block in older_level.blocks.iter() {
+                        uncles.push((height, *block.0));
+                    }
                 }
             }
-        }
+            for uncle in &uncles {
+                if chain_read_lock.level_at_height(uncle.0).is_none() {
+                    excluded_uncles.push((*uncle.1).into());
+                    continue;
+                }
+                if let Some(level) = chain_read_lock.level_at_height(uncle.0) {
+                    if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                        let parent = match chain_read_lock.get_parent_block(uncle_block) {
+                            Some(parent) => parent,
+                            None => {
+                                excluded_uncles.push(uncle.1);
+                                continue;
+                            },
+                        };
+                        if chain_read_lock
+                            .level_at_height(parent.height)
+                            .ok_or(Error::BlockLevelNotFound)?
+                            .chain_block !=
+                            parent.hash
+                        {
+                            excluded_uncles.push(uncle.1);
+                        }
+                    } else {
+                        excluded_uncles.push(uncle.1);
+                    }
+                }
+            }
 
-        // Remove excluded.
-        for excluded in excluded_uncles.iter() {
-            uncles.retain(|uncle| &uncle.1 != excluded);
+            // Remove excluded.
+            for excluded in excluded_uncles.iter() {
+                uncles.retain(|uncle| &uncle.1 != excluded);
+            }
+            uncles.truncate(UNCLE_LIMIT);
         }
-        uncles.truncate(UNCLE_LIMIT);
 
         Ok(P2Block::builder()
             .with_timestamp(EpochTime::now())
