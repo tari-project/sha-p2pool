@@ -3,15 +3,7 @@
 
 use std::string::FromUtf8Error;
 
-use libp2p::{
-    gossipsub::PublishError,
-    identity::DecodingError,
-    kad::NoKnownPeers,
-    multiaddr,
-    noise,
-    swarm::DialError,
-    TransportError,
-};
+use libp2p::{gossipsub::PublishError, identity::DecodingError, multiaddr, noise, swarm::DialError, TransportError};
 use thiserror::Error;
 
 use crate::sharechain;
@@ -44,8 +36,6 @@ pub enum LibP2PError {
     Publish(#[from] PublishError),
     #[error("Dial error: {0}")]
     Dial(#[from] DialError),
-    #[error("Kademlia: No known peers error: {0}")]
-    KademliaNoKnownPeers(#[from] NoKnownPeers),
     #[error("Missing peer ID from address: {0}")]
     MissingPeerId(String),
     #[error("Key decode error: {0}")]

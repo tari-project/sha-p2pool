@@ -29,7 +29,6 @@ use libp2p::{
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError},
     identify::{self, Info},
     identity::Keypair,
-    kad::{self, store::MemoryStore, Event, Mode},
     mdns::{self, tokio::Tokio},
     multiaddr::Protocol,
     noise,
@@ -48,6 +47,7 @@ use libp2p::{
     StreamProtocol,
     Swarm,
 };
+use libp2p_peersync::store::MemoryPeerStore;
 use log::{
     debug,
     error,
@@ -248,7 +248,8 @@ pub struct ServerNetworkBehaviour {
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
     pub direct_peer_exchange: cbor::Behaviour<DirectPeerInfoRequest, DirectPeerInfoResponse>,
     pub catch_up_sync: cbor::Behaviour<CatchUpSyncRequest, CatchUpSyncResponse>,
-    pub kademlia: kad::Behaviour<MemoryStore>,
+    // pub kademlia: kad::Behaviour<MemoryStore>,
+    pub peer_sync: libp2p_peersync::Behaviour<libp2p_peersync::store::MemoryPeerStore>,
     pub identify: identify::Behaviour,
     pub relay_server: relay::Behaviour,
     pub relay_client: relay::client::Behaviour,
@@ -474,6 +475,9 @@ where S: ShareChain
             ..Default::default()
         };
 
+        let peer_sync =
+        libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());
+
                 let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(),
                 relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
                 );
@@ -502,10 +506,11 @@ where S: ShareChain
                         )],
                         request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
                     ),
-                    kademlia: kad::Behaviour::new(
-                        key_pair.public().to_peer_id(),
-                        MemoryStore::new(key_pair.public().to_peer_id()),
-                    ),
+                    peer_sync,
+                    // kademlia: kad::Behaviour::new(
+                        // key_pair.public().to_peer_id(),
+                        // MemoryStore::new(key_pair.public().to_peer_id()),
+                    // ),
                     identify: identify::Behaviour::new(identify::Config::new(
                         "/p2pool/1.0.0".to_string(),
                         key_pair.public(),
@@ -524,7 +529,7 @@ where S: ShareChain
             .build();
 
         // All nodes are servers
-        swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
+        // swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
         Ok(swarm)
     }
@@ -699,6 +704,12 @@ where S: ShareChain
                             debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
 
                             if !self.config.is_seed_peer && self.add_peer(payload, source_peer).await {
+                                let _= self.swarm
+                                    .behaviour_mut()
+                                    .peer_sync
+                                    .add_want_peers(vec![source_peer.clone()]).await.inspect_err(|e| {
+                                        error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {e:?}");
+                                    });
                                 self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
                             }
                             return Ok(MessageAcceptance::Accept);
@@ -747,6 +758,13 @@ where S: ShareChain
                             }
                             debug!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
+                            let _ = self.swarm
+                                .behaviour_mut()
+                                .peer_sync
+                                .add_want_peers(vec![source_peer.clone()])
+                                .await.inspect_err(|error| {
+                                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {error:?}");
+                                });
                             // If we don't have this peer, try do peer exchange
                             if !self.network_peer_store.exists(message_peer) {
                                 self.initiate_direct_peer_exchange(message_peer).await;
@@ -1304,28 +1322,13 @@ where S: ShareChain
                         request_response::Event::ResponseSent { .. } => {},
                     };
                 },
-                ServerNetworkBehaviourEvent::Kademlia(event) => match event {
-                    Event::RoutingUpdated { peer, addresses, .. } => {
-                        debug!(target: LOG_TARGET, squad = &self.config.squad; "Routing updated: {peer:?} -> {addresses:?}");
-                        // addresses.iter().for_each(|addr| {
-                        //     self.swarm.add_peer_address(peer, addr.clone());
-                        // });
-                        // dbg!(peer);
-                        // dbg!(old_peer);
-                        // dbg!(addresses);
-                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                        // if let Some(old_peer) = old_peer {
-                        // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&old_peer);
-                        // }
-                    },
-                    _ => debug!(target: LOG_TARGET, squad = &self.config.squad; "[KADEMLIA] {event:?}"),
-                },
+
                 ServerNetworkBehaviourEvent::Identify(event) => match event {
                     identify::Event::Received { peer_id, info, .. } => self.handle_peer_identified(peer_id, info).await,
                     identify::Event::Error { peer_id, error, .. } => {
                         warn!("Failed to identify peer {peer_id:?}: {error:?}");
                         // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                        self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                        // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                     },
                     _ => {},
                 },
@@ -1339,6 +1342,9 @@ where S: ShareChain
                     debug!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::Autonat(event) => self.handle_autonat_event(event).await,
+                ServerNetworkBehaviourEvent::PeerSync(event) => {
+                    info!(target: LOG_TARGET, "[PEER SYNC]: {event:?}");
+                },
             },
             _ => {},
         };
@@ -1519,7 +1525,7 @@ where S: ShareChain
             .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
         {
             warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
-            self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+            // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
             let _res = self.swarm.disconnect_peer_id(peer_id);
 
             // return;
@@ -2196,12 +2202,13 @@ where S: ShareChain
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
             info!(target: LOG_TARGET, squad = &self.config.squad; "Adding seed peer: {:?} -> {:?}", peer_id, addr);
-            self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
+            // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
+            self.swarm.add_peer_address(peer_id.clone(), addr.clone());
         });
 
-        if !seed_peers.is_empty() {
-            self.bootstrap_kademlia()?;
-        }
+        // if !seed_peers.is_empty() {
+        // self.bootstrap_kademlia()?;
+        // }
 
         Ok(())
     }
@@ -2215,16 +2222,6 @@ where S: ShareChain
             ))),
             Some(a) => Ok(Multiaddr::try_from(a).map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?),
         }
-    }
-
-    fn bootstrap_kademlia(&mut self) -> Result<(), Error> {
-        self.swarm
-            .behaviour_mut()
-            .kademlia
-            .bootstrap()
-            .map_err(|error| Error::LibP2P(LibP2PError::KademliaNoKnownPeers(error)))?;
-
-        Ok(())
     }
 
     pub fn create_query_client(&self) -> Sender<P2pServiceQuery> {
@@ -2284,10 +2281,11 @@ where S: ShareChain
 
         for record in self.network_peer_store.whitelist_peers().values() {
             for address in record.peer_info.public_addresses() {
-                self.swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .add_address(&record.peer_id, address.clone());
+                // self.swarm
+                // .behaviour_mut()
+                // .kademlia
+                // .add_address(&record.peer_id, address.clone());
+                self.swarm.add_peer_address(record.peer_id.clone(), address);
             }
         }
         self.main_loop().await?;
