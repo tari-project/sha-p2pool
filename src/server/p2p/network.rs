@@ -29,7 +29,7 @@ use libp2p::{
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, MessageId, PublishError, Version},
     identify::{self, Info},
     identity::Keypair,
-    kad::{self, store::MemoryStore, Event},
+    kad::{self, store::MemoryStore, Event, Mode},
     mdns::{self, tokio::Tokio},
     multiaddr::Protocol,
     noise,
@@ -423,7 +423,7 @@ where S: ShareChain
 
     /// Creates a new swarm from the provided config
     async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let swarm = libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
             .with_tokio()
             .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
             .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
@@ -518,8 +518,8 @@ where S: ShareChain
             // .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
             .build();
 
-        dbg!("Check if we must set the kademlia mode");
-        // swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
+        // All nodes are servers
+        swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
         Ok(swarm)
     }
@@ -1106,10 +1106,10 @@ where S: ShareChain
                 established_in,
                 ..
             } => {
-                debug!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
             SwarmEvent::Dialing { peer_id, .. } => {
-                debug!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Dialing: {peer_id:?}");
             },
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
@@ -1485,6 +1485,8 @@ where S: ShareChain
             warn!(target: LOG_TARGET, "Dialled ourselves");
             return;
         }
+
+        dbg!(&info);
 
         if self.swarm.external_addresses().count() > 0 {
             debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}", self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));
@@ -2180,6 +2182,7 @@ where S: ShareChain
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
+            info!(target: LOG_TARGET, squad = &self.config.squad; "Adding seed peer: {:?} -> {:?}", peer_id, addr);
             self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
         });
 
