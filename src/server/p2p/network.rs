@@ -677,13 +677,11 @@ where S: ShareChain
         let source_peer = message.source;
         if let Some(source_peer) = source_peer {
             let topic = message.topic.to_string();
-            dbg!(&topic);
             match topic {
                 topic if topic == Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC) => {
                     match messages::PeerInfo::try_from(message) {
                         Ok(payload) => {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "[squad] New peer info: {source_peer:?} -> {payload:?}");
-                            dbg!(&payload);
                             if payload.version != PROTOCOL_VERSION {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
@@ -731,7 +729,6 @@ where S: ShareChain
                     // }
                     match NotifyNewTipBlock::try_from(message) {
                         Ok(payload) => {
-                            dbg!(&payload);
                             if payload.version != PROTOCOL_VERSION {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
