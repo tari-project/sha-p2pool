@@ -16,7 +16,7 @@ use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
+use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
 
 const LOG_TARGET: &str = "tari::p2pool::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
@@ -274,6 +274,9 @@ impl PeerStore {
             .iter()
             .filter_map(|(peer_id, peer_info)| {
                 if let Ok(p) = PeerId::from_str(peer_id) {
+                    if peer_info.version < PROTOCOL_VERSION {
+                        return None;
+                    }
                     Some((
                         peer_id.clone(),
                         PeerStoreRecord::new(p, peer_info.clone()).with_timestamp(EpochTime::now().as_u64()),

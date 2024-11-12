@@ -8,7 +8,10 @@ use tari_common_types::tari_address::TariAddress;
 use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::{server::p2p::ConnectionInfo, sharechain::p2block::P2Block};
+use crate::{
+    server::{http::stats_collector::GetStatsResponse, p2p::ConnectionInfo},
+    sharechain::p2block::P2Block,
+};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StatsBlock {
@@ -83,14 +86,12 @@ impl SquadDetails {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Stats {
-    pub connected: bool,
-    pub peer_count: u64,
     pub connection_info: ConnectionInfo,
     pub connected_since: Option<EpochTime>,
-    pub randomx_stats: ChainStats,
-    pub sha3x_stats: ChainStats,
+    pub randomx_stats: GetStatsResponse,
+    pub sha3x_stats: GetStatsResponse,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

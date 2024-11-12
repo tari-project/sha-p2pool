@@ -19,6 +19,7 @@ use crate::server::{
     http::{
         server::AppState,
         stats::models::{SquadDetails, Stats},
+        stats_collector::GetStatsResponse,
     },
     p2p::{ConnectedPeerInfo, P2pServiceQuery},
 };
@@ -196,8 +197,7 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     let timer = std::time::Instant::now();
     info!(target: LOG_TARGET, "handle_get_stats");
 
-    let sha3x_stats = get_chain_stats(state.clone(), PowAlgorithm::Sha3x).await?;
-    let randomx_stats = get_chain_stats(state.clone(), PowAlgorithm::RandomX).await?;
+    let (rx_stats, sha3x_stats) = get_chain_stats(state.clone()).await?;
     // let peer_count = state.peer_store.peer_count().await;
     let peer_count = 0;
     let connected = peer_count > 0;
@@ -232,11 +232,9 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     // };
 
     let stats = Stats {
-        connected,
-        peer_count,
         connection_info,
         connected_since,
-        randomx_stats,
+        randomx_stats: rx_stats,
         sha3x_stats,
     };
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
@@ -246,12 +244,26 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
 }
 
 #[allow(clippy::too_many_lines)]
-async fn get_chain_stats(state: AppState, _algo: PowAlgorithm) -> Result<ChainStats, StatusCode> {
-    Ok(ChainStats {
-        share_chain_height: 0,
-        share_chain_length: 0,
-        squad: SquadDetails::new(state.squad.to_string(), state.squad.formatted()),
-    })
+async fn get_chain_stats(state: AppState) -> Result<(GetStatsResponse, GetStatsResponse), StatusCode> {
+    let stats_client = state.stats_client.clone();
+    let (rx_stats, sha3x_stats) = (
+        stats_client
+            .get_chain_stats(PowAlgorithm::RandomX)
+            .await
+            .map_err(|error| {
+                error!(target: LOG_TARGET, "Failed to get chain stats: {error:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+        stats_client
+            .get_chain_stats(PowAlgorithm::Sha3x)
+            .await
+            .map_err(|error| {
+                error!(target: LOG_TARGET, "Failed to get chain stats: {error:?}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+    );
+
+    Ok((rx_stats, sha3x_stats))
     // return from cache if possible
     // let stats_cache = state.stats_cache.clone();
     // if let Some(stats) = stats_cache.stats(algo).await {

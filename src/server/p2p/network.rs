@@ -1508,10 +1508,8 @@ where S: ShareChain
             .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
         {
             warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
-            if !is_relay || self.relay_store.read().await.has_active_relay() {
-                self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
-                let _res = self.swarm.disconnect_peer_id(peer_id);
-            }
+            self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+            let _res = self.swarm.disconnect_peer_id(peer_id);
 
             // return;
         }

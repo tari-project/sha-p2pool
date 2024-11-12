@@ -48,7 +48,7 @@ pub struct StartArgs {
     ///
     /// e.g.:
     /// /ip4/127.0.0.1/tcp/52313/p2p/12D3KooWCUNCvi7PBPymgsHx39JWErYdSoT3EFPrn3xoVff4CHFu
-    /// /dnsaddr/esmeralda.p2pool.tari.com
+    /// /dnsaddr/esmeralda.sha-p2pool.tari.com
     #[arg(short, long, value_name = "seed-peers")]
     pub seed_peers: Option<Vec<String>>,
 

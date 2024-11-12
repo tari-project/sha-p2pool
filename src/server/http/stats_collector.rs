@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use human_format::Formatter;
 use log::{error, info};
+use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::epoch_time::EpochTime;
@@ -168,9 +169,26 @@ impl StatsCollector {
                         },
                         res = self.request_rx.recv() => {
                             match res {
-                                Some(StatsRequest::GetStats(_pow, _tx)) => {
-                                    todo!();
-                                    // let _ = tx.send(hashrate);
+                                Some(StatsRequest::GetStats(pow, tx)) => {
+
+                                    match pow {
+                                        PowAlgorithm::Sha3x => {
+                                            let _  = tx.send(GetStatsResponse {
+                                                height: self.sha3x_chain_height,
+                                                last_block_time: EpochTime::now(),
+                                                num_my_shares: 0,
+                                                total_shares: 0,
+                                            }).inspect_err(|e| error!(target: LOG_TARGET, "Error sending stats response: {:?}", e));
+                                        },
+                                        PowAlgorithm::RandomX => {
+                                            let _ = tx.send(GetStatsResponse {
+                                                height: self.randomx_chain_height,
+                                                last_block_time: EpochTime::now(),
+                                                num_my_shares: 0,
+                                                total_shares: 0,
+                                            }).inspect_err(|e| error!(target: LOG_TARGET, "Error sending stats response: {:?}", e));
+                                        },
+                                    }
                                 },
                                 None => {
                                     break;
@@ -207,7 +225,13 @@ pub(crate) enum StatsRequest {
     GetStats(PowAlgorithm, tokio::sync::oneshot::Sender<GetStatsResponse>),
 }
 
-pub(crate) struct GetStatsResponse {}
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct GetStatsResponse {
+    height: u64,
+    last_block_time: EpochTime,
+    num_my_shares: u64,
+    total_shares: u64,
+}
 
 #[derive(Clone)]
 pub(crate) struct ChainStats {

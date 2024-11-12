@@ -45,8 +45,8 @@ pub struct HttpServer {
 }
 
 #[derive(Clone)]
-pub struct AppState {
-    stats_client: StatsClient,
+pub(crate) struct AppState {
+    pub stats_client: StatsClient,
     pub squad: Squad,
     pub p2p_service_client: Sender<P2pServiceQuery>,
 }

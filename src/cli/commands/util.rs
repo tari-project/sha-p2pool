@@ -58,7 +58,7 @@ pub async fn server(
     let mut seed_peers = vec![];
     let network = Network::get_current_or_user_setting_or_default();
     if network != Network::LocalNet && !args.no_default_seed_peers {
-        let default_seed_peer = format!("/dnsaddr/{}.p2pool.tari.com", network.as_key_str());
+        let default_seed_peer = format!("/dnsaddr/{}.sha-p2pool.tari.com", network.as_key_str());
         seed_peers.push(default_seed_peer);
     }
     if let Some(cli_seed_peers) = args.seed_peers.clone() {
