@@ -68,6 +68,7 @@ where S: ShareChain
             network_peer_store,
             shutdown_signal.clone(),
             are_we_synced_with_p2pool.clone(),
+            stats_broadcast_client.clone(),
         )
         .await?;
         let local_peer_id = p2p_service.local_peer_id();

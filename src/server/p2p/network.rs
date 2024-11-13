@@ -7,8 +7,10 @@ use std::{
     fs,
     hash::Hash,
     io::Write,
+    net::IpAddr,
     num::NonZeroU32,
     path::PathBuf,
+    str::FromStr,
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -23,7 +25,7 @@ use hickory_resolver::{
 };
 use itertools::Itertools;
 use libp2p::{
-    autonat::{self, NatStatus},
+    autonat::{self, NatStatus, OutboundProbeEvent},
     connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
@@ -59,6 +61,7 @@ use log::{
     warn,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::de;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
@@ -90,6 +93,7 @@ use super::{
 use crate::{
     server::{
         config,
+        http::stats_collector::StatsBroadcastClient,
         p2p::{
             client::ServiceClient,
             messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
@@ -344,6 +348,7 @@ where S: ShareChain
     start_time: Instant,
     relay_store: Arc<RwLock<RelayStore>>,
     are_we_synced_with_p2pool: Arc<AtomicBool>,
+    stats_broadcast_client: StatsBroadcastClient,
 }
 
 impl<S> Service<S>
@@ -358,6 +363,7 @@ where S: ShareChain
         network_peer_store: PeerStore,
         shutdown_signal: ShutdownSignal,
         are_we_synced_with_p2pool: Arc<AtomicBool>,
+        stats_broadcast_client: StatsBroadcastClient,
     ) -> Result<Self, Error> {
         let swarm = setup::new_swarm(config).await?;
 
@@ -385,6 +391,7 @@ where S: ShareChain
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
             start_time: Instant::now(),
             are_we_synced_with_p2pool,
+            stats_broadcast_client,
         })
     }
 
@@ -989,6 +996,10 @@ where S: ShareChain
                 established_in,
                 ..
             } => {
+                if num_established == NonZeroU32::new(1).expect("Can't fail") {
+                    self.initiate_direct_peer_exchange(&peer_id).await;
+                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
             SwarmEvent::Dialing { peer_id, .. } => {
@@ -1498,6 +1509,14 @@ where S: ShareChain
                     debug!(target: LOG_TARGET, "[AUTONAT] Ignoring unknown status {new:?}");
                 },
             },
+            autonat::Event::OutboundProbe(probe_event) => match probe_event {
+                OutboundProbeEvent::Error { probe_id, peer, error } => {
+                    error!(target: LOG_TARGET, "[AUTONAT] Outbound probe error: {probe_id:?} -> {peer:?} -> {error:?}");
+                },
+                _ => {
+                    debug!(target: LOG_TARGET, "[AUTONAT] {probe_event:?}");
+                },
+            },
             _ => {
                 debug!(target: LOG_TARGET, "[AUTONAT] {event:?}");
             },
@@ -1555,21 +1574,7 @@ where S: ShareChain
     async fn handle_query(&mut self, query: P2pServiceQuery) {
         match query {
             P2pServiceQuery::GetConnectionInfo(reply) => {
-                let network_info = self.swarm.network_info();
-                let connection_counters = network_info.connection_counters();
-                let connection_info = ConnectionInfo {
-                    listener_addresses: self.swarm.external_addresses().cloned().collect(),
-                    connected_peers: self.swarm.connected_peers().count(),
-                    network_info: NetworkInfo {
-                        num_peers: network_info.num_peers(),
-                        connection_counters: ConnectionCounters {
-                            pending_incoming: connection_counters.num_pending_incoming(),
-                            pending_outgoing: connection_counters.num_pending_outgoing(),
-                            established_incoming: connection_counters.num_established_incoming(),
-                            established_outgoing: connection_counters.num_established_outgoing(),
-                        },
-                    },
-                };
+                let connection_info = self.get_libp2p_connection_info();
                 let _ = reply.send(connection_info);
             },
 
@@ -1614,6 +1619,25 @@ where S: ShareChain
                 let _ = response.send(blocks);
             },
         }
+    }
+
+    fn get_libp2p_connection_info(&mut self) -> ConnectionInfo {
+        let network_info = self.swarm.network_info();
+        let connection_counters = network_info.connection_counters();
+        let connection_info = ConnectionInfo {
+            listener_addresses: self.swarm.external_addresses().cloned().collect(),
+            connected_peers: self.swarm.connected_peers().count(),
+            network_info: NetworkInfo {
+                num_peers: network_info.num_peers(),
+                connection_counters: ConnectionCounters {
+                    pending_incoming: connection_counters.num_pending_incoming(),
+                    pending_outgoing: connection_counters.num_pending_outgoing(),
+                    established_incoming: connection_counters.num_established_incoming(),
+                    established_outgoing: connection_counters.num_established_outgoing(),
+                },
+            },
+        };
+        connection_info
     }
 
     async fn handle_inner_request(&mut self, req: InnerRequest) {
@@ -1699,6 +1723,10 @@ where S: ShareChain
 
         let mut whitelist_save_interval = tokio::time::interval(Duration::from_secs(60));
         whitelist_save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let mut connection_stats_publish = tokio::time::interval(Duration::from_secs(10));
+        connection_stats_publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))
         } else {
@@ -1808,6 +1836,19 @@ where S: ShareChain
                     self.network_peer_store.clear_grey_list();
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Clearing grey list took too long: {:?}", timer.elapsed());
+                    }
+                },
+                _ = connection_stats_publish.tick() => {
+                    let timer = Instant::now();
+                   let connection_info = self.get_libp2p_connection_info();
+                   self.stats_broadcast_client.send_libp2p_stats(
+                    connection_info.network_info.connection_counters.pending_incoming,
+                    connection_info.network_info.connection_counters.pending_outgoing,
+                    connection_info.network_info.connection_counters.established_incoming,
+                    connection_info.network_info.connection_counters.established_outgoing,
+                   );
+                   if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Publishing connection stats took too long: {:?}", timer.elapsed());
                     }
                 },
                 _ = debug_chain_graph.tick() => {
@@ -2072,9 +2113,20 @@ where S: ShareChain
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
         // listen on local address
-        self.swarm
-            .listen_on(format!("/ip4/0.0.0.0/tcp/{}", self.port).parse()?)?;
 
+        let ips_to_bind_to = [
+            IpAddr::from_str("::").unwrap(),      // IN_ADDR_ANY_V6
+            IpAddr::from_str("0.0.0.0").unwrap(), // IN_ADDR_ANY_V4
+        ];
+
+        let port = self.port;
+        for addr in ips_to_bind_to {
+            let ip_label = if addr.is_ipv4() { "ip4" } else { "ip6" };
+            self.swarm
+                .listen_on(format!("/{ip_label}/{addr}/udp/{port}/quic-v1").parse()?)?;
+            self.swarm
+                .listen_on(format!("/{ip_label}/{addr}/tcp/{port}").parse()?)?;
+        }
         // external address
         if let Some(external_addr) = &self.config.external_addr {
             self.swarm.add_external_address(
