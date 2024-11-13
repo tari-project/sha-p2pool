@@ -38,6 +38,8 @@ libp2p = {git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918c
   "memory-connection-limits",
   "rsa",
   "ecdsa",
+  "ping",
+  "quic",
 ]}
 libp2p-peersync = {git = "https://github.com/tari-project/tari-dan.git", branch = "development"}
 log = {version = "0.4.21", features = ["kv"]}

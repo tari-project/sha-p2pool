@@ -7,12 +7,15 @@ use std::{
     fs,
     hash::Hash,
     io::Write,
+    net::IpAddr,
     num::NonZeroU32,
     path::PathBuf,
+    str::FromStr,
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::{anyhow, Error};
 use blake2::Blake2b;
 use convert_case::{Case, Casing};
 use digest::{consts::U32, generic_array::GenericArray, Digest};
@@ -22,7 +25,7 @@ use hickory_resolver::{
 };
 use itertools::Itertools;
 use libp2p::{
-    autonat::{self, NatStatus},
+    autonat::{self, NatStatus, OutboundProbeEvent},
     connection_limits::{self, ConnectionLimits},
     dcutr,
     futures::StreamExt,
@@ -32,6 +35,7 @@ use libp2p::{
     mdns::{self, tokio::Tokio},
     multiaddr::Protocol,
     noise,
+    ping,
     relay,
     request_response::{self, cbor, OutboundFailure, ResponseChannel},
     swarm::{
@@ -57,6 +61,7 @@ use log::{
     warn,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::de;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
@@ -75,23 +80,25 @@ use tokio::{
     time::MissedTickBehavior,
 };
 
-use super::messages::{
-    CatchUpSyncRequest,
-    CatchUpSyncResponse,
-    DirectPeerInfoRequest,
-    DirectPeerInfoResponse,
-    NotifyNewTipBlock,
+use super::{
+    messages::{
+        CatchUpSyncRequest,
+        CatchUpSyncResponse,
+        DirectPeerInfoRequest,
+        DirectPeerInfoResponse,
+        NotifyNewTipBlock,
+    },
+    setup,
 };
 use crate::{
     server::{
         config,
+        http::stats_collector::StatsBroadcastClient,
         p2p::{
             client::ServiceClient,
             messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
-            Error,
-            LibP2PError,
         },
         PROTOCOL_VERSION,
     },
@@ -103,9 +110,9 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
-const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/5";
-const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
-const CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL: &str = "/catch_up_sync/5";
+pub(crate) const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/5";
+pub(crate) const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
+pub(crate) const CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL: &str = "/catch_up_sync/5";
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 const SYNC_REQUEST_LOG_TARGET: &str = "sync_request";
 const MESSAGE_LOGGING_LOG_TARGET: &str = "tari::p2pool::message_logging";
@@ -253,6 +260,7 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
+    pub ping: ping::Behaviour,
 }
 
 pub enum P2pServiceQuery {
@@ -338,6 +346,7 @@ where S: ShareChain
     start_time: Instant,
     relay_store: Arc<RwLock<RelayStore>>,
     are_we_synced_with_p2pool: Arc<AtomicBool>,
+    stats_broadcast_client: StatsBroadcastClient,
 }
 
 impl<S> Service<S>
@@ -352,8 +361,9 @@ where S: ShareChain
         network_peer_store: PeerStore,
         shutdown_signal: ShutdownSignal,
         are_we_synced_with_p2pool: Arc<AtomicBool>,
+        stats_broadcast_client: StatsBroadcastClient,
     ) -> Result<Self, Error> {
-        let swarm = Self::new_swarm(config).await?;
+        let swarm = setup::new_swarm(config).await?;
 
         // client related channels
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<NotifyNewTipBlock>(100);
@@ -379,157 +389,8 @@ where S: ShareChain
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
             start_time: Instant::now(),
             are_we_synced_with_p2pool,
+            stats_broadcast_client,
         })
-    }
-
-    /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
-    /// Using this method we can be sure that our Peer ID remains the same across restarts in case of
-    /// stable_peer is set to true.
-    async fn keypair(config: &Config) -> Result<Keypair, Error> {
-        if !config.stable_peer {
-            return Ok(Keypair::generate_ed25519());
-        }
-
-        // if we have a private key set, use it instead
-        if let Some(private_key) = &config.private_key {
-            return Ok(private_key.clone());
-        }
-
-        // if we have a saved private key from file, just use it
-        let mut content = vec![];
-        let mut key_path = config.private_key_folder.clone();
-        key_path.push(STABLE_PRIVATE_KEY_FILE);
-
-        if let Ok(mut file) = File::open(key_path.clone()).await {
-            if file.read_to_end(&mut content).await.is_ok() {
-                return Keypair::from_protobuf_encoding(content.as_slice())
-                    .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)));
-            }
-        }
-
-        // otherwise create a new one
-        let key_pair = Keypair::generate_ed25519();
-        let mut new_private_key_file = File::create_new(key_path)
-            .await
-            .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
-        new_private_key_file
-            .write_all(
-                key_pair
-                    .to_protobuf_encoding()
-                    .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?
-                    .as_slice(),
-            )
-            .await
-            .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
-
-        Ok(key_pair)
-    }
-
-    /// Creates a new swarm from the provided config
-    async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(Self::keypair(&config.p2p_service).await?)
-            .with_tokio()
-            .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
-            .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
-            .with_relay_client(noise::Config::new, yamux::Config::default)
-            .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
-            .with_behaviour(|key_pair, relay_client| {
-                // .with_behaviour(move |key_pair, relay_client| {
-                // gossipsub
-
-                let id_fn = |msg: &Message| {
-                    let mut hasher = Blake2b::new();
-                    hasher.update(&msg.data);
-                    let id : GenericArray<u8, U32> = hasher.finalize();
-                    MessageId::new(&id)
-                };
-                let gossipsub_config = gossipsub::ConfigBuilder::default()
-                    // .fanout_ttl(Duration::from_secs(10))
-                    // .max_ihave_length(1000) // Default is 5000
-                    // .max_messages_per_rpc(Some(1000))
-                    // We get a lot of messages, so 
-                    //.duplicate_cache_time(Duration::from_secs(1))
-                    .message_id_fn(id_fn)
-                    .validate_messages()
-                    .build()
-                    .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
-                let gossipsub = gossipsub::Behaviour::new(
-                    gossipsub::MessageAuthenticity::Signed(key_pair.clone()),
-                    gossipsub_config,
-                )?;
-
-                // mdns
-                let mut mdns_service = Toggle::from(None);
-                if config.p2p_service.mdns_enabled {
-                    mdns_service = Toggle::from(Some(
-                        mdns::Behaviour::new(mdns::Config::default(), key_pair.public().to_peer_id())
-                            .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
-                    ));
-                }
-
-                // relay server
-          let relay_config =  relay::Config{
-            max_reservations: if config.p2p_service.is_seed_peer {  1024 } else { 512 },
-            ..Default::default()
-        };
-
-        let peer_sync =
-        libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());
-
-                let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(),
-                relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
-                );
-
-                Ok(ServerNetworkBehaviour {
-                    gossipsub,
-                    mdns: mdns_service,
-                    share_chain_sync: cbor::Behaviour::<ShareChainSyncRequest, ShareChainSyncResponse>::new(
-                        [(
-                            StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
-                            request_response::ProtocolSupport::Full,
-                        )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
-                    ),
-                    direct_peer_exchange: cbor::Behaviour::<DirectPeerInfoRequest, DirectPeerInfoResponse>::new(
-                        [(
-                            StreamProtocol::new(DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL),
-                            request_response::ProtocolSupport::Full,
-                        )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
-                    ),
-                    catch_up_sync: cbor::Behaviour::<CatchUpSyncRequest, CatchUpSyncResponse>::new(
-                        [(
-                            StreamProtocol::new(CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL),
-                            request_response::ProtocolSupport::Full,
-                        )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
-                    ),
-                    peer_sync,
-                    // kademlia: kad::Behaviour::new(
-                        // key_pair.public().to_peer_id(),
-                        // MemoryStore::new(key_pair.public().to_peer_id()),
-                    // ),
-                    identify: identify::Behaviour::new(identify::Config::new(
-                        "/p2pool/1.0.0".to_string(),
-                        key_pair.public(),
-                    ).with_push_listen_addr_updates(true)),
-                    relay_server,
-                    relay_client,
-                    dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
-                    autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
-                    connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
-                })
-            })
-            .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
-            // In most cases libp2p will keep connections open that we need. Setting this higher 
-            // will make us keep connections open that we don't need.
-            // .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
-            .build();
-
-        // All nodes are servers
-        // swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
-
-        Ok(swarm)
     }
 
     /// Creates a new client for this service, it is thread safe (Send + Sync).
@@ -550,14 +411,10 @@ where S: ShareChain
         let peer_info_squad_raw: Vec<u8> = self.create_peer_info(public_addresses).await?.try_into()?;
 
         // broadcast peer info to squad
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(
-                IdentTopic::new(Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC)),
-                peer_info_squad_raw,
-            )
-            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
+        self.swarm.behaviour_mut().gossipsub.publish(
+            IdentTopic::new(Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC)),
+            peer_info_squad_raw,
+        )?;
 
         Ok(())
     }
@@ -569,8 +426,8 @@ where S: ShareChain
     async fn create_peer_info(&mut self, public_addresses: Vec<Multiaddr>) -> Result<PeerInfo, Error> {
         let share_chain_sha3x = self.share_chain_sha3x.clone();
         let share_chain_random_x = self.share_chain_random_x.clone();
-        let current_height_sha3x = share_chain_sha3x.tip_height().await.map_err(Error::ShareChain)?;
-        let current_height_random_x = share_chain_random_x.tip_height().await.map_err(Error::ShareChain)?;
+        let current_height_sha3x = share_chain_sha3x.tip_height().await?;
+        let current_height_random_x = share_chain_random_x.tip_height().await?;
         let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
         let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
         let peer_info_squad_raw = PeerInfo::new(
@@ -1137,6 +994,10 @@ where S: ShareChain
                 established_in,
                 ..
             } => {
+                if num_established == NonZeroU32::new(1).expect("Can't fail") {
+                    self.initiate_direct_peer_exchange(&peer_id).await;
+                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
             SwarmEvent::Dialing { peer_id, .. } => {
@@ -1374,6 +1235,9 @@ where S: ShareChain
                 ServerNetworkBehaviourEvent::Autonat(event) => self.handle_autonat_event(event).await,
                 ServerNetworkBehaviourEvent::PeerSync(event) => {
                     info!(target: LOG_TARGET, "[PEER SYNC]: {event:?}");
+                },
+                ServerNetworkBehaviourEvent::Ping(event) => {
+                    info!(target: LOG_TARGET, "[PING]: {event:?}");
                 },
             },
             _ => {},
@@ -1658,6 +1522,14 @@ where S: ShareChain
                     debug!(target: LOG_TARGET, "[AUTONAT] Ignoring unknown status {new:?}");
                 },
             },
+            autonat::Event::OutboundProbe(probe_event) => match probe_event {
+                OutboundProbeEvent::Error { probe_id, peer, error } => {
+                    error!(target: LOG_TARGET, "[AUTONAT] Outbound probe error: {probe_id:?} -> {peer:?} -> {error:?}");
+                },
+                _ => {
+                    debug!(target: LOG_TARGET, "[AUTONAT] {probe_event:?}");
+                },
+            },
             _ => {
                 debug!(target: LOG_TARGET, "[AUTONAT] {event:?}");
             },
@@ -1697,11 +1569,7 @@ where S: ShareChain
             addresses.iter().for_each(|addr| {
                 let listen_addr = addr.clone().with(Protocol::P2pCircuit);
                 info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                match self
-                    .swarm
-                    .listen_on(listen_addr.clone())
-                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
-                {
+                match self.swarm.listen_on(listen_addr.clone()) {
                     Ok(_) => {
                         info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
                         relay.is_circuit_established = true;
@@ -1719,21 +1587,7 @@ where S: ShareChain
     async fn handle_query(&mut self, query: P2pServiceQuery) {
         match query {
             P2pServiceQuery::GetConnectionInfo(reply) => {
-                let network_info = self.swarm.network_info();
-                let connection_counters = network_info.connection_counters();
-                let connection_info = ConnectionInfo {
-                    listener_addresses: self.swarm.external_addresses().cloned().collect(),
-                    connected_peers: self.swarm.connected_peers().count(),
-                    network_info: NetworkInfo {
-                        num_peers: network_info.num_peers(),
-                        connection_counters: ConnectionCounters {
-                            pending_incoming: connection_counters.num_pending_incoming(),
-                            pending_outgoing: connection_counters.num_pending_outgoing(),
-                            established_incoming: connection_counters.num_established_incoming(),
-                            established_outgoing: connection_counters.num_established_outgoing(),
-                        },
-                    },
-                };
+                let connection_info = self.get_libp2p_connection_info();
                 let _ = reply.send(connection_info);
             },
 
@@ -1778,6 +1632,25 @@ where S: ShareChain
                 let _ = response.send(blocks);
             },
         }
+    }
+
+    fn get_libp2p_connection_info(&mut self) -> ConnectionInfo {
+        let network_info = self.swarm.network_info();
+        let connection_counters = network_info.connection_counters();
+        let connection_info = ConnectionInfo {
+            listener_addresses: self.swarm.external_addresses().cloned().collect(),
+            connected_peers: self.swarm.connected_peers().count(),
+            network_info: NetworkInfo {
+                num_peers: network_info.num_peers(),
+                connection_counters: ConnectionCounters {
+                    pending_incoming: connection_counters.num_pending_incoming(),
+                    pending_outgoing: connection_counters.num_pending_outgoing(),
+                    established_incoming: connection_counters.num_established_incoming(),
+                    established_outgoing: connection_counters.num_established_outgoing(),
+                },
+            },
+        };
+        connection_info
     }
 
     async fn handle_inner_request(&mut self, req: InnerRequest) {
@@ -1865,6 +1738,10 @@ where S: ShareChain
 
         let mut whitelist_save_interval = tokio::time::interval(Duration::from_secs(60));
         whitelist_save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let mut connection_stats_publish = tokio::time::interval(Duration::from_secs(10));
+        connection_stats_publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))
         } else {
@@ -1939,15 +1816,7 @@ where S: ShareChain
 
                     // broadcast peer info
                     if let Err(error) = self.broadcast_peer_info().await {
-                        match error {
-                            Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "No peers to broadcast peer info!");
-                            }
-                            Error::LibP2P(LibP2PError::Publish(PublishError::Duplicate)) => {}
-                            _ => {
-                                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to publish node info: {error:?}");
-                            }
-                        }
+                        warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
                     }
 
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -1990,8 +1859,20 @@ where S: ShareChain
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Clearing black list took too long: {:?}", timer.elapsed());
                     }
-                }
-
+                },
+                _ = connection_stats_publish.tick() => {
+                    let timer = Instant::now();
+                   let connection_info = self.get_libp2p_connection_info();
+                   self.stats_broadcast_client.send_libp2p_stats(
+                    connection_info.network_info.connection_counters.pending_incoming,
+                    connection_info.network_info.connection_counters.pending_outgoing,
+                    connection_info.network_info.connection_counters.established_incoming,
+                    connection_info.network_info.connection_counters.established_outgoing,
+                   );
+                   if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Publishing connection stats took too long: {:?}", timer.elapsed());
+                    }
+                },
                 _ = debug_chain_graph.tick() => {
                  if self.config.debug_print_chain {
                     self.print_debug_chain_graph().await;
@@ -2164,12 +2045,10 @@ where S: ShareChain
 
         let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
         for seed_peer in &self.config.seed_peers {
-            let addr = seed_peer
-                .parse::<Multiaddr>()
-                .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?;
+            let addr = seed_peer.parse::<Multiaddr>()?;
             let addr_parts = addr.iter().collect_vec();
             if addr_parts.is_empty() {
-                return Err(Error::LibP2P(LibP2PError::MultiAddrEmpty));
+                return Err(anyhow!("Seed peer address is empty"));
             }
             let is_dns_addr = matches!(addr_parts.first(), Some(Protocol::Dnsaddr(_)));
             let peer_id = match addr.iter().last() {
@@ -2177,7 +2056,7 @@ where S: ShareChain
                 _ => None,
             };
             if peer_id.is_none() && !is_dns_addr {
-                return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
+                return Err(anyhow!("Seed peer address does not contain peer id"));
             }
 
             if is_dns_addr {
@@ -2248,13 +2127,10 @@ where S: ShareChain
     }
 
     fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
-        let txt_str =
-            String::from_utf8(txt.to_vec()).map_err(|error| Error::LibP2P(LibP2PError::ConvertBytesToString(error)))?;
+        let txt_str = String::from_utf8(txt.to_vec())?;
         match txt_str.strip_prefix("dnsaddr=") {
-            None => Err(Error::LibP2P(LibP2PError::InvalidDnsEntry(
-                "Missing `dnsaddr=` prefix.".to_string(),
-            ))),
-            Some(a) => Ok(Multiaddr::try_from(a).map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?),
+            None => Err(anyhow!("Missing `dnsaddr=` prefix.")),
+            Some(a) => Ok(Multiaddr::try_from(a)?),
         }
     }
 
@@ -2266,21 +2142,25 @@ where S: ShareChain
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
         // listen on local address
-        self.swarm
-            .listen_on(
-                format!("/ip4/0.0.0.0/tcp/{}", self.port)
-                    .parse()
-                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
-            )
-            .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
 
+        let ips_to_bind_to = [
+            IpAddr::from_str("::").unwrap(),      // IN_ADDR_ANY_V6
+            IpAddr::from_str("0.0.0.0").unwrap(), // IN_ADDR_ANY_V4
+        ];
+
+        let port = self.port;
+        for addr in ips_to_bind_to {
+            let ip_label = if addr.is_ipv4() { "ip4" } else { "ip6" };
+            self.swarm
+                .listen_on(format!("/{ip_label}/{addr}/udp/{port}/quic-v1").parse()?)?;
+            self.swarm
+                .listen_on(format!("/{ip_label}/{addr}/tcp/{port}").parse()?)?;
+        }
         // external address
         if let Some(external_addr) = &self.config.external_addr {
             self.swarm.add_external_address(
                 // format!("/ip4/{}/tcp/{}", external_addr, self.port)
-                external_addr
-                    .parse()
-                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
+                external_addr.parse()?,
             );
         }
         self.subscribe_to_topics().await;

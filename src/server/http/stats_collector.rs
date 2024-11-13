@@ -33,6 +33,10 @@ pub(crate) struct StatsCollector {
     total_peers: u64,
     total_grey_list: u64,
     total_black_list: u64,
+    pending_incoming: u32,
+    pending_outgoing: u32,
+    established_incoming: u32,
+    established_outgoing: u32,
 }
 
 impl StatsCollector {
@@ -59,6 +63,10 @@ impl StatsCollector {
             randomx_network_difficulty: Difficulty::min(),
             sha_target_difficulty: Difficulty::min(),
             randomx_target_difficulty: Difficulty::min(),
+            pending_incoming: 0,
+            pending_outgoing: 0,
+            established_incoming: 0,
+            established_outgoing: 0,
         }
     }
 
@@ -70,7 +78,6 @@ impl StatsCollector {
 
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
-            StatData::ChainStats { .. } => {},
             StatData::MinerBlockAccepted { .. } => {
                 self.miner_accepted += 1;
             },
@@ -129,6 +136,18 @@ impl StatsCollector {
                     self.randomx_network_difficulty = network_difficulty;
                 },
             },
+            StatData::LibP2PStats {
+                pending_incoming,
+                pending_outgoing,
+                established_incoming,
+                established_outgoing,
+                timestamp,
+            } => {
+                self.pending_incoming = pending_incoming;
+                self.pending_outgoing = pending_outgoing;
+                self.established_incoming = established_incoming;
+                self.established_outgoing = established_outgoing;
+            },
         }
     }
 
@@ -145,7 +164,7 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} ==== ",
+                                    "========= Uptime: {}. Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
@@ -164,7 +183,9 @@ impl StatsCollector {
                                     self.pool_rejected,
                                     self.total_peers,
                                     self.total_grey_list,
-                                    self.total_black_list
+                                    self.total_black_list,
+                                    self.established_incoming,
+                                    self.established_outgoing
                                 );
                         },
                         res = self.request_rx.recv() => {
@@ -252,10 +273,6 @@ pub(crate) enum StatData {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
-    ChainStats {
-        chain: ChainStats,
-        timestamp: EpochTime,
-    },
     MinerBlockAccepted {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
@@ -264,7 +281,6 @@ pub(crate) enum StatData {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
-
     PoolBlockAccepted {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
@@ -285,12 +301,18 @@ pub(crate) enum StatData {
         total_black_list: u64,
         timestamp: EpochTime,
     },
+    LibP2PStats {
+        pending_incoming: u32,
+        pending_outgoing: u32,
+        established_incoming: u32,
+        established_outgoing: u32,
+        timestamp: EpochTime,
+    },
 }
 
 impl StatData {
     pub fn timestamp(&self) -> EpochTime {
         match self {
-            StatData::ChainStats { timestamp, .. } => *timestamp,
             StatData::MinerBlockAccepted { timestamp, .. } => *timestamp,
             StatData::MinerBlockRejected { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
@@ -299,6 +321,7 @@ impl StatData {
             StatData::NewPeer { timestamp, .. } => *timestamp,
             StatData::TargetDifficultyChanged { timestamp, .. } => *timestamp,
             StatData::NetworkDifficultyChanged { timestamp, .. } => *timestamp,
+            StatData::LibP2PStats { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -414,5 +437,21 @@ impl StatsBroadcastClient {
             timestamp: EpochTime::now(),
         };
         self.broadcast(data)
+    }
+
+    pub fn send_libp2p_stats(
+        &self,
+        pending_incoming: u32,
+        pending_outgoing: u32,
+        established_incoming: u32,
+        established_outgoing: u32,
+    ) -> Result<(), anyhow::Error> {
+        self.broadcast(StatData::LibP2PStats {
+            pending_incoming,
+            pending_outgoing,
+            established_incoming,
+            established_outgoing,
+            timestamp: EpochTime::now(),
+        })
     }
 }

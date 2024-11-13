@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    net::{AddrParseError, SocketAddr},
+    net::SocketAddr,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
 };
 
+use anyhow::Error;
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
-use thiserror::Error;
 
 use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
@@ -28,18 +28,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::server";
-
-#[derive(Error, Debug)]
-pub(crate) enum Error {
-    #[error("P2P service error: {0}")]
-    P2PService(#[from] p2p::Error),
-    #[error("gRPC error: {0}")]
-    Grpc(#[from] grpc::error::Error),
-    #[error("Socket address parse error: {0}")]
-    AddrParse(#[from] AddrParseError),
-    #[error("Consensus manager error: {0}")]
-    ConsensusBuilder(#[from] tari_core::consensus::ConsensusBuilderError),
-}
 
 /// Server represents the server running all the necessary components for sha-p2pool.
 pub(crate) struct Server<S>
@@ -80,9 +68,9 @@ where S: ShareChain
             network_peer_store,
             shutdown_signal.clone(),
             are_we_synced_with_p2pool.clone(),
+            stats_broadcast_client.clone(),
         )
-        .await
-        .map_err(Error::P2PService)?;
+        .await?;
         let local_peer_id = p2p_service.local_peer_id();
 
         let mut base_node_grpc_server = None;
@@ -92,9 +80,7 @@ where S: ShareChain
         let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
         if config.mining_enabled {
             let base_node_grpc_service =
-                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone())
-                    .await
-                    .map_err(Error::Grpc)?;
+                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone()).await?;
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
 
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
@@ -111,8 +97,7 @@ where S: ShareChain
                 config.p2p_service.squad.clone(),
                 are_we_synced_with_p2pool.clone(),
             )
-            .await
-            .map_err(Error::Grpc)?;
+            .await?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
         }
 
@@ -154,14 +139,10 @@ where S: ShareChain
             .add_service(base_node_service)
             .add_service(p2pool_service)
             .serve_with_shutdown(
-                SocketAddr::from_str(format!("0.0.0.0:{}", grpc_port).as_str()).map_err(Error::AddrParse)?,
+                SocketAddr::from_str(format!("0.0.0.0:{}", grpc_port).as_str())?,
                 shutdown_signal,
             )
-            .await
-            .map_err(|err| {
-                error!(target: LOG_TARGET, "GRPC encountered an error: {:?}", err);
-                Error::Grpc(grpc::error::Error::Tonic(TonicError::Transport(err)))
-            })?;
+            .await?;
 
         info!(target: LOG_TARGET, "gRPC server stopped!");
 
@@ -216,7 +197,7 @@ where S: ShareChain
             });
         }
 
-        self.p2p_service.start().await.map_err(Error::P2PService)?;
+        self.p2p_service.start().await?;
 
         info!(target: LOG_TARGET, "Server stopped!");
 

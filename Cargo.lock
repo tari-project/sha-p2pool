@@ -2402,6 +2402,7 @@ dependencies = [
  "libp2p-memory-connection-limits",
  "libp2p-metrics",
  "libp2p-noise",
+ "libp2p-ping",
  "libp2p-quic",
  "libp2p-relay",
  "libp2p-request-response",
@@ -2678,6 +2679,7 @@ dependencies = [
  "libp2p-gossipsub",
  "libp2p-identify",
  "libp2p-identity",
+ "libp2p-ping",
  "libp2p-relay",
  "libp2p-swarm",
  "pin-project 1.1.5",
@@ -2726,6 +2728,23 @@ dependencies = [
  "quick-protobuf-codec 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "libp2p-ping"
+version = "0.45.0"
+source = "git+https://github.com/tari-project/rust-libp2p.git?rev=3d918ccbf5ae1cbec0815a2156079b0fba4ba558#3d918ccbf5ae1cbec0815a2156079b0fba4ba558"
+dependencies = [
+ "either",
+ "futures 0.3.30",
+ "futures-timer",
+ "libp2p-core",
+ "libp2p-identity",
+ "libp2p-swarm",
+ "rand",
+ "tracing",
+ "void",
+ "web-time",
 ]
 
 [[package]]

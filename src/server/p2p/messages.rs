@@ -9,16 +9,13 @@ use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{
-    server::{p2p::Error, PROTOCOL_VERSION},
-    sharechain::p2block::P2Block,
-};
+use crate::{server::PROTOCOL_VERSION, sharechain::p2block::P2Block};
 
 #[macro_export]
 macro_rules! impl_conversions {
     ($type:ty) => {
         impl TryFrom<libp2p::gossipsub::Message> for $type {
-            type Error = $crate::server::p2p::Error;
+            type Error = anyhow::Error;
 
             fn try_from(message: libp2p::gossipsub::Message) -> Result<Self, Self::Error> {
                 $crate::server::p2p::messages::deserialize_message::<$type>(message.data.as_slice())
@@ -26,7 +23,7 @@ macro_rules! impl_conversions {
         }
 
         impl TryInto<Vec<u8>> for $type {
-            type Error = $crate::server::p2p::Error;
+            type Error = anyhow::Error;
 
             fn try_into(self) -> Result<Vec<u8>, Self::Error> {
                 $crate::server::p2p::messages::serialize_message(&self)
@@ -34,14 +31,14 @@ macro_rules! impl_conversions {
         }
     };
 }
-pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, Error>
+pub fn deserialize_message<'a, T>(raw_message: &'a [u8]) -> Result<T, anyhow::Error>
 where T: Deserialize<'a> {
-    serde_cbor::from_slice(raw_message).map_err(Error::SerializeDeserialize)
+    Ok(serde_cbor::from_slice(raw_message)?)
 }
 
-pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, Error>
+pub fn serialize_message<T>(input: &T) -> Result<Vec<u8>, anyhow::Error>
 where T: Serialize {
-    serde_cbor::to_vec(input).map_err(Error::SerializeDeserialize)
+    Ok(serde_cbor::to_vec(input)?)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
