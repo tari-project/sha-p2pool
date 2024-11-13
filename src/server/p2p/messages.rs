@@ -208,13 +208,15 @@ impl CatchUpSyncResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoRequest {
     pub peer_id: String,
-    pub info: PeerInfo,
+    pub my_info: PeerInfo,
+    pub best_peers: Vec<PeerInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoResponse {
     pub peer_id: String,
     pub info: PeerInfo,
+    pub best_peers: Vec<PeerInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

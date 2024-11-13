@@ -127,6 +127,7 @@ const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: usize = 150;
 // Time to start up and catch up before we start processing new tip messages
 const STARTUP_CATCH_UP_TIME: Duration = Duration::from_secs(1);
+const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -754,16 +755,22 @@ where S: ShareChain
                 return;
             }
 
-            // TODO: Should we send them our details? The problem is that if we send too many of these, libp2p
-            // starts dropping requests with "libp2p_relay::priv_client::handler Dropping in-flight connect
-            // request because we are at capacity"
+            let mut my_best_peers = self
+                .network_peer_store
+                .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
+            my_best_peers.extend(
+                self.network_peer_store
+                    .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
+            );
 
+            let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             self.swarm
                 .behaviour_mut()
                 .direct_peer_exchange
                 .send_request(peer, DirectPeerInfoRequest {
-                    info: my_info,
+                    my_info,
                     peer_id: local_peer_id.to_base58(),
+                    best_peers: my_best_peers,
                 });
         }
     }
@@ -773,11 +780,15 @@ where S: ShareChain
         channel: ResponseChannel<DirectPeerInfoResponse>,
         request: DirectPeerInfoRequest,
     ) {
-        if request.info.version != PROTOCOL_VERSION {
+        if request.my_info.version != PROTOCOL_VERSION {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", request.peer_id);
             return;
         }
 
+        let source_peer = request.my_info.peer_id;
+        let num_peers = request.best_peers.len();
+
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {source_peer:?} with {num_peers} new peers");
         let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())
@@ -786,6 +797,14 @@ where S: ShareChain
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
             })
         {
+            let mut my_best_peers = self
+                .network_peer_store
+                .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
+            my_best_peers.extend(
+                self.network_peer_store
+                    .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
+            );
+            let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             if self
                 .swarm
                 .behaviour_mut()
@@ -793,6 +812,7 @@ where S: ShareChain
                 .send_response(channel, DirectPeerInfoResponse {
                     peer_id: local_peer_id.to_base58(),
                     info,
+                    best_peers: my_best_peers,
                 })
                 .is_err()
             {
@@ -802,8 +822,13 @@ where S: ShareChain
 
         match request.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if self.add_peer(request.info, peer_id).await {
+                if self.add_peer(request.my_info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
+                for peer in request.best_peers {
+                    if let Some(peer_id) = peer.peer_id {
+                        self.add_peer(peer, peer_id).await;
+                    }
                 }
             },
             Err(error) => {
@@ -817,10 +842,16 @@ where S: ShareChain
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", response.peer_id);
             return;
         }
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
                 if self.add_peer(response.info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
+                for peer in response.best_peers {
+                    if let Some(peer_id) = peer.peer_id {
+                        self.add_peer(peer, peer_id).await;
+                    }
                 }
             },
             Err(error) => {
