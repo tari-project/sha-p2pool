@@ -94,7 +94,7 @@ pub enum AddPeerStatus {
 pub struct PeerStore {
     whitelist_peers: HashMap<String, PeerStoreRecord>,
     greylist_peers: HashMap<String, PeerStoreRecord>,
-    blacklist_peers: HashSet<String>,
+    blacklist_peers: HashMap<String, PeerStoreRecord>,
     stats_broadcast_client: StatsBroadcastClient,
     seed_peers: Vec<PeerId>,
 }
@@ -106,7 +106,7 @@ impl PeerStore {
             stats_broadcast_client,
             whitelist_peers: HashMap::new(),
             greylist_peers: HashMap::new(),
-            blacklist_peers: HashSet::new(),
+            blacklist_peers: HashMap::new(),
             seed_peers: Vec::new(),
         }
     }
@@ -140,7 +140,7 @@ impl PeerStore {
     pub fn exists(&self, peer_id: &PeerId) -> bool {
         self.whitelist_peers.contains_key(&peer_id.to_base58()) ||
             self.greylist_peers.contains_key(&peer_id.to_base58()) ||
-            self.blacklist_peers.contains(&peer_id.to_base58())
+            self.blacklist_peers.contains_key(&peer_id.to_base58())
     }
 
     pub fn whitelist_peers(&self) -> &HashMap<String, PeerStoreRecord> {
@@ -236,7 +236,7 @@ impl PeerStore {
             self.greylist_peers.insert(peer_id.to_base58(), peer_record);
             return AddPeerStatus::Greylisted;
         }
-        if self.blacklist_peers.contains(&peer_id.to_base58()) {
+        if self.blacklist_peers.contains_key(&peer_id.to_base58()) {
             return AddPeerStatus::Blacklisted;
         }
 
@@ -308,10 +308,10 @@ impl PeerStore {
     }
 
     pub fn clear_grey_list(&mut self) {
-        for (peer_id, record) in self.greylist_peers.iter() {
+        for (peer_id, record) in self.greylist_peers.drain() {
             if record.num_grey_listings >= MAX_GREY_LISTINGS {
                 warn!(target: LOG_TARGET, "Blacklisting peer {} because of: {}", peer_id, record.last_grey_list_reason.as_ref().unwrap_or(&"unknown".to_string()));
-                self.blacklist_peers.insert(peer_id.clone());
+                self.blacklist_peers.insert(peer_id.clone(), record.clone());
             } else {
                 if self.seed_peers.contains(&record.peer_id) {
                     // Don't put seed peers in the whitelist
@@ -320,7 +320,20 @@ impl PeerStore {
                 self.whitelist_peers.insert(peer_id.clone(), record.clone());
             }
         }
-        self.greylist_peers.clear();
+        let _ = self.stats_broadcast_client.send_new_peer(
+            self.whitelist_peers.len() as u64,
+            self.greylist_peers.len() as u64,
+            self.blacklist_peers.len() as u64,
+        );
+    }
+
+    pub fn clear_black_list(&mut self) {
+        for (peer_id, mut record) in self.blacklist_peers.drain() {
+            record.catch_up_attempts = 0;
+            record.last_grey_list_reason = None;
+            record.num_grey_listings = 0;
+            self.whitelist_peers.insert(peer_id, record);
+        }
         let _ = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
@@ -389,7 +402,7 @@ impl PeerStore {
     }
 
     pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
-        self.blacklist_peers.contains(&peer_id.to_base58())
+        self.blacklist_peers.contains_key(&peer_id.to_base58())
     }
 
     pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {

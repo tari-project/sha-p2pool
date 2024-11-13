@@ -169,16 +169,15 @@ pub struct Config {
     pub squad: Squad,
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
+    pub black_list_clear_interval: Duration,
     pub sync_interval: Duration,
     pub is_seed_peer: bool,
     pub debug_print_chain: bool,
     pub num_peers_to_sync: usize,
-    pub max_blocks_to_request: usize,
     pub sync_job_enabled: bool,
     pub peer_list_folder: PathBuf,
     pub sha3x_enabled: bool,
     pub randomx_enabled: bool,
-    pub event_delay_before_start: u32,
 }
 
 impl Default for Config {
@@ -196,15 +195,14 @@ impl Default for Config {
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(60),
+            black_list_clear_interval: Duration::from_secs(60 * 10),
             sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
             num_peers_to_sync: 2,
-            max_blocks_to_request: 20,
             sync_job_enabled: true,
             sha3x_enabled: true,
             randomx_enabled: true,
-            event_delay_before_start: 10,
         }
     }
 }
@@ -1274,10 +1272,25 @@ where S: ShareChain
                         },
                         request_response::Event::OutboundFailure { peer, error, .. } => {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
-                            // Unlock the permit
-                            self.network_peer_store
-                                .move_to_grey_list(peer, format!("Error during share chain sync:{}", error))
-                                .await;
+                            let mut should_grey_list = true;
+                            match error {
+                                OutboundFailure::DialFailure => {
+                                    debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                },
+                                OutboundFailure::ConnectionClosed => {
+                                    // I think it might upgrade to a DCTUR so no need to grey list
+                                    debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                    should_grey_list = false;
+                                },
+                                _ => {
+                                    warn!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                },
+                            }
+                            if should_grey_list {
+                                self.network_peer_store
+                                    .move_to_grey_list(peer, format!("Error during share chain sync:{}", error))
+                                    .await;
+                            }
 
                             // Remove peer from peer store to try to sync from another peer,
                             // if the peer goes online/accessible again, the peer store will have it again.
@@ -1845,6 +1858,8 @@ where S: ShareChain
         let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
         grey_list_clear_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut black_list_clear_interval = tokio::time::interval(self.config.black_list_clear_interval);
+        black_list_clear_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
         sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -1969,6 +1984,14 @@ where S: ShareChain
                         warn!(target: LOG_TARGET, "Clearing grey list took too long: {:?}", timer.elapsed());
                     }
                 },
+                _ = black_list_clear_interval.tick() => {
+                    let timer = Instant::now();
+                    self.network_peer_store.clear_black_list();
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Clearing black list took too long: {:?}", timer.elapsed());
+                    }
+                }
+
                 _ = debug_chain_graph.tick() => {
                  if self.config.debug_print_chain {
                     self.print_debug_chain_graph().await;
@@ -2205,9 +2228,16 @@ where S: ShareChain
             // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
             self.swarm.add_peer_address(peer_id.clone(), addr.clone());
             self.network_peer_store.add_seed_peer(peer_id.clone());
-            let _ = self.swarm.dial(peer_id.clone()).inspect_err(|e| {
-                warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to dial seed peer: {e:?}");
-            });
+            let _ = self
+                .swarm
+                .dial(
+                    DialOpts::peer_id(peer_id.clone())
+                        .condition(PeerCondition::Always)
+                        .build(),
+                )
+                .inspect_err(|e| {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to dial seed peer: {e:?}");
+                });
         });
 
         // if !seed_peers.is_empty() {
@@ -2253,10 +2283,10 @@ where S: ShareChain
                     .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
             );
         }
+        self.subscribe_to_topics().await;
 
         let seed_peers = self.parse_seed_peers().await?;
         self.join_seed_peers(seed_peers).await?;
-        self.subscribe_to_topics().await;
 
         // start initial share chain sync
         // let in_progress = self.sync_in_progress.clone();
