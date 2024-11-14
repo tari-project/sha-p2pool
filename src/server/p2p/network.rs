@@ -126,8 +126,7 @@ const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: usize = 150;
 // Time to start up and catch up before we start processing new tip messages
-const STARTUP_CATCH_UP_TIME: Duration = Duration::from_secs(1);
-const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 16;
+const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -202,8 +201,8 @@ impl Default for Config {
             relay_server_disabled: false,
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
-            grey_list_clear_interval: Duration::from_secs(60),
-            black_list_clear_interval: Duration::from_secs(60 * 10),
+            grey_list_clear_interval: Duration::from_secs(60 * 5),
+            black_list_clear_interval: Duration::from_secs(60 * 15),
             sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
@@ -761,15 +760,17 @@ where S: ShareChain
                 return;
             }
 
-            let mut my_best_peers = self
-                .network_peer_store
-                .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
-            my_best_peers.extend(
+            let mut my_best_peers =
                 self.network_peer_store
-                    .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
-            );
+                    .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX, &[]);
+            my_best_peers.extend(self.network_peer_store.best_peers_to_share(
+                NUM_PEERS_TO_SYNC_PER_ALGO,
+                PowAlgorithm::Sha3x,
+                &[],
+            ));
 
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
+            let known_peers = self.network_peer_store.get_known_peers();
             self.swarm
                 .behaviour_mut()
                 .direct_peer_exchange
@@ -777,6 +778,7 @@ where S: ShareChain
                     my_info,
                     peer_id: local_peer_id.to_base58(),
                     best_peers: my_best_peers,
+                    known_peer_ids: known_peers.into_iter().collect(),
                 });
         }
     }
@@ -803,13 +805,16 @@ where S: ShareChain
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
             })
         {
-            let mut my_best_peers = self
-                .network_peer_store
-                .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
-            my_best_peers.extend(
-                self.network_peer_store
-                    .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
+            let mut my_best_peers = self.network_peer_store.best_peers_to_share(
+                NUM_PEERS_TO_SYNC_PER_ALGO,
+                PowAlgorithm::RandomX,
+                &request.known_peer_ids,
             );
+            my_best_peers.extend(self.network_peer_store.best_peers_to_share(
+                NUM_PEERS_TO_SYNC_PER_ALGO,
+                PowAlgorithm::Sha3x,
+                &request.known_peer_ids,
+            ));
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             if self
                 .swarm
@@ -831,8 +836,10 @@ where S: ShareChain
                 if self.add_peer(request.my_info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
-                for peer in request.best_peers {
+                for mut peer in request.best_peers {
                     if let Some(peer_id) = peer.peer_id {
+                        // Reset the timestamp so that we can try to ping them
+                        peer.timestamp = EpochTime::now().as_u64();
                         self.add_peer(peer, peer_id).await;
                     }
                 }
@@ -854,8 +861,10 @@ where S: ShareChain
                 if self.add_peer(response.info, peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
-                for peer in response.best_peers {
+                for mut peer in response.best_peers {
                     if let Some(peer_id) = peer.peer_id {
+                        // Reset the timestamp so that we can try to ping them
+                        peer.timestamp = EpochTime::now().as_u64();
                         self.add_peer(peer, peer_id).await;
                     }
                 }

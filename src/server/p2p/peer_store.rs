@@ -172,31 +172,63 @@ impl PeerStore {
         &self.greylist_peers
     }
 
-    pub fn best_peers_to_share(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
+    pub fn get_known_peers(&self) -> HashSet<PeerId> {
+        self.whitelist_peers
+            .keys()
+            .chain(self.greylist_peers.keys())
+            .chain(self.blacklist_peers.keys())
+            .filter_map(|peer_id| PeerId::from_str(peer_id).ok())
+            .collect()
+    }
+
+    pub fn best_peers_to_share(
+        &self,
+        count: usize,
+        algo: PowAlgorithm,
+        other_nodes_peers: &[PeerId],
+    ) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 10 minutes
-        let timestamp = EpochTime::now().as_u64() - 600;
-        peers.retain(|peer| {
-            peer.last_new_tip_notify
-                .as_ref()
-                .map(|n| n.timestamp)
-                .unwrap_or(peer.peer_info.timestamp) >
-                timestamp
-        });
+        // let timestamp = EpochTime::now().as_u64() - 600;
+        // peers.retain(|peer| {
+        //     peer.last_new_tip_notify
+        //         .as_ref()
+        //         .map(|n| n.timestamp)
+        //         .unwrap_or(peer.peer_info.timestamp) >
+        //         timestamp
+        // });
+        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
         match algo {
-            PowAlgorithm::RandomX => {
-                peers.sort_by(|a, b| {
-                    a.peer_info
-                        .current_random_x_height
-                        .cmp(&b.peer_info.current_random_x_height)
-                });
-            },
+            PowAlgorithm::RandomX => peers.sort_by(|a, b| {
+                b.last_new_tip_notify
+                    .as_ref()
+                    .map(|n| n.timestamp)
+                    .unwrap_or(b.peer_info.timestamp)
+                    .cmp(
+                        &a.last_new_tip_notify
+                            .as_ref()
+                            .map(|n| n.timestamp)
+                            .unwrap_or(a.peer_info.timestamp),
+                    )
+            }),
 
             PowAlgorithm::Sha3x => {
-                peers.sort_by(|a, b| a.peer_info.current_sha3x_height.cmp(&b.peer_info.current_sha3x_height));
+                peers.sort_by(|a, b| {
+                    b.last_new_tip_notify
+                        .as_ref()
+                        .map(|n| n.timestamp)
+                        .unwrap_or(b.peer_info.timestamp)
+                        .cmp(
+                            &a.last_new_tip_notify
+                                .as_ref()
+                                .map(|n| n.timestamp)
+                                .unwrap_or(a.peer_info.timestamp),
+                        )
+                });
             },
         }
-        peers.reverse();
+
+        peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
         peers.truncate(count);
         peers.into_iter().cloned().collect()
     }
@@ -212,20 +244,46 @@ impl PeerStore {
                 .unwrap_or(peer.peer_info.timestamp) >
                 timestamp
         });
+        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
+
         match algo {
-            PowAlgorithm::RandomX => {
+            PowAlgorithm::RandomX => peers.sort_by(|a, b| {
+                b.peer_info
+                    .current_random_x_height
+                    .cmp(&a.peer_info.current_random_x_height)
+                    .then(
+                        b.last_new_tip_notify
+                            .as_ref()
+                            .map(|n| n.timestamp)
+                            .unwrap_or(b.peer_info.timestamp)
+                            .cmp(
+                                &a.last_new_tip_notify
+                                    .as_ref()
+                                    .map(|n| n.timestamp)
+                                    .unwrap_or(a.peer_info.timestamp),
+                            ),
+                    )
+            }),
+            PowAlgorithm::Sha3x => {
                 peers.sort_by(|a, b| {
-                    a.peer_info
-                        .current_random_x_height
-                        .cmp(&b.peer_info.current_random_x_height)
+                    b.peer_info
+                        .current_sha3x_height
+                        .cmp(&a.peer_info.current_sha3x_height)
+                        .then(
+                            b.last_new_tip_notify
+                                .as_ref()
+                                .map(|n| n.timestamp)
+                                .unwrap_or(b.peer_info.timestamp)
+                                .cmp(
+                                    &a.last_new_tip_notify
+                                        .as_ref()
+                                        .map(|n| n.timestamp)
+                                        .unwrap_or(a.peer_info.timestamp),
+                                ),
+                        )
                 });
             },
-
-            PowAlgorithm::Sha3x => {
-                peers.sort_by(|a, b| a.peer_info.current_sha3x_height.cmp(&b.peer_info.current_sha3x_height));
-            },
         }
-        peers.reverse();
         peers.truncate(count);
         peers.into_iter().cloned().collect()
     }

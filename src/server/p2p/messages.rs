@@ -210,6 +210,7 @@ pub struct DirectPeerInfoRequest {
     pub peer_id: String,
     pub my_info: PeerInfo,
     pub best_peers: Vec<PeerInfo>,
+    pub known_peer_ids: Vec<PeerId>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
