@@ -41,6 +41,7 @@ use libp2p::{
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
+        ExternalAddrExpired,
         NetworkBehaviour,
         SwarmEvent,
     },
@@ -1087,8 +1088,9 @@ where S: ShareChain
             SwarmEvent::ListenerError { listener_id, error } => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Listener error: {listener_id:?} -> {error:?}");
             },
-            SwarmEvent::ExternalAddrExpired { address, .. } => {
+            SwarmEvent::ExternalAddrExpired { address } => {
                 warn!(target: LOG_TARGET, squad = &self.config.squad; "External address has expired: {address:?}. TODO: Do we need to create a new one?");
+                self.attempt_relay_reservation().await;
             },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
