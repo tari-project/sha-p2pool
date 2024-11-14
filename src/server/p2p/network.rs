@@ -528,6 +528,7 @@ where S: ShareChain
     #[allow(clippy::too_many_lines)]
     async fn handle_new_gossipsub_message(&mut self, message: Message) -> Result<MessageAcceptance, Error> {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
+        let _ = self.stats_broadcast_client.send_gossipsub_message_received();
         let source_peer = message.source;
         if let Some(source_peer) = source_peer {
             let topic = message.topic.to_string();
@@ -616,16 +617,20 @@ where S: ShareChain
 
                             self.network_peer_store
                                 .add_last_new_tip_notify(&source_peer, payload.clone());
-                            let _ = self.swarm
-                                .behaviour_mut()
-                                .peer_sync
-                                .add_want_peers(vec![source_peer.clone()])
-                                .await.inspect_err(|error| {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {error:?}");
-                                });
+                            // let _ = self.swarm
+                            //     .behaviour_mut()
+                            //     .peer_sync
+                            //     .add_want_peers(vec![source_peer.clone()])
+                            //     .await.inspect_err(|error| {
+                            //     info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers:
+                            // {error:?}");     });
                             // If we don't have this peer, try do peer exchange
-                            if !self.network_peer_store.exists(message_peer) {
-                                self.initiate_direct_peer_exchange(message_peer).await;
+                            // if !self.network_peer_store.exists(message_peer) {
+                            //     self.initiate_direct_peer_exchange(message_peer).await;
+                            // }
+
+                            if self.config.is_seed_peer {
+                                return Ok(MessageAcceptance::Accept);
                             }
 
                             // verify payload
@@ -1878,7 +1883,7 @@ where S: ShareChain
                 },
                 _ = sync_interval.tick() =>  {
                     let timer = Instant::now();
-                    if self.config.sync_job_enabled {
+                    if !self.config.is_seed_peer && self.config.sync_job_enabled {
                         self.try_sync_from_best_peer().await;
                     }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -1916,7 +1921,7 @@ where S: ShareChain
                 _ = connection_stats_publish.tick() => {
                     let timer = Instant::now();
                    let connection_info = self.get_libp2p_connection_info();
-                   self.stats_broadcast_client.send_libp2p_stats(
+                   let _ = self.stats_broadcast_client.send_libp2p_stats(
                     connection_info.network_info.connection_counters.pending_incoming,
                     connection_info.network_info.connection_counters.pending_outgoing,
                     connection_info.network_info.connection_counters.established_incoming,

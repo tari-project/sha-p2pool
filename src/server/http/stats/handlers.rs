@@ -197,6 +197,11 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     let timer = std::time::Instant::now();
     info!(target: LOG_TARGET, "handle_get_stats");
 
+    let last_gossip_message = state.stats_client.get_last_gossip_message().await.map_err(|error| {
+        error!(target: LOG_TARGET, "Failed to get last gossip message: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     let (rx_stats, sha3x_stats) = get_chain_stats(state.clone()).await?;
     // let peer_count = state.peer_store.peer_count().await;
     let peer_count = 0;
@@ -236,6 +241,7 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
         connected_since,
         randomx_stats: rx_stats,
         sha3x_stats,
+        last_gossip_message,
     };
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
         error!(target: LOG_TARGET, "handle_get_stats took too long: {}ms", timer.elapsed().as_millis());

@@ -37,6 +37,7 @@ pub(crate) struct StatsCollector {
     pending_outgoing: u32,
     established_incoming: u32,
     established_outgoing: u32,
+    last_gossip_message: EpochTime,
 }
 
 impl StatsCollector {
@@ -67,6 +68,7 @@ impl StatsCollector {
             pending_outgoing: 0,
             established_incoming: 0,
             established_outgoing: 0,
+            last_gossip_message: EpochTime::now(),
         }
     }
 
@@ -148,6 +150,9 @@ impl StatsCollector {
                 self.established_incoming = established_incoming;
                 self.established_outgoing = established_outgoing;
             },
+            StatData::GossipsubMessageReceived { timestamp } => {
+                self.last_gossip_message = timestamp;
+            },
         }
     }
 
@@ -164,7 +169,7 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. V{} Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{}==== ",
+                                    "========= Uptime: {}. V{} Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
@@ -186,7 +191,10 @@ impl StatsCollector {
                                     self.total_grey_list,
                                     self.total_black_list,
                                     self.established_incoming,
-                                    self.established_outgoing
+                                    self.established_outgoing,
+                                    humantime::format_duration(Duration::from_secs(
+                                        EpochTime::now().as_u64().checked_sub(self.last_gossip_message.as_u64()).unwrap_or_default())),
+
                                 );
                         },
                         res = self.request_rx.recv() => {
@@ -211,6 +219,9 @@ impl StatsCollector {
                                             }).inspect_err(|e| error!(target: LOG_TARGET, "Error sending stats response: {:?}", e));
                                         },
                                     }
+                                },
+                                Some(StatsRequest::GetLastGossipMessage(tx)) => {
+                                    let _ = tx.send(self.last_gossip_message).inspect_err(|e| error!(target: LOG_TARGET, "Error sending last gossip message: {:?}", e));
                                 },
                                 None => {
                                     break;
@@ -245,6 +256,7 @@ impl StatsCollector {
 
 pub(crate) enum StatsRequest {
     GetStats(PowAlgorithm, tokio::sync::oneshot::Sender<GetStatsResponse>),
+    GetLastGossipMessage(tokio::sync::oneshot::Sender<EpochTime>),
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -309,6 +321,9 @@ pub(crate) enum StatData {
         established_outgoing: u32,
         timestamp: EpochTime,
     },
+    GossipsubMessageReceived {
+        timestamp: EpochTime,
+    },
 }
 
 impl StatData {
@@ -323,6 +338,7 @@ impl StatData {
             StatData::TargetDifficultyChanged { timestamp, .. } => *timestamp,
             StatData::NetworkDifficultyChanged { timestamp, .. } => *timestamp,
             StatData::LibP2PStats { timestamp, .. } => *timestamp,
+            StatData::GossipsubMessageReceived { timestamp } => *timestamp,
         }
     }
 }
@@ -336,6 +352,12 @@ impl StatsClient {
     pub async fn get_chain_stats(&self, pow_algo: PowAlgorithm) -> Result<GetStatsResponse, anyhow::Error> {
         let (tx, rx) = oneshot::channel();
         self.request_tx.send(StatsRequest::GetStats(pow_algo, tx)).await?;
+        Ok(rx.await?)
+    }
+
+    pub async fn get_last_gossip_message(&self) -> Result<EpochTime, anyhow::Error> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx.send(StatsRequest::GetLastGossipMessage(tx)).await?;
         Ok(rx.await?)
     }
 }
@@ -452,6 +474,12 @@ impl StatsBroadcastClient {
             pending_outgoing,
             established_incoming,
             established_outgoing,
+            timestamp: EpochTime::now(),
+        })
+    }
+
+    pub fn send_gossipsub_message_received(&self) -> Result<(), anyhow::Error> {
+        self.broadcast(StatData::GossipsubMessageReceived {
             timestamp: EpochTime::now(),
         })
     }

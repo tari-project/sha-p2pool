@@ -92,6 +92,7 @@ pub struct Stats {
     pub connected_since: Option<EpochTime>,
     pub randomx_stats: GetStatsResponse,
     pub sha3x_stats: GetStatsResponse,
+    pub last_gossip_message: EpochTime,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
