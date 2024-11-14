@@ -51,7 +51,6 @@ use libp2p::{
     StreamProtocol,
     Swarm,
 };
-use libp2p_peersync::store::MemoryPeerStore;
 use log::{
     debug,
     error,
@@ -61,7 +60,6 @@ use log::{
     warn,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::de;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
@@ -127,6 +125,7 @@ const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: usize = 150;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
+const NUM_PEERS_INITIAL_SYNC: usize = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -805,13 +804,16 @@ where S: ShareChain
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
             })
         {
-            let mut my_best_peers = self.network_peer_store.best_peers_to_share(
-                NUM_PEERS_TO_SYNC_PER_ALGO,
-                PowAlgorithm::RandomX,
-                &request.known_peer_ids,
-            );
+            let num_peers = if request.best_peers.is_empty() {
+                NUM_PEERS_INITIAL_SYNC
+            } else {
+                NUM_PEERS_TO_SYNC_PER_ALGO
+            };
+            let mut my_best_peers =
+                self.network_peer_store
+                    .best_peers_to_share(num_peers, PowAlgorithm::RandomX, &request.known_peer_ids);
             my_best_peers.extend(self.network_peer_store.best_peers_to_share(
-                NUM_PEERS_TO_SYNC_PER_ALGO,
+                num_peers,
                 PowAlgorithm::Sha3x,
                 &request.known_peer_ids,
             ));
