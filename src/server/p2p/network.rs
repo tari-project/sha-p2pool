@@ -269,7 +269,8 @@ pub struct ServerNetworkBehaviour {
 
 pub enum P2pServiceQuery {
     GetConnectionInfo(oneshot::Sender<ConnectionInfo>),
-    GetConnectedPeers(oneshot::Sender<(Vec<ConnectedPeerInfo>, Vec<ConnectedPeerInfo>)>),
+    GetPeers(oneshot::Sender<(Vec<ConnectedPeerInfo>, Vec<ConnectedPeerInfo>)>),
+    GetConnections(oneshot::Sender<Vec<ConnectedPeerInfo>>),
     GetChain {
         pow_algo: PowAlgorithm,
         height: u64,
@@ -283,8 +284,9 @@ pub(crate) struct ConnectedPeerInfo {
     pub peer_id: String,
     pub peer_info: PeerInfo,
     pub last_grey_list_reason: Option<String>,
-    // peer_addresses: Vec<Multiaddr>,
-    // is_pending: bol,
+    pub last_notify: Option<NotifyNewTipBlock>,
+    pub last_ping: Option<EpochTime>, /* peer_addresses: Vec<Multiaddr>,
+                                       * is_pending: bol, */
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1746,7 +1748,7 @@ where S: ShareChain
                 let _ = reply.send(connection_info);
             },
 
-            P2pServiceQuery::GetConnectedPeers(reply) => {
+            P2pServiceQuery::GetPeers(reply) => {
                 let connected_peers = self.network_peer_store.whitelist_peers();
                 let mut white_list_res = vec![];
                 for (p, info) in connected_peers {
@@ -1754,6 +1756,8 @@ where S: ShareChain
                         peer_id: p.to_string(),
                         peer_info: info.peer_info.clone(),
                         last_grey_list_reason: info.last_grey_list_reason.clone(),
+                        last_notify: info.last_new_tip_notify.as_ref().map(|e| e.as_ref().clone()),
+                        last_ping: info.last_ping,
                     });
                 }
                 let grey_list_peers = self.network_peer_store.greylist_peers();
@@ -1763,9 +1767,29 @@ where S: ShareChain
                         peer_id: p.to_string(),
                         peer_info: info.peer_info.clone(),
                         last_grey_list_reason: info.last_grey_list_reason.clone(),
+                        last_notify: info.last_new_tip_notify.as_ref().map(|e| e.as_ref().clone()),
+                        last_ping: info.last_ping,
                     });
                 }
                 let _ = reply.send((white_list_res, grey_list_res));
+            },
+            P2pServiceQuery::GetConnections(reply) => {
+                let connected_peers = self.swarm.connected_peers();
+                let mut res = vec![];
+                for p in connected_peers {
+                    let peer_info = self.network_peer_store.get(&p).map(|p| p.clone());
+                    if let Some(peer_info) = peer_info {
+                        let p = ConnectedPeerInfo {
+                            peer_id: p.to_string(),
+                            peer_info: peer_info.peer_info,
+                            last_grey_list_reason: peer_info.last_grey_list_reason,
+                            last_notify: peer_info.last_new_tip_notify.as_ref().map(|e| e.as_ref().clone()),
+                            last_ping: peer_info.last_ping,
+                        };
+                        res.push(p);
+                    }
+                }
+                let _ = reply.send(res);
             },
             P2pServiceQuery::GetChain {
                 pow_algo,

@@ -104,6 +104,14 @@ impl PeerStore {
         }
     }
 
+    pub fn get(&self, peer_id: &PeerId) -> Option<&PeerStoreRecord> {
+        self.whitelist_peers.get(&peer_id.to_base58()).or_else(|| {
+            self.greylist_peers
+                .get(&peer_id.to_base58())
+                .or_else(|| self.blacklist_peers.get(&peer_id.to_base58()))
+        })
+    }
+
     pub fn set_last_ping(&mut self, peer_id: &PeerId, timestamp: EpochTime) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();

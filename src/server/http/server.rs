@@ -76,6 +76,7 @@ impl HttpServer {
             .route("/health", get(health::handle_health))
             .route("/version", get(version::handle_version))
             .route("/chain", get(handlers::handle_chain))
+            .route("/peer", get(handlers::handle_peers))
             .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
                 stats_client: self.stats_client.clone(),

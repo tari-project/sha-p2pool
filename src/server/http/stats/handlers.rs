@@ -41,16 +41,46 @@ pub(crate) struct BlockResult {
 }
 
 #[derive(Serialize)]
-pub(crate) struct Connections {
+pub(crate) struct PeerList {
     allow_list: Vec<ConnectedPeerInfo>,
     grey_list: Vec<ConnectedPeerInfo>,
 }
-pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<Json<Connections>, StatusCode> {
+
+#[derive(Serialize)]
+pub(crate) struct ConnectionsResponse {
+    peers: Vec<ConnectedPeerInfo>,
+}
+
+pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<Json<ConnectionsResponse>, StatusCode> {
     let timer = std::time::Instant::now();
     let (tx, rx) = oneshot::channel();
     state
         .p2p_service_client
-        .send(P2pServiceQuery::GetConnectedPeers(tx))
+        .send(P2pServiceQuery::GetConnections(tx))
+        .await
+        .map_err(|error| {
+            error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let res = rx.await.map_err(|e| {
+        error!(target: LOG_TARGET, "Failed to receive from oneshot: {e:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: LOG_TARGET, "handle_connections took too long: {}ms", timer.elapsed().as_millis());
+    }
+
+    Ok(Json(ConnectionsResponse { peers: res }))
+}
+
+pub(crate) async fn handle_peers(State(state): State<AppState>) -> Result<Json<PeerList>, StatusCode> {
+    let timer = std::time::Instant::now();
+    let (tx, rx) = oneshot::channel();
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetPeers(tx))
         .await
         .map_err(|error| {
             error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
@@ -68,7 +98,7 @@ pub(crate) async fn handle_connections(State(state): State<AppState>) -> Result<
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
         error!(target: LOG_TARGET, "handle_connections took too long: {}ms", timer.elapsed().as_millis());
     }
-    Ok(Json(Connections {
+    Ok(Json(PeerList {
         allow_list: res.0.clone(),
         grey_list: res.1.clone(),
     }))
