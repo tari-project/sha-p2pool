@@ -95,6 +95,14 @@ pub(crate) struct StartArgs {
     #[arg(long, value_name = "relay-server-disabled", default_value_t = false)]
     pub relay_server_disabled: bool,
 
+    /// Relay Server Max Circuits
+    #[arg(long, value_name = "relay-server-max-circuits")]
+    pub relay_server_max_circuits: Option<usize>,
+
+    /// Relay Server Max Circuits per peer
+    #[arg(long, value_name = "relay-server-max-circuits-per-peer")]
+    pub relay_server_max_circuits_per_peer: Option<usize>,
+
     /// HTTP server disabled
     ///
     /// If set, local HTTP server (stats, health-check, status etc...) is disabled.

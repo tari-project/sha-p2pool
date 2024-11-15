@@ -111,9 +111,16 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
             }
 
             // relay server
-      let relay_config =  relay::Config{
+      let mut relay_config =  relay::Config{
         ..Default::default()
     };
+    if let Some(max) = config.max_relay_circuits  {
+        relay_config.max_circuits = max;
+    }
+    if let Some(max) = config.max_relay_circuits_per_peer {
+        relay_config.max_circuits_per_peer = max;
+    }
+     
 
     let peer_sync =
     libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());

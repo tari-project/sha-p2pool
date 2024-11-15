@@ -24,6 +24,8 @@ pub struct Config {
     pub max_incoming_connections: Option<u32>,
     pub max_outgoing_connections: Option<u32>,
     pub network_silence_delay: u64,
+    pub max_relay_circuits: Option<usize>,
+    pub max_relay_circuits_per_peer: Option<usize>,
 }
 
 impl Default for Config {
@@ -39,6 +41,8 @@ impl Default for Config {
             max_incoming_connections: Some(100),
             max_outgoing_connections: Some(16),
             network_silence_delay: 300,
+            max_relay_circuits: None,
+            max_relay_circuits_per_peer: None,
         }
     }
 }
@@ -139,6 +143,16 @@ impl ConfigBuilder {
 
     pub fn with_relay_disabled(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.relay_server_disabled = config;
+        self
+    }
+
+    pub fn with_relay_max_circuits(&mut self, config: Option<usize>) -> &mut Self {
+        self.config.max_relay_circuits = config;
+        self
+    }
+
+    pub fn with_relay_max_circuits_per_peer(&mut self, config: Option<usize>) -> &mut Self {
+        self.config.max_relay_circuits_per_peer = config;
         self
     }
 

@@ -625,15 +625,22 @@ where S: ShareChain
                             }
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
+                            if self.network_peer_store.is_whitelisted(&source_peer) {
+                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Received a block from a peer {}, but it is not whitelisted. Will process anyway, but may not be able to switch to this chain. Heights:{}", source_peer, &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
+                                // return Ok(MessageAcceptance::Accept);
+                            }
                             self.network_peer_store
                                 .add_last_new_tip_notify(&source_peer, payload.clone());
-                            // let _ = self.swarm
-                            //     .behaviour_mut()
-                            //     .peer_sync
-                            //     .add_want_peers(vec![source_peer.clone()])
-                            //     .await.inspect_err(|error| {
-                            //     info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers:
-                            // {error:?}");     });
+                            let _ = self
+                                .swarm
+                                .behaviour_mut()
+                                .peer_sync
+                                .add_want_peers(vec![source_peer.clone()])
+                                .await
+                                .inspect_err(|error| {
+                                    info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers:
+                            {error:?}");
+                                });
                             // If we don't have this peer, try do peer exchange
                             // if !self.network_peer_store.exists(message_peer) {
                             //     self.initiate_direct_peer_exchange(message_peer).await;
@@ -1360,6 +1367,8 @@ where S: ShareChain
                 },
                 ServerNetworkBehaviourEvent::Ping(event) => {
                     info!(target: LOG_TARGET, "[PING]: {event:?}");
+                    // Remove a peer from the greylist if we are in contact with them
+                    self.network_peer_store.set_last_ping(&event.peer, EpochTime::now());
                 },
             },
             _ => {},

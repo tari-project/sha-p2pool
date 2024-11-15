@@ -93,6 +93,8 @@ pub async fn server(
     config_builder.with_is_seed_peer(args.is_seed_peer);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
     config_builder.with_relay_disabled(args.relay_server_disabled);
+    config_builder.with_relay_max_circuits(args.relay_server_max_circuits);
+    config_builder.with_relay_max_circuits_per_peer(args.relay_server_max_circuits_per_peer);
     config_builder.with_http_server_enabled(!args.http_server_disabled);
     config_builder.with_user_agent(
         args.user_agent

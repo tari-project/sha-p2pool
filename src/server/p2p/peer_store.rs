@@ -50,6 +50,7 @@ pub(crate) struct PeerStoreRecord {
     pub last_grey_list_reason: Option<String>,
     pub catch_up_attempts: u64,
     pub last_new_tip_notify: Option<Arc<NotifyNewTipBlock>>,
+    pub last_ping: Option<EpochTime>,
 }
 
 impl PeerStoreRecord {
@@ -64,6 +65,7 @@ impl PeerStoreRecord {
             last_grey_list_reason: None,
             catch_up_attempts: 0,
             last_new_tip_notify: None,
+            last_ping: None,
         }
     }
 
@@ -72,19 +74,6 @@ impl PeerStoreRecord {
         self
     }
 }
-
-/// Tip of height from known peers.
-// #[derive(Copy, Clone, Debug)]
-// pub struct PeerStoreBlockHeightTip {
-//     pub peer_id: PeerId,
-//     pub height: u64,
-// }
-
-// impl PeerStoreBlockHeightTip {
-//     pub fn new(peer_id: PeerId, height: u64) -> Self {
-//         Self { peer_id, height }
-//     }
-// }
 
 pub enum AddPeerStatus {
     NewPeer,
@@ -112,6 +101,30 @@ impl PeerStore {
             greylist_peers: HashMap::new(),
             blacklist_peers: HashMap::new(),
             seed_peers: Vec::new(),
+        }
+    }
+
+    pub fn set_last_ping(&mut self, peer_id: &PeerId, timestamp: EpochTime) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_ping = Some(timestamp);
+            *entry = new_record;
+        }
+        if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_ping = Some(timestamp);
+            *entry = new_record;
+            // Move it to the whitelist
+            let mut record = self.greylist_peers.remove(&peer_id.to_base58()).unwrap();
+            record.num_grey_listings = 0;
+
+            self.whitelist_peers.insert(peer_id.to_base58(), record);
+        }
+
+        if let Some(entry) = self.blacklist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_ping = Some(timestamp);
+            *entry = new_record;
         }
     }
 
