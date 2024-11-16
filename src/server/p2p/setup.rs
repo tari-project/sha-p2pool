@@ -116,6 +116,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
     };
     if let Some(max) = config.max_relay_circuits  {
         relay_config.max_circuits = max;
+        relay_config.max_reservations = max;
     }
     if let Some(max) = config.max_relay_circuits_per_peer {
         relay_config.max_circuits_per_peer = max;

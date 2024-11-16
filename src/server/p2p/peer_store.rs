@@ -516,7 +516,7 @@ impl PeerStore {
         self.whitelist_peers.len() as u64
     }
 
-    pub async fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
+    pub fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
         if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
             let record = self.whitelist_peers.remove(&peer_id.to_base58());
             if let Some(mut record) = record {
