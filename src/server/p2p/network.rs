@@ -930,9 +930,9 @@ where S: ShareChain
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
-        // let new_tip_notify = self.client_broadcast_block_tx.clone();
+        let new_tip_notify = self.client_broadcast_block_tx.clone();
         let tx = self.inner_request_tx.clone();
-        // let local_peer_id = self.local_peer_id();
+        let local_peer_id = self.local_peer_id();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
@@ -946,9 +946,8 @@ where S: ShareChain
                             error!(target: SYNC_REQUEST_LOG_TARGET, "Could not get added new tip from chain storage");
                             return;
                         };
-                        // let total_pow = share_chain.get_total_chain_pow().await;
-                        // let _ = new_tip_notify.send(NotifyNewTipBlock::new(local_peer_id, algo, new_blocks,
-                        // total_pow));
+                        let total_pow = share_chain.get_total_chain_pow().await;
+                        let _ = new_tip_notify.send(NotifyNewTipBlock::new(local_peer_id, algo, new_blocks, total_pow));
                     }
                 },
                 Err(error) => match error {
