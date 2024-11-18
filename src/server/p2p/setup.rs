@@ -135,8 +135,6 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
     if let Some(max) = config.max_relay_circuits_per_peer {
         relay_config.max_circuits_per_peer = max;
     }
-    let peer_sync =
-    libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());
 
             let relay_server = if config.p2p_service.relay_server_disabled {
                 Toggle::from(None)
@@ -170,7 +168,6 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                     )],
                     request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
                 ),
-                peer_sync,
                 // kademlia: kad::Behaviour::new(
                     // key_pair.public().to_peer_id(),
                     // MemoryStore::new(key_pair.public().to_peer_id()),

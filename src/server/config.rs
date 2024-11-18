@@ -39,7 +39,7 @@ impl Default for Config {
             p2p_service: p2p::Config::default(),
             http_server: http::server::Config::default(),
             max_incoming_connections: Some(100),
-            max_outgoing_connections: Some(16),
+            max_outgoing_connections: Some(20),
             network_silence_delay: 300,
             max_relay_circuits: None,
             max_relay_circuits_per_peer: None,
