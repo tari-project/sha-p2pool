@@ -910,7 +910,7 @@ pub mod test {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
-            if i > 1 {
+            if i > 10 {
                 let prev_hash_uncle = share_chain
                     .p2_chain
                     .read()
@@ -951,19 +951,20 @@ pub mod test {
             .await
             .unwrap();
         assert_eq!(shares.len(), 5);
-        // we have 3 miners with 27 shares and 2 with 23 shares
-        // 27 = 3 *5 + 3*4; 23 = 3 *5 + 2
-        let mut counter_27 = 0;
-        let mut counter_23 = 0;
+        // we have 1 miner with 15 shares and 4 with 19 shares
+        // 15  = 3* full shares (5)
+        // 19  = 3* full shares (5) + 1 * uncle(4)
+        let mut counter_19 = 0;
+        let mut counter_15 = 0;
         for share in shares {
             match share.1 .0 {
-                27 => counter_27 += 1,
-                23 => counter_23 += 1,
-                _ => panic!("Should be 27 or 23"),
+                19 => counter_19 += 1,
+                15 => counter_15 += 1,
+                _ => panic!("Should be 19 or 15"),
             }
         }
-        assert_eq!(counter_27, 3);
-        assert_eq!(counter_23, 2);
+        assert_eq!(counter_19, 4);
+        assert_eq!(counter_15, 1);
     }
 
     #[tokio::test]
