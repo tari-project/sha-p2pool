@@ -143,7 +143,7 @@ impl StatsCollector {
                 pending_outgoing,
                 established_incoming,
                 established_outgoing,
-                timestamp,
+                timestamp: _,
             } => {
                 self.pending_incoming = pending_incoming;
                 self.pending_outgoing = pending_outgoing;

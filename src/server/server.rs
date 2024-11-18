@@ -18,8 +18,7 @@ use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
     server::{
         config,
-        grpc,
-        grpc::{base_node::TariBaseNodeGrpc, error::TonicError, p2pool::ShaP2PoolGrpc},
+        grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
         p2p,
         p2p::peer_store::PeerStore,

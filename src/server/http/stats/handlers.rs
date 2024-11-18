@@ -14,13 +14,9 @@ use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::oneshot;
 
-use super::{models::ChainStats, MAX_ACCEPTABLE_HTTP_TIMEOUT};
+use super::MAX_ACCEPTABLE_HTTP_TIMEOUT;
 use crate::server::{
-    http::{
-        server::AppState,
-        stats::models::{SquadDetails, Stats},
-        stats_collector::GetStatsResponse,
-    },
+    http::{server::AppState, stats::models::Stats, stats_collector::GetStatsResponse},
     p2p::{ConnectedPeerInfo, P2pServiceQuery},
 };
 
@@ -234,8 +230,8 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
 
     let (rx_stats, sha3x_stats) = get_chain_stats(state.clone()).await?;
     // let peer_count = state.peer_store.peer_count().await;
-    let peer_count = 0;
-    let connected = peer_count > 0;
+    // let peer_count = 0;
+    // let connected = peer_count > 0;
     // let connected_since = state.peer_store.last_connected();
     let connected_since = None;
     let (tx, rx) = oneshot::channel();

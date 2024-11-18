@@ -20,21 +20,17 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
-use num::BigUint;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
     proof_of_work::{randomx_factory::RandomXFactory, AccumulatedDifficulty, Difficulty},
 };
 
-use crate::{
-    server::p2p::Squad,
-    sharechain::{error::Error, p2block::P2Block},
-};
+use crate::sharechain::{error::Error, p2block::P2Block};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
