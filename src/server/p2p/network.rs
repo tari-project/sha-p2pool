@@ -625,16 +625,7 @@ where S: ShareChain
                             }
                             self.network_peer_store
                                 .add_last_new_tip_notify(&source_peer, payload.clone());
-                            let _ = self
-                                .swarm
-                                .behaviour_mut()
-                                .peer_sync
-                                .add_want_peers(vec![source_peer.clone()])
-                                .await
-                                .inspect_err(|error| {
-                                    info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers:
-                            {error:?}");
-                                });
+
                             // If we don't have this peer, try do peer exchange
                             // if !self.network_peer_store.exists(message_peer) {
                             //     self.initiate_direct_peer_exchange(message_peer).await;
@@ -1933,7 +1924,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        if self.swarm.connected_peers().count() > 15 {
+                        if self.swarm.connected_peers().count() > 13 {
                             continue;
                         }
                         let mut num_dialed = 0;

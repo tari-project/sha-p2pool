@@ -73,6 +73,15 @@ impl PeerStoreRecord {
         self.peer_info.timestamp = timestamp;
         self
     }
+
+    pub fn last_seen(&self) -> EpochTime {
+        self.last_ping.unwrap_or_else(|| {
+            self.last_new_tip_notify
+                .as_ref()
+                .map(|n| EpochTime::from(n.timestamp))
+                .unwrap_or(EpochTime::from(self.peer_info.timestamp))
+        })
+    }
 }
 
 pub enum AddPeerStatus {
@@ -219,35 +228,7 @@ impl PeerStore {
         //         timestamp
         // });
         peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
-        match algo {
-            PowAlgorithm::RandomX => peers.sort_by(|a, b| {
-                b.last_new_tip_notify
-                    .as_ref()
-                    .map(|n| n.timestamp)
-                    .unwrap_or(b.peer_info.timestamp)
-                    .cmp(
-                        &a.last_new_tip_notify
-                            .as_ref()
-                            .map(|n| n.timestamp)
-                            .unwrap_or(a.peer_info.timestamp),
-                    )
-            }),
-
-            PowAlgorithm::Sha3x => {
-                peers.sort_by(|a, b| {
-                    b.last_new_tip_notify
-                        .as_ref()
-                        .map(|n| n.timestamp)
-                        .unwrap_or(b.peer_info.timestamp)
-                        .cmp(
-                            &a.last_new_tip_notify
-                                .as_ref()
-                                .map(|n| n.timestamp)
-                                .unwrap_or(a.peer_info.timestamp),
-                        )
-                });
-            },
-        }
+        peers.sort_by(|a, b| b.last_seen().cmp(&a.last_seen()));
 
         peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
         peers.truncate(count);
@@ -257,14 +238,8 @@ impl PeerStore {
     pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 1 minutes
-        let timestamp = EpochTime::now().as_u64() - 60;
-        peers.retain(|peer| {
-            peer.last_new_tip_notify
-                .as_ref()
-                .map(|n| n.timestamp)
-                .unwrap_or(peer.peer_info.timestamp) >
-                timestamp
-        });
+        let timestamp = EpochTime::from(EpochTime::now().as_u64() - 60);
+        peers.retain(|peer| peer.last_seen() > timestamp);
         peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
 
         match algo {
@@ -272,33 +247,14 @@ impl PeerStore {
                 b.peer_info
                     .current_random_x_pow
                     .cmp(&a.peer_info.current_random_x_pow)
-                    .then(
-                        b.last_new_tip_notify
-                            .as_ref()
-                            .map(|n| n.timestamp)
-                            .unwrap_or(b.peer_info.timestamp)
-                            .cmp(
-                                &a.last_new_tip_notify
-                                    .as_ref()
-                                    .map(|n| n.timestamp)
-                                    .unwrap_or(a.peer_info.timestamp),
-                            ),
-                    )
+                    .then(b.last_seen().cmp(&a.last_seen()))
             }),
             PowAlgorithm::Sha3x => {
                 peers.sort_by(|a, b| {
-                    b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow).then(
-                        b.last_new_tip_notify
-                            .as_ref()
-                            .map(|n| n.timestamp)
-                            .unwrap_or(b.peer_info.timestamp)
-                            .cmp(
-                                &a.last_new_tip_notify
-                                    .as_ref()
-                                    .map(|n| n.timestamp)
-                                    .unwrap_or(a.peer_info.timestamp),
-                            ),
-                    )
+                    b.peer_info
+                        .current_sha3x_pow
+                        .cmp(&a.peer_info.current_sha3x_pow)
+                        .then(b.last_seen().cmp(&a.last_seen()))
                 });
             },
         }
