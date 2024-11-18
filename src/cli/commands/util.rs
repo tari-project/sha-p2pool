@@ -25,6 +25,7 @@ use crate::{
     sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
 };
 
+#[allow(clippy::too_many_lines)]
 pub async fn server(
     cli: Arc<Cli>,
     args: &StartArgs,
@@ -143,7 +144,7 @@ genesis_block_hash.to_hex());
         stats_broadcast_client.clone(),
     )?;
 
-    Ok(Server::new(
+    Server::new(
         config,
         share_chain_sha3x,
         share_chain_random_x,
@@ -151,5 +152,5 @@ genesis_block_hash.to_hex());
         stats_broadcast_client,
         shutdown_signal,
     )
-    .await?)
+    .await
 }

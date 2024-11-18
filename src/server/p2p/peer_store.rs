@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::Error;
-use libp2p::{core::peer_record, PeerId};
+use libp2p::PeerId;
 use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
@@ -138,6 +138,10 @@ impl PeerStore {
 
     pub fn add_seed_peer(&mut self, peer_id: PeerId) {
         self.seed_peers.push(peer_id);
+    }
+
+    pub fn add_seed_peers(&mut self, mut peer_ids: Vec<PeerId>) {
+        self.seed_peers.append(&mut peer_ids);
     }
 
     pub fn is_seed_peer(&self, peer_id: &PeerId) -> bool {

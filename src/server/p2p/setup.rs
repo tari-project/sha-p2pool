@@ -7,7 +7,22 @@ use anyhow::Error;
 use blake2::Blake2b;
 use digest::{consts::U32, generic_array::GenericArray, Digest};
 use libp2p::{
-    autonat::{self}, connection_limits::{self, ConnectionLimits}, dcutr, gossipsub::{self, Message, MessageId}, identify, identity::Keypair, mdns::{self}, noise, ping, relay, request_response::{self, cbor}, swarm::behaviour::toggle::Toggle, tcp, yamux, StreamProtocol, Swarm
+    autonat::{self},
+    connection_limits::{self, ConnectionLimits},
+    dcutr,
+    gossipsub::{self, Message, MessageId},
+    identify,
+    identity::Keypair,
+    mdns::{self},
+    noise,
+    ping,
+    relay,
+    request_response::{self, cbor},
+    swarm::behaviour::toggle::Toggle,
+    tcp,
+    yamux,
+    StreamProtocol,
+    Swarm,
 };
 use libp2p_peersync::store::MemoryPeerStore;
 use tokio::{
@@ -49,7 +64,7 @@ pub(crate) async fn keypair(config: &Config) -> Result<Keypair, Error> {
 
     if let Ok(mut file) = File::open(key_path.clone()).await {
         if file.read_to_end(&mut content).await.is_ok() {
-            return Ok(Keypair::from_protobuf_encoding(content.as_slice()) ?);
+            return Ok(Keypair::from_protobuf_encoding(content.as_slice())?);
         }
     }
 
@@ -73,7 +88,6 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
             config.handshake_timeout = Duration::from_secs(30);
             config
         })
-  
         .with_relay_client(noise::Config::new, yamux::Config::default)
         ?
         .with_behaviour(|key_pair, relay_client| {
@@ -121,8 +135,6 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
     if let Some(max) = config.max_relay_circuits_per_peer {
         relay_config.max_circuits_per_peer = max;
     }
-     
-
     let peer_sync =
     libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());
 

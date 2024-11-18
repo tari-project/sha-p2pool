@@ -6,7 +6,6 @@ use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
-use num::{BigUint, Zero};
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     consensus::ConsensusManager,
@@ -31,7 +30,7 @@ use super::{
     UNCLE_REWARD_SHARE,
 };
 use crate::{
-    server::{http::stats_collector::StatsBroadcastClient, p2p::Squad, PROTOCOL_VERSION},
+    server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
     sharechain::{
         error::{Error, ValidationError},
         p2block::P2Block,
@@ -330,18 +329,18 @@ impl ShareChain for InMemoryShareChain {
             p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
-        if let Ok(false) = &res {
-            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, no tip change", self.pow_algo, height);
-        }
-        if let Ok(true) = &res {
-            info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, tip changed", self.pow_algo, height);
-        }
-
-        if let Err(Error::BlockParentDoesNotExist { missing_parents }) = &res {
-            let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
-        } else if let Err(e) = &res {
-            warn!(target: LOG_TARGET, "Failed to add block from submit (height {}): {}", height, e);
+        match &res {
+            Ok(false) => {
+                info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, no tip change", self.pow_algo, height)
+            },
+            Ok(true) => {
+                info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, tip changed", self.pow_algo, height)
+            },
+            Err(Error::BlockParentDoesNotExist { missing_parents }) => {
+                let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
+                info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
+            },
+            Err(e) => warn!(target: LOG_TARGET, "Failed to add block from submit (height {}): {}", height, e),
         }
         res
     }
@@ -548,10 +547,10 @@ impl ShareChain for InMemoryShareChain {
                     let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
                     // Blocks in the main chain can't be uncles
                     excluded_uncles.push(chain_block.hash);
-                    for uncle in chain_block.uncles.iter() {
+                    for uncle in &chain_block.uncles {
                         excluded_uncles.push(uncle.1);
                     }
-                    for block in older_level.blocks.iter() {
+                    for block in &older_level.blocks {
                         uncles.push((height, *block.0));
                     }
                 }
@@ -585,7 +584,7 @@ impl ShareChain for InMemoryShareChain {
             }
 
             // Remove excluded.
-            for excluded in excluded_uncles.iter() {
+            for excluded in &excluded_uncles {
                 uncles.retain(|uncle| &uncle.1 != excluded);
             }
             uncles.truncate(UNCLE_LIMIT);
@@ -767,15 +766,14 @@ pub mod test {
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        let share_chain = InMemoryShareChain::new(
+        InMemoryShareChain::new(
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
             coinbase_extras,
             stats_broadcast_client,
         )
-        .unwrap();
-        share_chain
+        .unwrap()
     }
 
     pub fn new_random_address() -> TariAddress {
@@ -821,7 +819,11 @@ pub mod test {
             share_chain.submit_block(block).await.unwrap();
         }
 
-        let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
+        let mut wl = share_chain.p2_chain.write().await;
+        let shares = share_chain
+            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
+            .await
+            .unwrap();
         assert_eq!(shares.len(), 15);
         for share in shares {
             assert_eq!(share.1, (5, static_coinbase_extra.clone()))
@@ -869,7 +871,11 @@ pub mod test {
             share_chain.submit_block(block).await.unwrap();
         }
 
-        let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
+        let mut wl = share_chain.p2_chain.write().await;
+        let shares = share_chain
+            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
+            .await
+            .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
             assert_eq!(share.1, (15, static_coinbase_extra.clone()))
@@ -939,7 +945,11 @@ pub mod test {
             share_chain.submit_block(block).await.unwrap();
         }
 
-        let shares = share_chain.miners_with_shares(Squad::default()).await.unwrap();
+        let mut wl = share_chain.p2_chain.write().await;
+        let shares = share_chain
+            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
+            .await
+            .unwrap();
         assert_eq!(shares.len(), 5);
         // we have 3 miners with 27 shares and 2 with 23 shares
         // 27 = 3 *5 + 3*4; 23 = 3 *5 + 2
@@ -974,7 +984,7 @@ pub mod test {
         assert_eq!(chain.tip_height().await.unwrap(), 9);
 
         let mut their_blocks = Vec::new();
-        their_blocks.push((3, blocks[3].hash.clone()));
+        their_blocks.push((3, blocks[3].hash));
 
         let res = chain.request_sync(&their_blocks, 10, None).await.unwrap();
         assert_eq!(res.len(), 7);
@@ -983,7 +993,7 @@ pub mod test {
 
         // if last block is higher, then we should start from the highest match
         let res = chain
-            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
             .unwrap();
 
@@ -992,9 +1002,9 @@ pub mod test {
         assert_eq!(heights, vec![5, 6, 7, 8, 9]);
 
         // if there is a match in the middle, we should start from the highest match
-        their_blocks.push((7, blocks[7].hash.clone()));
+        their_blocks.push((7, blocks[7].hash));
         let res = chain
-            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
             .unwrap();
 
@@ -1009,10 +1019,10 @@ pub mod test {
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .build();
         // prev_hash = block.generate_hash();
-        their_blocks.push((11, missing_block.hash.clone()));
+        their_blocks.push((11, missing_block.hash));
 
         let res = chain
-            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash.clone())))
+            .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
             .unwrap();
 

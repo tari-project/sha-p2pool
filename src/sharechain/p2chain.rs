@@ -144,7 +144,7 @@ impl P2Chain {
                 .total_accumulated_tip_difficulty
                 .checked_add_difficulty(block.target_difficulty)
                 .ok_or(Error::DifficultyOverflow)?;
-            for uncle in block.uncles.iter() {
+            for uncle in &block.uncles {
                 if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
                     self.total_accumulated_tip_difficulty = self
                         .total_accumulated_tip_difficulty
@@ -227,6 +227,7 @@ impl P2Chain {
         Ok(new_tip)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn verify_chain_inner(
         &mut self,
         new_block_height: u64,
@@ -344,140 +345,140 @@ impl P2Chain {
             .ok_or(Error::BlockNotFound)?
             .clone();
 
-        if self.get_tip().is_some() && self.get_tip().unwrap().chain_block == new_block.prev_hash {
-            // Can only become the new tip if it is verified
-            if new_block.verified {
+        if new_block.verified {
+            if self.get_tip().is_some() && self.get_tip().unwrap().chain_block == new_block.prev_hash {
                 // easy this builds on the tip
                 info!(target: LOG_TARGET, "[{:?}] New block added to tip, and is now the new tip: {:?}", algo, new_block_height);
                 self.set_new_tip(new_block_height, hash)?;
                 new_tip = true;
-            }
-        } else if new_block.verified {
-            let mut all_blocks_verified = true;
-            debug!(target: LOG_TARGET, "[{:?}] New block is not on the tip, checking for reorg: {:?}", algo, new_block_height);
+            } else {
+                let mut all_blocks_verified = true;
+                debug!(target: LOG_TARGET, "[{:?}] New block is not on the tip, checking for reorg: {:?}", algo, new_block_height);
 
-            let mut total_work = AccumulatedDifficulty::from_u128(new_block.target_difficulty.as_u64() as u128)
-                .expect("Difficulty will always fit into accumulated difficulty");
+                let mut total_work = AccumulatedDifficulty::from_u128(new_block.target_difficulty.as_u64() as u128)
+                    .expect("Difficulty will always fit into accumulated difficulty");
 
-            for uncle in new_block.uncles.iter() {
-                if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
-                    if !uncle_block.verified {
-                        // we cannot count unverified blocks
-                        all_blocks_verified = false;
-                        break;
-                    }
-                    total_work = total_work
-                        .checked_add_difficulty(uncle_block.target_difficulty)
-                        .ok_or(Error::DifficultyOverflow)?;
-                } else {
-                    missing_parents.push((uncle.0, uncle.1));
-                }
-            }
-            let mut current_counting_block = new_block.clone();
-            let mut counter = 1;
-            while let Some(parent) = self.get_parent_block(&current_counting_block) {
-                if !parent.verified {
-                    all_blocks_verified = false;
-                    // we cannot count unverified blocks
-                    break;
-                }
-                total_work = total_work
-                    .checked_add_difficulty(parent.target_difficulty)
-                    .ok_or(Error::DifficultyOverflow)?;
-                current_counting_block = parent.clone();
-                for uncle in parent.uncles.iter() {
+                for uncle in new_block.uncles.iter() {
                     if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                        if !uncle_block.verified {
+                            // we cannot count unverified blocks
+                            all_blocks_verified = false;
+                            break;
+                        }
                         total_work = total_work
                             .checked_add_difficulty(uncle_block.target_difficulty)
                             .ok_or(Error::DifficultyOverflow)?;
-                        if !uncle_block.verified {
-                            all_blocks_verified = false;
-                            // we cannot count unverified blocks
-                            break;
-                        }
                     } else {
                         missing_parents.push((uncle.0, uncle.1));
                     }
                 }
-                if !missing_parents.is_empty() {
-                    break;
-                }
-                counter += 1;
-                if counter >= self.share_window {
-                    break;
-                }
-                if parent.height == 0 {
-                    // we cant count further next block will be non existing as we have the first block here no
-                    // lets change the counter to reflect max share window as this will be the max share window we can
-                    // have
-                    counter = self.share_window;
-                }
-            }
-            if total_work > self.total_accumulated_tip_difficulty &&
-                counter >= self.share_window &&
-                all_blocks_verified &&
-                missing_parents.is_empty()
-            {
-                new_tip = true;
-                // we need to reorg the chain
-                // lets start by resetting the lwma
-                self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
-                    .expect("Failed to create LWMA");
-                self.lwma.add_front(new_block.timestamp, new_block.target_difficulty);
-                let chain_height = self
-                    .level_at_height_mut(new_block.height)
-                    .ok_or(Error::BlockLevelNotFound)?;
-                chain_height.chain_block = new_block.hash;
-                self.cached_shares = None;
-                self.current_tip = new_block.height;
-                // lets fix the chain
-                let mut current_block = new_block;
-                while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
-                    let parent_level = (self.level_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
-                    if current_block.prev_hash != parent_level.chain_block {
-                        // safety check
-                        let nextblock = parent_level.blocks.get(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
-                            panic!(
-                                "FATAL: Reorging (block in chain) failed because parent block was not found and chain \
-                                 data is corrupted."
-                            );
-                            // return Err(Error::BlockNotFound);
-                        }
-                        // fix the main chain
-                        let mut_parent_level = self
-                            .level_at_height_mut(current_block.height.saturating_sub(1))
-                            .unwrap();
-                        mut_parent_level.chain_block = current_block.prev_hash;
-                        current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
-                    } else if !self.lwma.is_full() {
-                        // we still need more blocks to fill up the lwma
-                        let nextblock = parent_level.blocks.get(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(target: LOG_TARGET, "FATAL: Reorging (block not in chain) failed because parent block was not found and chain data is corrupted.");
-                            panic!(
-                                "FATAL: Reorging (block not in chain) failed because parent block was not found and \
-                                 chain data is corrupted."
-                            );
-                        }
-
-                        current_block = nextblock.unwrap().clone();
-
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
-                    } else {
+                let mut current_counting_block = new_block.clone();
+                let mut counter = 1;
+                while let Some(parent) = self.get_parent_block(&current_counting_block) {
+                    if !parent.verified {
+                        all_blocks_verified = false;
+                        // we cannot count unverified blocks
                         break;
                     }
-
-                    if current_block.height == 0 {
-                        // edge case if there is less than the lwa size or share window in chain
+                    total_work = total_work
+                        .checked_add_difficulty(parent.target_difficulty)
+                        .ok_or(Error::DifficultyOverflow)?;
+                    current_counting_block = parent.clone();
+                    for uncle in parent.uncles.iter() {
+                        if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
+                            total_work = total_work
+                                .checked_add_difficulty(uncle_block.target_difficulty)
+                                .ok_or(Error::DifficultyOverflow)?;
+                            if !uncle_block.verified {
+                                all_blocks_verified = false;
+                                // we cannot count unverified blocks
+                                break;
+                            }
+                        } else {
+                            missing_parents.push((uncle.0, uncle.1));
+                        }
+                    }
+                    if !missing_parents.is_empty() {
                         break;
                     }
+                    counter += 1;
+                    if counter >= self.share_window {
+                        break;
+                    }
+                    if parent.height == 0 {
+                        // we cant count further next block will be non existing as we have the first block here no
+                        // lets change the counter to reflect max share window as this will be the max share window we
+                        // can have
+                        counter = self.share_window;
+                    }
                 }
-                self.total_accumulated_tip_difficulty = total_work;
+                if total_work > self.total_accumulated_tip_difficulty &&
+                    counter >= self.share_window &&
+                    all_blocks_verified &&
+                    missing_parents.is_empty()
+                {
+                    new_tip = true;
+                    // we need to reorg the chain
+                    // lets start by resetting the lwma
+                    self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
+                        .expect("Failed to create LWMA");
+                    self.lwma.add_front(new_block.timestamp, new_block.target_difficulty);
+                    let chain_height = self
+                        .level_at_height_mut(new_block.height)
+                        .ok_or(Error::BlockLevelNotFound)?;
+                    chain_height.chain_block = new_block.hash;
+                    self.cached_shares = None;
+                    self.current_tip = new_block.height;
+                    // lets fix the chain
+                    let mut current_block = new_block;
+                    while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
+                        let parent_level =
+                            (self.level_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
+                        if current_block.prev_hash != parent_level.chain_block {
+                            // safety check
+                            let nextblock = parent_level.blocks.get(&current_block.prev_hash);
+                            if nextblock.is_none() {
+                                error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
+                                panic!(
+                                    "FATAL: Reorging (block in chain) failed because parent block was not found and \
+                                     chain data is corrupted."
+                                );
+                                // return Err(Error::BlockNotFound);
+                            }
+                            // fix the main chain
+                            let mut_parent_level = self
+                                .level_at_height_mut(current_block.height.saturating_sub(1))
+                                .unwrap();
+                            mut_parent_level.chain_block = current_block.prev_hash;
+                            current_block = nextblock.unwrap().clone();
+                            self.lwma
+                                .add_front(current_block.timestamp, current_block.target_difficulty);
+                        } else if !self.lwma.is_full() {
+                            // we still need more blocks to fill up the lwma
+                            let nextblock = parent_level.blocks.get(&current_block.prev_hash);
+                            if nextblock.is_none() {
+                                error!(target: LOG_TARGET, "FATAL: Reorging (block not in chain) failed because parent block was not found and chain data is corrupted.");
+                                panic!(
+                                    "FATAL: Reorging (block not in chain) failed because parent block was not found \
+                                     and chain data is corrupted."
+                                );
+                            }
+
+                            current_block = nextblock.unwrap().clone();
+
+                            self.lwma
+                                .add_front(current_block.timestamp, current_block.target_difficulty);
+                        } else {
+                            break;
+                        }
+
+                        if current_block.height == 0 {
+                            // edge case if there is less than the lwa size or share window in chain
+                            break;
+                        }
+                    }
+                    self.total_accumulated_tip_difficulty = total_work;
+                }
             }
         }
 
@@ -724,7 +725,7 @@ impl P2Chain {
                 panic!("Parent block is not verified");
             }
             current_block = parent.clone();
-            for uncle in parent.uncles.iter() {
+            for uncle in &parent.uncles {
                 if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
                     if !uncle_block.verified {
                         panic!("Uncle block is not verified");
@@ -924,7 +925,7 @@ mod test {
             .with_height(5)
             .with_tari_block(tari_block.clone())
             .with_miner_wallet_address(address.clone())
-            .with_prev_hash(blocks[4].hash.clone())
+            .with_prev_hash(blocks[4].hash)
             .build();
 
         tari_block.header.nonce = 6;
@@ -935,7 +936,7 @@ mod test {
             .with_tari_block(tari_block.clone())
             .with_miner_wallet_address(address.clone())
             .with_prev_hash(prev_hash)
-            .with_uncles(vec![(5, uncle_block.hash.clone())])
+            .with_uncles(vec![(5, uncle_block.hash)])
             .build();
         blocks.push(block.clone());
 
@@ -1056,13 +1057,13 @@ mod test {
         for i in 11..41 {
             let level = chain.level_at_height(i).unwrap();
             let block = level.block_in_main_chain().unwrap();
-            let parent = chain.get_parent_block(&block).unwrap();
+            let parent = chain.get_parent_block(block).unwrap();
             assert_eq!(parent.original_block.header.nonce, i - 1);
         }
 
         let level = chain.level_at_height(10).unwrap();
         let block = level.block_in_main_chain().unwrap();
-        assert!(chain.get_parent_block(&block).is_none());
+        assert!(chain.get_parent_block(block).is_none());
     }
 
     #[test]
@@ -1079,7 +1080,7 @@ mod test {
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(i as u64 + 1).unwrap())
+                .with_target_difficulty(Difficulty::from_u64(i + 1).unwrap())
                 .with_prev_hash(prev_hash)
                 .build();
 
@@ -1090,7 +1091,7 @@ mod test {
             let level = chain.get_tip().unwrap();
             assert_eq!(
                 level.block_in_main_chain().unwrap().target_difficulty,
-                Difficulty::from_u64(i as u64 + 1).unwrap()
+                Difficulty::from_u64(i + 1).unwrap()
             );
         }
     }
