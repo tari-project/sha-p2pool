@@ -32,7 +32,7 @@ use super::{
 use crate::{
     server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
     sharechain::{
-        error::{Error, ValidationError},
+        error::{ShareChainError, ValidationError},
         p2block::P2Block,
         p2chain::P2Chain,
         BlockValidationParams,
@@ -68,9 +68,9 @@ impl InMemoryShareChain {
         consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stat_client: StatsBroadcastClient,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ShareChainError> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
-            return Err(Error::MissingBlockValidationParams);
+            return Err(ShareChainError::MissingBlockValidationParams);
         }
 
         Ok(Self {
@@ -85,11 +85,11 @@ impl InMemoryShareChain {
 
     /// Calculates block difficulty based on it's pow algo.
     fn block_difficulty(&self, block: &P2Block) -> Result<u64, ValidationError> {
-        match block.original_block.header.pow.pow_algo {
+        match block.original_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
                 if let Some(params) = &self.block_validation_params {
                     let difficulty = randomx_difficulty(
-                        &block.original_block.header,
+                        &block.original_header,
                         params.random_x_factory(),
                         params.genesis_block_hash(),
                         params.consensus_manager(),
@@ -102,7 +102,7 @@ impl InMemoryShareChain {
                 }
             },
             PowAlgorithm::Sha3x => {
-                let difficulty = sha3x_difficulty(&block.original_block.header).map_err(ValidationError::Difficulty)?;
+                let difficulty = sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?;
                 Ok(difficulty.as_u64())
             },
         }
@@ -114,27 +114,25 @@ impl InMemoryShareChain {
         block: &P2Block,
         params: Option<Arc<BlockValidationParams>>,
     ) -> Result<Difficulty, ValidationError> {
-        if block.original_block.header.pow.pow_algo != self.pow_algo {
+        if block.original_header.pow.pow_algo != self.pow_algo {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Pow algorithm mismatch! This share chain uses {:?}!", self.pow_algo, self.pow_algo);
             return Err(ValidationError::InvalidPowAlgorithm);
         }
 
         // validate PoW
-        let pow_algo = block.original_block.header.pow.pow_algo;
+        let pow_algo = block.original_header.pow.pow_algo;
         let curr_difficulty = match pow_algo {
             PowAlgorithm::RandomX => {
                 let random_x_params = params.ok_or(ValidationError::MissingBlockValidationParams)?;
                 randomx_difficulty(
-                    &block.original_block.header,
+                    &block.original_header,
                     random_x_params.random_x_factory(),
                     random_x_params.genesis_block_hash(),
                     random_x_params.consensus_manager(),
                 )
                 .map_err(ValidationError::RandomXDifficulty)?
             },
-            PowAlgorithm::Sha3x => {
-                sha3x_difficulty(&block.original_block.header).map_err(ValidationError::Difficulty)?
-            },
+            PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?,
         };
         if curr_difficulty < block.target_difficulty {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty, curr_difficulty);
@@ -177,7 +175,7 @@ impl InMemoryShareChain {
         block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ShareChainError> {
         let new_block_p2pool_height = block.height;
 
         if p2_chain.get_tip().is_none() || block.height == 0 || syncing {
@@ -190,7 +188,9 @@ impl InMemoryShareChain {
         // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
         // older than the share window is way too old for us to care about.
         if block.height < tip_height.saturating_sub(SHARE_WINDOW as u64) && !syncing {
-            return Err(Error::BlockValidation("Block is older than share window".to_string()));
+            return Err(ShareChainError::BlockValidation(
+                "Block is older than share window".to_string(),
+            ));
         }
 
         // Check if already added.
@@ -229,7 +229,7 @@ impl InMemoryShareChain {
     async fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
-    ) -> Result<HashMap<String, (u64, Vec<u8>)>, Error> {
+    ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
             miner: String,
@@ -258,7 +258,7 @@ impl InMemoryShareChain {
         let mut cur_block = tip_level
             .blocks
             .get(&tip_level.chain_block)
-            .ok_or(Error::BlockNotFound)?;
+            .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
             cur_block.miner_wallet_address.to_base58(),
@@ -268,10 +268,10 @@ impl InMemoryShareChain {
         for uncle in cur_block.uncles.iter() {
             let uncle_block = p2_chain
                 .level_at_height(uncle.0)
-                .ok_or(Error::UncleBlockNotFound)?
+                .ok_or(ShareChainError::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
-                .ok_or(Error::UncleBlockNotFound)?;
+                .ok_or(ShareChainError::UncleBlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
                 uncle_block.miner_wallet_address.to_base58(),
@@ -280,7 +280,9 @@ impl InMemoryShareChain {
             );
         }
         while cur_block.height > stop_height {
-            cur_block = p2_chain.get_parent_block(cur_block).ok_or(Error::BlockNotFound)?;
+            cur_block = p2_chain
+                .get_parent_block(cur_block)
+                .ok_or(ShareChainError::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
                 cur_block.miner_wallet_address.to_base58(),
@@ -290,10 +292,10 @@ impl InMemoryShareChain {
             for uncle in cur_block.uncles.iter() {
                 let uncle_block = p2_chain
                     .level_at_height(uncle.0)
-                    .ok_or(Error::UncleBlockNotFound)?
+                    .ok_or(ShareChainError::UncleBlockNotFound)?
                     .blocks
                     .get(&uncle.1)
-                    .ok_or(Error::UncleBlockNotFound)?;
+                    .ok_or(ShareChainError::UncleBlockNotFound)?;
                 update_insert(
                     &mut miners_to_shares,
                     uncle_block.miner_wallet_address.to_base58(),
@@ -309,9 +311,9 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error> {
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
-            return Err(Error::BlockValidation("Block version is too low".to_string()));
+            return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));
         }
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let height = block.height;
@@ -336,7 +338,7 @@ impl ShareChain for InMemoryShareChain {
             Ok(true) => {
                 info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, tip changed", self.pow_algo, height)
             },
-            Err(Error::BlockParentDoesNotExist { missing_parents }) => {
+            Err(ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
                 let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
                 info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
             },
@@ -345,7 +347,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, Error> {
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, ShareChainError> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let mut new_tip = false;
 
@@ -354,7 +356,7 @@ impl ShareChain for InMemoryShareChain {
         let mut missing_parents = HashMap::new();
         if !blocks.is_sorted_by_key(|block| block.height) {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
-            //  return Err(Error::BlockValidation("Blocks are not sorted by height".to_string()));
+            //  return Err(ShareChainError::BlockValidation("Blocks are not sorted by height".to_string()));
         }
         for block in blocks.iter() {
             known_blocks_incoming.push(block.hash);
@@ -362,7 +364,7 @@ impl ShareChain for InMemoryShareChain {
 
         'outer: for block in blocks {
             if block.version != PROTOCOL_VERSION {
-                return Err(Error::BlockValidation("Block version is too low".to_string()));
+                return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));
             }
             let height = block.height;
             // info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
@@ -380,7 +382,7 @@ impl ShareChain for InMemoryShareChain {
                     new_tip = tip_change;
                 },
                 Err(e) => {
-                    if let Error::BlockParentDoesNotExist {
+                    if let ShareChainError::BlockParentDoesNotExist {
                         missing_parents: new_missing_parents,
                     } = e
                     {
@@ -410,7 +412,7 @@ impl ShareChain for InMemoryShareChain {
 
         if !missing_parents.is_empty() {
             info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.values().map(|height| height.to_string()));
-            return Err(Error::BlockParentDoesNotExist {
+            return Err(ShareChainError::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()
                     .map(|(hash, height)| (height, hash))
@@ -420,7 +422,7 @@ impl ShareChain for InMemoryShareChain {
         Ok(new_tip)
     }
 
-    async fn tip_height(&self) -> Result<u64, Error> {
+    async fn tip_height(&self) -> Result<u64, ShareChainError> {
         let bl = self.p2_chain.read().await;
         let tip_level = bl.get_height();
         Ok(tip_level)
@@ -431,7 +433,7 @@ impl ShareChain for InMemoryShareChain {
         bl.total_accumulated_tip_difficulty()
     }
 
-    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, Error> {
+    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, ShareChainError> {
         let bl = self.p2_chain.read().await;
         let tip_level = bl.get_tip();
         if let Some(tip_level) = tip_level {
@@ -456,7 +458,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, Error> {
+    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, ShareChainError> {
         let mut chain_read_lock = self.p2_chain.read().await;
         // first check if there is a cached hashmap of shares
         let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
@@ -480,10 +482,10 @@ impl ShareChain for InMemoryShareChain {
         for uncle in new_tip_block.uncles.iter() {
             let uncle_block = chain_read_lock
                 .level_at_height(uncle.0)
-                .ok_or(Error::UncleBlockNotFound)?
+                .ok_or(ShareChainError::UncleBlockNotFound)?
                 .blocks
                 .get(&uncle.1)
-                .ok_or(Error::UncleBlockNotFound)?;
+                .ok_or(ShareChainError::UncleBlockNotFound)?;
             miners_to_shares.insert(
                 uncle_block.miner_wallet_address.to_base58(),
                 (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
@@ -518,7 +520,7 @@ impl ShareChain for InMemoryShareChain {
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<Arc<P2Block>, Error> {
+    ) -> Result<Arc<P2Block>, ShareChainError> {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
@@ -544,7 +546,9 @@ impl ShareChain for InMemoryShareChain {
         if new_height >= UNCLE_START_HEIGHT {
             for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
                 if let Some(older_level) = chain_read_lock.level_at_height(height) {
-                    let chain_block = older_level.block_in_main_chain().ok_or(Error::BlockNotFound)?;
+                    let chain_block = older_level
+                        .block_in_main_chain()
+                        .ok_or(ShareChainError::BlockNotFound)?;
                     // Blocks in the main chain can't be uncles
                     excluded_uncles.push(chain_block.hash);
                     for uncle in &chain_block.uncles {
@@ -571,7 +575,7 @@ impl ShareChain for InMemoryShareChain {
                         };
                         if chain_read_lock
                             .level_at_height(parent.height)
-                            .ok_or(Error::BlockLevelNotFound)?
+                            .ok_or(ShareChainError::BlockLevelNotFound)?
                             .chain_block !=
                             parent.hash
                         {
@@ -600,7 +604,7 @@ impl ShareChain for InMemoryShareChain {
             .build())
     }
 
-    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error> {
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>> {
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut blocks = Vec::with_capacity(requested_blocks.len());
 
@@ -617,7 +621,7 @@ impl ShareChain for InMemoryShareChain {
                 }
             }
         }
-        Ok(blocks)
+        blocks
     }
 
     async fn request_sync(
@@ -625,7 +629,7 @@ impl ShareChain for InMemoryShareChain {
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<Vec<Arc<P2Block>>, Error> {
+    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
         let p2_chain_read = self.p2_chain.read().await;
 
         // Assume their blocks are in order highest first.
@@ -696,7 +700,7 @@ impl ShareChain for InMemoryShareChain {
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
-    ) -> Result<Vec<Arc<P2Block>>, Error> {
+    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
         let chain_read_lock = self.p2_chain.read().await;
         let mut res = Vec::with_capacity(page_size);
         let mut num_main_chain_blocks = 0;

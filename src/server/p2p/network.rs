@@ -26,7 +26,7 @@ use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
     connection_limits::{self},
     dcutr,
-    futures::{AsyncWriteExt, StreamExt},
+    futures::StreamExt,
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
     identify::{self, Info},
     identity::Keypair,
@@ -461,7 +461,7 @@ where S: ShareChain
                                 IdentTopic::new(Self::squad_topic(&self.config.squad, BLOCK_NOTIFY_TOPIC)),
                                 block_raw,
                             )
-                        // .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))
+                        // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
                         {
                             Ok(_) => {},
                             Err(error) => {
@@ -606,7 +606,7 @@ where S: ShareChain
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
                             if self.network_peer_store.read().await.is_whitelisted(&source_peer) {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Received a block from a peer {}, but it is not whitelisted. Will process anyway, but may not be able to switch to this chain. Heights:{}", source_peer, &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
+                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Received a block from a peer {}, but it is not whitelisted. Will process anyway, but may not be able to switch to this chain. Heights:{}", source_peer, &payload.new_blocks.iter().map(|b| b.original_header.height.to_string()).join(","));
                                 // return Ok(MessageAcceptance::Accept);
                             }
                             self.network_peer_store
@@ -629,7 +629,7 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Reject);
                             }
 
-                            info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.0.to_string()).join(","));
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.original_header.height.to_string()).join(","));
                             let algo = payload.algo();
                             let share_chain = match algo {
                                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -639,7 +639,12 @@ where S: ShareChain
                             let our_tip = share_chain.tip_height().await.unwrap_or(0);
                             let our_pow = share_chain.get_total_chain_pow().await;
                             if payload.total_accumulated_difficulty < our_pow.as_u128() &&
-                                payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0) <=
+                                payload
+                                    .new_blocks
+                                    .iter()
+                                    .map(|payload| payload.original_header.height)
+                                    .max()
+                                    .unwrap_or(0) <=
                                     our_tip.saturating_sub(4)
                             {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", message_peer);
@@ -647,7 +652,12 @@ where S: ShareChain
                             }
 
                             // if payload.
-                            let max_payload_height = payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0);
+                            let max_payload_height = payload
+                                .new_blocks
+                                .iter()
+                                .map(|payload| payload.original_header.height)
+                                .max()
+                                .unwrap_or(0);
                             // Either the tip is too far ahead and we need to catch up, or the chain is below ours but
                             // with a higher proof of work, so we then need to reorg to that chain.
                             // In both cases catchup sync will be better than simple sync
@@ -670,10 +680,10 @@ where S: ShareChain
 
                             let mut missing_blocks = vec![];
                             for block in &payload.new_blocks {
-                                if share_chain.has_block(block.0, &block.1).await {
+                                if share_chain.has_block(block.original_header.height, &block.hash).await {
                                     continue;
                                 }
-                                missing_blocks.push(*block);
+                                missing_blocks.push((block.original_header.height, block.hash));
                             }
                             if !missing_blocks.is_empty() {
                                 let sync_share_chain = SyncShareChain {
@@ -895,13 +905,12 @@ where S: ShareChain
         let local_peer_id = *self.swarm.local_peer_id();
         let squad = self.config.squad.clone();
         tokio::spawn(async move {
-            let response = match share_chain.get_blocks(request.missing_blocks()).await {
-                Ok(blocks) => ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks),
-                Err(error) => {
-                    error!(target: LOG_TARGET, squad; "Failed to get blocks from height: {error:?}");
-                    return;
-                },
-            };
+            let response = ShareChainSyncResponse::new(
+                local_peer_id,
+                request.algo(),
+                &share_chain.get_blocks(request.missing_blocks()).await,
+            );
+
             if tx.send(InnerRequest::SyncChainRequest((channel, response))).is_err() {
                 error!(target: LOG_TARGET, squad; "Failed to send block sync response");
             }
@@ -930,45 +939,30 @@ where S: ShareChain
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
-        let new_tip_notify = self.client_broadcast_block_tx.clone();
         let tx = self.inner_request_tx.clone();
-        let local_peer_id = self.local_peer_id();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, squad; "Synced blocks added to share chain, new tip added [{}]",new_tip);
-                    if new_tip {
-                        info!(target: SYNC_REQUEST_LOG_TARGET, "New tip block from sync: {}", blocks.iter().map(|a| a.height.to_string()).join(", "));
-                        let new_blocks = share_chain.get_tip_and_uncles().await;
-
-                        if new_blocks.is_empty() {
-                            error!(target: SYNC_REQUEST_LOG_TARGET, "Could not get added new tip from chain storage");
-                            return;
-                        };
-                        let total_pow = share_chain.get_total_chain_pow().await;
-                        let _ = new_tip_notify.send(NotifyNewTipBlock::new(local_peer_id, algo, new_blocks, total_pow));
-                    }
                 },
-                Err(error) => match error {
-                    crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
-                        let sync_share_chain = SyncShareChain {
-                            algo,
-                            peer,
-                            missing_parents,
-                            is_from_new_block_notify: false,
-                        };
+                Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
+                    let sync_share_chain = SyncShareChain {
+                        algo,
+                        peer,
+                        missing_parents,
+                        is_from_new_block_notify: false,
+                    };
 
-                        let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                        return;
-                    },
-                    _ => {
-                        error!(target: LOG_TARGET, squad; "Failed to add synced blocks to share chain: {error:?}");
-                        peer_store
-                            .write()
-                            .await
-                            .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                    },
+                    let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                    return;
+                },
+                Err(error) => {
+                    error!(target: LOG_TARGET, squad; "Failed to add synced blocks to share chain: {error:?}");
+                    peer_store
+                        .write()
+                        .await
+                        .move_to_grey_list(peer, format!("Block failed validation: {error}"));
                 },
             };
             if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
@@ -984,7 +978,7 @@ where S: ShareChain
         let SyncShareChain {
             peer,
             algo,
-            mut missing_parents,
+            missing_parents,
             is_from_new_block_notify,
         } = sync_share_chain;
         let peer_store_read_lock = self.network_peer_store.read().await;
@@ -1168,7 +1162,7 @@ where S: ShareChain
                         // self.network_peer_store
                         //     .move_to_grey_list(
                         //         peer,
-                        //         format!("Error during direct peer exchange: {}", error.to_string()),
+                        //         format!("ShareChainError during direct peer exchange: {}", error.to_string()),
                         //     )
                         //     .await;
                     },
@@ -1211,10 +1205,10 @@ where S: ShareChain
                                 },
                             }
                             if should_grey_list {
-                                self.network_peer_store
-                                    .write()
-                                    .await
-                                    .move_to_grey_list(peer, format!("Error during share chain sync:{}", error));
+                                self.network_peer_store.write().await.move_to_grey_list(
+                                    peer,
+                                    format!("ShareChainError during share chain sync:{}", error),
+                                );
                             }
 
                             // Remove peer from peer store to try to sync from another peer,
@@ -1319,7 +1313,7 @@ where S: ShareChain
                                 self.network_peer_store
                                     .write()
                                     .await
-                                    .move_to_grey_list(peer, format!("Error during catch up sync:{}", error));
+                                    .move_to_grey_list(peer, format!("ShareChainError during catch up sync:{}", error));
                             }
                             // Remove peer from peer store to try to sync from another peer,
                             // if the peer goes online/accessible again, the peer store will have it again.
@@ -1473,7 +1467,7 @@ where S: ShareChain
                     }
                 },
                 Err(error) => match error {
-                    crate::sharechain::error::Error::BlockParentDoesNotExist { missing_parents } => {
+                    crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
                         // This should not happen though, catchup should return all blocks
                         warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
                         let sync_share_chain = SyncShareChain {
@@ -1612,17 +1606,16 @@ where S: ShareChain
             let mut height = tip_height;
             let mut hash = tip_hash;
             for _ in 0..CATCH_UP_SYNC_BLOCKS_IN_I_HAVE {
-                if let Ok(blocks) = share_chain.get_blocks(&[(height, hash)]).await {
-                    if let Some(block) = blocks.first() {
-                        i_have_blocks.push((height, block.hash));
-                        if height == 0 {
-                            break;
-                        }
-                        height = block.height - 1;
-                        hash = block.hash;
-                    } else {
+                let blocks = share_chain.get_blocks(&[(height, hash)]).await;
+                if let Some(block) = blocks.first() {
+                    i_have_blocks.push((height, block.hash));
+                    if height == 0 {
                         break;
                     }
+                    height = block.height - 1;
+                    hash = block.hash;
+                } else {
+                    break;
                 }
             }
         }

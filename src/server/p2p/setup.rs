@@ -24,7 +24,6 @@ use libp2p::{
     StreamProtocol,
     Swarm,
 };
-use libp2p_peersync::store::MemoryPeerStore;
 use tokio::{
     fs::File,
     io::{self, AsyncReadExt, AsyncWriteExt},

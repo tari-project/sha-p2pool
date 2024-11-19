@@ -30,7 +30,7 @@ use tari_core::{
     proof_of_work::{randomx_factory::RandomXFactory, AccumulatedDifficulty, Difficulty},
 };
 
-use crate::sharechain::{error::Error, p2block::P2Block};
+use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
@@ -95,41 +95,41 @@ impl BlockValidationParams {
 pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, Error>;
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, Error>;
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, ShareChainError>;
 
     /// Returns the tip of height in chain (from original Tari block header)
-    async fn tip_height(&self) -> Result<u64, Error>;
+    async fn tip_height(&self) -> Result<u64, ShareChainError>;
 
     /// Returns the tip of the chain.
-    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, Error>;
+    async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, ShareChainError>;
 
     async fn get_tip_and_uncles(&self) -> Vec<(u64, FixedHash)>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, Error>;
+    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, ShareChainError>;
 
     /// Generate a new block on tip of the chain.
     async fn generate_new_tip_block(
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<Arc<P2Block>, Error>;
+    ) -> Result<Arc<P2Block>, ShareChainError>;
 
     // /// Return a new block that could be added via `submit_block`.
-    // async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> Result<P2Block, Error>;
+    // async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> Result<P2Block, ShareChainError>;
 
     /// Returns the requested blocks from this chain
-    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Result<Vec<Arc<P2Block>>, Error>;
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>>;
 
     async fn request_sync(
         &self,
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<Vec<Arc<P2Block>>, Error>;
+    ) -> Result<Vec<Arc<P2Block>>, ShareChainError>;
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 
@@ -138,7 +138,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
-    ) -> Result<Vec<Arc<P2Block>>, Error>;
+    ) -> Result<Vec<Arc<P2Block>>, ShareChainError>;
 
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
 

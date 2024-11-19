@@ -14,7 +14,7 @@ use tari_core::{
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum ShareChainError {
     #[error("Tari address error: {0}")]
     TariAddress(#[from] TariAddressError),
     #[error("Invalid block: {reason}")]

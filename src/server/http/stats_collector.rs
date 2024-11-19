@@ -208,7 +208,7 @@ impl StatsCollector {
                                                 last_block_time: EpochTime::now(),
                                                 num_my_shares: 0,
                                                 total_shares: 0,
-                                            }).inspect_err(|e| error!(target: LOG_TARGET, "Error sending stats response: {:?}", e));
+                                            }).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending stats response: {:?}", e));
                                         },
                                         PowAlgorithm::RandomX => {
                                             let _ = tx.send(GetStatsResponse {
@@ -216,12 +216,12 @@ impl StatsCollector {
                                                 last_block_time: EpochTime::now(),
                                                 num_my_shares: 0,
                                                 total_shares: 0,
-                                            }).inspect_err(|e| error!(target: LOG_TARGET, "Error sending stats response: {:?}", e));
+                                            }).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending stats response: {:?}", e));
                                         },
                                     }
                                 },
                                 Some(StatsRequest::GetLastGossipMessage(tx)) => {
-                                    let _ = tx.send(self.last_gossip_message).inspect_err(|e| error!(target: LOG_TARGET, "Error sending last gossip message: {:?}", e));
+                                    let _ = tx.send(self.last_gossip_message).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending last gossip message: {:?}", e));
                                 },
                                 None => {
                                     break;
@@ -243,7 +243,7 @@ impl StatsCollector {
                             // entry.push_back(sample);
                                 },
                                 Err(e) => {
-                                    error!(target: LOG_TARGET, "Error receiving hashrate sample: {:?}", e);
+                                    error!(target: LOG_TARGET, "ShareChainError receiving hashrate sample: {:?}", e);
                                     break;
                                 }
                             }
@@ -376,7 +376,7 @@ impl StatsBroadcastClient {
         let _ = self
             .tx
             .send(data)
-            .inspect_err(|_e| error!(target: LOG_TARGET, "Error broadcasting stats"));
+            .inspect_err(|_e| error!(target: LOG_TARGET, "ShareChainError broadcasting stats"));
         Ok(())
     }
 

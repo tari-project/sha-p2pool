@@ -8,17 +8,24 @@ use digest::consts::U32;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::{tari_address::TariAddress, types::BlockHash};
+use tari_common_types::{
+    tari_address::TariAddress,
+    types::{BlockHash, FixedHash},
+};
 use tari_core::{
     blocks::{genesis_block::get_genesis_block, Block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
     proof_of_work::Difficulty,
-    transactions::aggregated_body::AggregateBody,
+    transactions::transaction_components::TransactionOutput,
 };
 use tari_script::script;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
-use crate::{impl_conversions, server::PROTOCOL_VERSION, sharechain::CHAIN_ID};
+use crate::{
+    impl_conversions,
+    server::PROTOCOL_VERSION,
+    sharechain::{ShareChainError, CHAIN_ID},
+};
 
 lazy_static! {
     pub static ref CURRENT_CHAIN_ID: String = {
@@ -37,7 +44,9 @@ pub(crate) struct P2Block {
     pub timestamp: EpochTime,
     pub prev_hash: BlockHash,
     pub height: u64,
-    pub original_block: Block,
+    pub original_header: BlockHeader,
+    pub coinbases: Vec<TransactionOutput>,
+    pub other_output_hash: FixedHash,
     pub miner_wallet_address: TariAddress,
     pub sent_to_main_chain: bool,
     pub target_difficulty: Difficulty,
@@ -61,7 +70,7 @@ impl P2Block {
             .chain(&self.timestamp)
             .chain(&self.height)
             .chain(&self.miner_wallet_address.to_vec())
-            .chain(&self.original_block.header)
+            .chain(&self.original_header)
             .chain(&self.target_difficulty)
             .chain(&self.uncles)
             .chain(&self.miner_coinbase_extra)
@@ -74,17 +83,26 @@ impl P2Block {
     }
 
     pub fn get_miner_coinbase_extra(&self) -> Vec<u8> {
-        let coinbases = self.original_block.body.get_coinbase_outputs();
         let own_script = script!(PushPubKey(Box::new(
             self.miner_wallet_address.public_spend_key().clone()
         )))
         .expect("Constructing a script should not fail");
-        for coinbase in coinbases {
+        for coinbase in &self.coinbases {
             if coinbase.script == own_script {
                 return coinbase.features.coinbase_extra.as_ref().to_vec();
             }
         }
         Vec::new()
+    }
+
+    pub fn populate_tari_data(&mut self, block: Block) -> Result<(), ShareChainError> {
+        self.coinbases = block.body.get_coinbase_outputs().into_iter().cloned().collect();
+        self.other_output_hash = block
+            .body
+            .calculate_header_normal_output_mr()
+            .map_err(|e| ShareChainError::InvalidBlock { reason: e.to_string() })?;
+        self.original_header = block.header;
+        Ok(())
     }
 }
 
@@ -103,7 +121,9 @@ impl BlockBuilder {
                 timestamp: EpochTime::now(),
                 prev_hash: Default::default(),
                 height: 0,
-                original_block: Block::new(BlockHeader::new(0), AggregateBody::empty()),
+                original_header: BlockHeader::new(0),
+                coinbases: Vec::new(),
+                other_output_hash: Default::default(),
                 miner_wallet_address: Default::default(),
                 sent_to_main_chain: false,
                 target_difficulty: Difficulty::min(),
@@ -134,9 +154,9 @@ impl BlockBuilder {
         self
     }
 
-    pub fn with_tari_block(mut self, block: Block) -> Self {
-        self.block.original_block = block;
-        self
+    pub fn with_tari_block(mut self, block: Block) -> Result<Self, ShareChainError> {
+        self.block.populate_tari_data(block)?;
+        Ok(self)
     }
 
     pub fn with_miner_wallet_address(mut self, miner_wallet_address: TariAddress) -> Self {

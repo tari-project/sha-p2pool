@@ -80,7 +80,7 @@ macro_rules! proxy_simple_result {
         let res = match $self.client.write().await.$call($request.into_inner()).await {
             Ok(resp) => Ok(resp),
             Err(error) => {
-                error!("Error while calling {:?} on base node: {:?}", stringify!($call), error);
+                error!("ShareChainError while calling {:?} on base node: {:?}", stringify!($call), error);
                 Err(error)
             },
         };

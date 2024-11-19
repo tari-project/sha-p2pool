@@ -145,10 +145,6 @@ impl PeerStore {
         }
     }
 
-    pub fn add_seed_peer(&mut self, peer_id: PeerId) {
-        self.seed_peers.push(peer_id);
-    }
-
     pub fn add_seed_peers(&mut self, mut peer_ids: Vec<PeerId>) {
         self.seed_peers.append(&mut peer_ids);
     }
@@ -218,7 +214,7 @@ impl PeerStore {
     pub fn best_peers_to_share(
         &self,
         count: usize,
-        algo: PowAlgorithm,
+        _algo: PowAlgorithm,
         other_nodes_peers: &[PeerId],
     ) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();

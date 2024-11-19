@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use tari_common_types::types::{BlockHash, FixedHash};
 
-use crate::sharechain::{error::Error, p2block::P2Block};
+use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
 // Copyright 2024. The Tari Project
 //
@@ -56,9 +56,9 @@ impl P2ChainLevel {
         }
     }
 
-    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), crate::sharechain::error::Error> {
+    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), crate::sharechain::error::ShareChainError> {
         if self.height != block.height {
-            return Err(Error::InvalidBlock {
+            return Err(ShareChainError::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
             });
         }

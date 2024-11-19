@@ -131,7 +131,7 @@ where S: ShareChain
             info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
             return Ok(());
         }
-        let pow_algo = block.original_block.header.pow.pow_algo;
+        let pow_algo = block.original_header.pow.pow_algo;
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -139,13 +139,17 @@ where S: ShareChain
         match share_chain.submit_block(block.clone()).await {
             Ok(new_tip) => {
                 let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                let mut new_blocks = vec![(block.height, block.hash)];
-                for uncle in block.uncles.iter() {
-                    new_blocks.push(*uncle);
-                }
+                let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(block.clone())];
+                let mut uncles = share_chain
+                    .get_blocks(&block.uncles)
+                    .await
+                    .into_iter()
+                    .map(|block| Arc::<P2Block>::unwrap_or_clone(block))
+                    .collect();
+                new_blocks.append(&mut uncles);
                 if new_tip {
                     let total_pow = share_chain.get_total_chain_pow().await;
-                    let notify = NotifyNewTipBlock::new(self.local_peer_id, pow_algo, new_blocks, total_pow);
+                    let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks, total_pow);
                     let res = self
                         .p2p_client
                         .broadcast_block(notify)
@@ -246,8 +250,8 @@ where S: ShareChain
                 .map_err(|e| Status::internal(format!("Could not convert gprc block to tari block: {}", e)))?;
             // we set the nonce to 0 in order to find the template again.
             tari_block.header.nonce = 0;
-            new_tip_block.original_block = tari_block;
-            let tari_hash = new_tip_block.original_block.hash();
+            new_tip_block.populate_tari_data(tari_block);
+            let tari_hash = new_tip_block.original_header.hash();
 
             let height = grpc_block
                 .header
@@ -402,17 +406,17 @@ where S: ShareChain
             };
 
 
-            p2pool_block.original_block = tari_block;
-            let mined_tari_hash = p2pool_block.original_block.hash();
+            p2pool_block.original_header= tari_block.header;
+            let mined_tari_hash = p2pool_block.original_header.hash();
 
             debug!(target: LOG_TARGET, "Trace - getting block difficulty: {}", timer.elapsed().as_millis());
             // Check block's difficulty compared to the latest network one to increase the probability
             // to get the block accepted (and also a block with lower difficulty than latest one is invalid anyway).
-            let request_block_difficulty = match p2pool_block.original_block.header.pow.pow_algo {
-                PowAlgorithm::Sha3x => sha3x_difficulty(&p2pool_block.original_block.header)
+            let request_block_difficulty = match p2pool_block.original_header.pow.pow_algo {
+                PowAlgorithm::Sha3x => sha3x_difficulty(&p2pool_block.original_header)
                     .map_err(|error| Status::internal(error.to_string()))?,
                 PowAlgorithm::RandomX => randomx_difficulty(
-                    &p2pool_block.original_block.header,
+                    &p2pool_block.original_header,
                     self.block_validation_params.random_x_factory(),
                     self.block_validation_params.genesis_block_hash(),
                     self.block_validation_params.consensus_manager(),
@@ -422,23 +426,23 @@ where S: ShareChain
             info!(
             target: LOG_TARGET,
             "Submitted {} block difficulty: {}",
-            p2pool_block.original_block.header.pow.pow_algo, request_block_difficulty
+            p2pool_block.original_header.pow.pow_algo, request_block_difficulty
         );
 
             debug!(target: LOG_TARGET, "Trace - getting network difficulty: {}", timer.elapsed().as_millis());
-            let network_difficulty = match p2pool_block.original_block.header.pow.pow_algo {
+            let network_difficulty = match p2pool_block.original_header.pow.pow_algo {
                 PowAlgorithm::Sha3x => self
                     .sha3_block_height_difficulty_cache
                     .read()
                     .await
-                    .get(&(p2pool_block.original_block.header.height))
+                    .get(&(p2pool_block.original_header.height))
                     .copied()
                     .unwrap_or_else(Difficulty::min),
                 PowAlgorithm::RandomX => self
                     .randomx_block_height_difficulty_cache
                     .read()
                     .await
-                    .get(&(p2pool_block.original_block.header.height))
+                    .get(&(p2pool_block.original_header.height))
                     .copied()
                     .unwrap_or_else(Difficulty::min),
             };
@@ -490,7 +494,7 @@ where S: ShareChain
             // Don't error if we can't submit it.
             match self.submit_share_chain_block(p2pool_block.clone()).await {
                 Ok(_) => {
-                    let pow_type = p2pool_block.original_block.header.pow.pow_algo.to_string();
+                    let pow_type = p2pool_block.original_header.pow.pow_algo.to_string();
                     info!(target: LOG_TARGET, "🔗 Block submitted to {} share chain!", pow_type);
                 },
                 Err(error) => {
