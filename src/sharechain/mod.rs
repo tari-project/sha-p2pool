@@ -143,4 +143,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
 
     async fn chain_pow(&self) -> AccumulatedDifficulty;
+
+    async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)>;
 }

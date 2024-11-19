@@ -677,29 +677,38 @@ where S: ShareChain
                                 // .await;
                                 return Ok(MessageAcceptance::Ignore);
                             }
-
-                            let mut missing_blocks = vec![];
-                            for block in &payload.new_blocks {
-                                if share_chain.has_block(block.original_header.height, &block.hash).await {
-                                    continue;
-                                }
-                                missing_blocks.push((block.original_header.height, block.hash));
+                            let mut blocks: Vec<P2Block> = payload.new_blocks.iter().cloned().collect();
+                            for block in &mut blocks {
+                                block.verified = false;
                             }
-                            if !missing_blocks.is_empty() {
-                                let sync_share_chain = SyncShareChain {
-                                    algo,
-                                    peer: *message_peer,
-                                    missing_parents: missing_blocks,
-                                    is_from_new_block_notify: true,
-                                };
-                                let _ = self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                            }
+                            let blocks: Vec<_> = blocks.into_iter().map(Arc::new).collect();
+                            match share_chain.add_synced_blocks(&blocks).await {
+                                Ok(new_tip) => {
+                                    info!(target: LOG_TARGET,  squad = &self.config.squad; "Synced blocks added to share chain, new tip added [{}]",new_tip);
+                                },
+                                Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist {
+                                    missing_parents,
+                                }) => {
+                                    let sync_share_chain = SyncShareChain {
+                                        algo,
+                                        peer: *message_peer,
+                                        missing_parents,
+                                        is_from_new_block_notify: false,
+                                    };
 
-                            // Ignore so that we only tell our closest peers. IDK if this is the correct approach
-                            // but we are sending too many messages. It might be better to use REQ-RES for this and to
-                            // trigger a manually request to each of the peers we are
-                            // connected to instead.
-                            return Ok(MessageAcceptance::Ignore);
+                                    let _ = self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                },
+                                Err(error) => {
+                                    error!(target: LOG_TARGET,  squad = &self.config.squad; "Failed to add synced blocks to share chain: {error:?}");
+                                    self.network_peer_store
+                                        .write()
+                                        .await
+                                        .move_to_grey_list(*message_peer, format!("Block failed validation: {error}"));
+                                    return Ok(MessageAcceptance::Ignore);
+                                },
+                            };
+
+                            return Ok(MessageAcceptance::Accept);
                         },
                         Err(error) => {
                             // TODO: elevate to error
@@ -1599,26 +1608,9 @@ where S: ShareChain
         // }
 
         // let tx = self.inner_request_tx.clone();
-        let mut i_have_blocks = Vec::with_capacity(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE);
-        if let Ok(Some(tip)) = share_chain.get_tip().await {
-            let tip_height = tip.0;
-            let tip_hash = tip.1;
-            let mut height = tip_height;
-            let mut hash = tip_hash;
-            for _ in 0..CATCH_UP_SYNC_BLOCKS_IN_I_HAVE {
-                let blocks = share_chain.get_blocks(&[(height, hash)]).await;
-                if let Some(block) = blocks.first() {
-                    i_have_blocks.push((height, block.hash));
-                    if height == 0 {
-                        break;
-                    }
-                    height = block.height - 1;
-                    hash = block.hash;
-                } else {
-                    break;
-                }
-            }
-        }
+        let mut i_have_blocks = share_chain
+            .create_catchup_sync_blocks(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE)
+            .await;
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] Sending catch up sync to {} for blocks {}, last block received {}. Their height:{}",
                 algo,

@@ -4,6 +4,7 @@
 use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
+use libp2p::futures::AsyncWriteExt;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
@@ -754,6 +755,41 @@ impl ShareChain for InMemoryShareChain {
             return level.blocks.contains_key(hash);
         }
         false
+    }
+
+    async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)> {
+        let p2_chain_read_lock = self.p2_chain.read().await;
+        let mut i_have_blocks = Vec::with_capacity(size);
+        if let Some(tip) = p2_chain_read_lock.get_tip() {
+            let tip_height = tip.height;
+            let tip_hash = tip.chain_block;
+            let mut height = tip_height;
+            let mut hash = tip_hash;
+            for _ in 0..size {
+                if let Some(level) = p2_chain_read_lock.level_at_height(height) {
+                    let block = if let Some(block) = level.blocks.get(&hash) {
+                        block.clone()
+                    } else {
+                        // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it
+                        // wont find this hash, so we return the curent chain block
+                        if let Some(block) = level.block_in_main_chain() {
+                            block.clone()
+                        } else {
+                            break;
+                        }
+                    };
+                    i_have_blocks.push((height, block.hash));
+                    if height == 0 {
+                        break;
+                    }
+                    height = block.height - 1;
+                    hash = block.hash;
+                } else {
+                    break;
+                }
+            }
+        }
+        i_have_blocks
     }
 }
 
