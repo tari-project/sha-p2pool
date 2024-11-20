@@ -244,7 +244,7 @@ impl StatsCollector {
                                 },
                                 Err(e) => {
                                     error!(target: LOG_TARGET, "ShareChainError receiving hashrate sample: {:?}", e);
-                                    break;
+                                    // break;
                                 }
                             }
                                             }

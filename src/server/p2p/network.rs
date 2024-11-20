@@ -1429,61 +1429,65 @@ where S: ShareChain
 
         tokio::spawn(async move {
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
-            match share_chain.add_synced_blocks(&blocks).await {
-                Ok(result) => {
-                    info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain: {result:?}");
-                    let our_pow = share_chain.get_total_chain_pow().await;
-                    let mut must_continue_sync = their_pow > our_pow.as_u128();
-                    info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
-                    // Check if we have their tip in our chain.
-                    if share_chain.has_block(their_height, &their_tip_hash).await {
-                        info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} because we have their tip in our chain already", algo, peer);
-                        must_continue_sync = false;
-                    }
-                    let mut peer_store_write_lock = network_peer_store.write().await;
-                    let num_catchups = peer_store_write_lock.num_catch_ups(&peer);
-                    info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] num catchups: {:?}", algo, num_catchups);
-                    if must_continue_sync && num_catchups.map(|n| n < MAX_CATCH_UP_ATTEMPTS).unwrap_or(true) {
-                        info!(target: SYNC_REQUEST_LOG_TARGET, "Continue catch up for {}", peer);
-                        peer_store_write_lock.add_catch_up_attempt(&peer);
-                        let perform_catch_up_sync = PerformCatchUpSync {
-                            algo,
-                            peer,
-                            last_block_from_them,
-                            their_height,
-                        };
-                        let _ = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
-                    } else {
-                        info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
+            for b in blocks {
+                match share_chain.add_synced_blocks(&[b]).await {
+                    Ok(result) => {
+                        info!(target: LOG_TARGET, "Block added");
+                    },
+                    Err(error) => match error {
+                        crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
+                            // This should not happen though, catchup should return all blocks
+                            warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
+                            let sync_share_chain = SyncShareChain {
+                                algo,
+                                peer,
+                                missing_parents,
+                                is_from_new_block_notify: false,
+                            };
+                            let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                            return;
+                        },
+                        _ => {
+                            error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
+                            network_peer_store
+                                .write()
+                                .await
+                                .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                        },
+                    },
+                };
+            }
 
-                        // this only gets called after sync completes. So lets make sure we can mine since we completed
-                        // a sync
-                        synced_bool.store(true, std::sync::atomic::Ordering::Relaxed);
-                        peer_store_write_lock.reset_catch_up_attempts(&peer);
-                    }
-                },
-                Err(error) => match error {
-                    crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
-                        // This should not happen though, catchup should return all blocks
-                        warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
-                        let sync_share_chain = SyncShareChain {
-                            algo,
-                            peer,
-                            missing_parents,
-                            is_from_new_block_notify: false,
-                        };
-                        let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                        return;
-                    },
-                    _ => {
-                        error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
-                        network_peer_store
-                            .write()
-                            .await
-                            .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                    },
-                },
-            };
+            info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
+            let our_pow = share_chain.get_total_chain_pow().await;
+            let mut must_continue_sync = their_pow > our_pow.as_u128();
+            info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
+            // Check if we have their tip in our chain.
+            if share_chain.has_block(their_height, &their_tip_hash).await {
+                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} because we have their tip in our chain already", algo, peer);
+                must_continue_sync = false;
+            }
+            let mut peer_store_write_lock = network_peer_store.write().await;
+            let num_catchups = peer_store_write_lock.num_catch_ups(&peer);
+            info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] num catchups: {:?}", algo, num_catchups);
+            if must_continue_sync && num_catchups.map(|n| n < MAX_CATCH_UP_ATTEMPTS).unwrap_or(true) {
+                info!(target: SYNC_REQUEST_LOG_TARGET, "Continue catch up for {}", peer);
+                peer_store_write_lock.add_catch_up_attempt(&peer);
+                let perform_catch_up_sync = PerformCatchUpSync {
+                    algo,
+                    peer,
+                    last_block_from_them,
+                    their_height,
+                };
+                let _ = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
+            } else {
+                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
+
+                // this only gets called after sync completes. So lets make sure we can mine since we completed
+                // a sync
+                synced_bool.store(true, std::sync::atomic::Ordering::Relaxed);
+                peer_store_write_lock.reset_catch_up_attempts(&peer);
+            }
             if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
                 warn!(target: LOG_TARGET, squad; "Catch up sync response took too long: {:?}", timer.elapsed());
             }
