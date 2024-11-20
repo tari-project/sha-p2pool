@@ -464,7 +464,7 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.values().map(|height| height.to_string()));
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.values().map(|height| height.to_string()).collect::<Vec<String>>());
             return Err(ShareChainError::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()

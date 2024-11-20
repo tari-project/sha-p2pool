@@ -26,7 +26,7 @@ use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
     connection_limits::{self},
     dcutr,
-    futures::{AsyncReadExt, StreamExt},
+    futures::StreamExt,
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
     identify::{self, Info},
     identity::Keypair,
@@ -576,6 +576,7 @@ where S: ShareChain
                     // }
                     match NotifyNewTipBlock::try_from(message) {
                         Ok(payload) => {
+                            // info!(target: LOG_TARGET, squad = &self.config.squad; "New new tip notify: {}", payload);
                             if payload.version != PROTOCOL_VERSION {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
@@ -606,7 +607,7 @@ where S: ShareChain
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
                             if self.network_peer_store.read().await.is_whitelisted(&source_peer) {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Received a block from a peer {}, but it is not whitelisted. Will process anyway, but may not be able to switch to this chain. Heights:{}", source_peer, &payload.new_blocks.iter().map(|b| b.original_header.height.to_string()).join(","));
+                                warn!(target: LOG_TARGET, squad = &self.config.squad; "Received a block from a peer {}, but it is not whitelisted. Will process anyway, but may not be able to switch to this chain. Heights:{}", source_peer, &payload.new_blocks.iter().map(|b| b.height.to_string()).join(","));
                                 // return Ok(MessageAcceptance::Accept);
                             }
                             self.network_peer_store
@@ -629,7 +630,9 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Reject);
                             }
 
-                            info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.original_header.height.to_string()).join(","));
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New block from broadcast: {:?}", &payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>());
+                            // info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New blocks from broadcast:
+                            // {:?}", &payload.new_blocks.iter().map(|b| b.hash.to_hex()).collect::<Vec<String>>());
                             let algo = payload.algo();
                             let share_chain = match algo {
                                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -642,7 +645,7 @@ where S: ShareChain
                                 payload
                                     .new_blocks
                                     .iter()
-                                    .map(|payload| payload.original_header.height)
+                                    .map(|payload| payload.height)
                                     .max()
                                     .unwrap_or(0) <=
                                     our_tip.saturating_sub(4)
@@ -655,7 +658,7 @@ where S: ShareChain
                             let max_payload_height = payload
                                 .new_blocks
                                 .iter()
-                                .map(|payload| payload.original_header.height)
+                                .map(|payload| payload.height)
                                 .max()
                                 .unwrap_or(0);
                             // Either the tip is too far ahead and we need to catch up, or the chain is below ours but
@@ -684,7 +687,7 @@ where S: ShareChain
                             let blocks: Vec<_> = blocks.into_iter().map(Arc::new).collect();
                             match share_chain.add_synced_blocks(&blocks).await {
                                 Ok(new_tip) => {
-                                    info!(target: LOG_TARGET,  squad = &self.config.squad; "Synced blocks added to share chain, new tip added [{}]",new_tip);
+                                    info!(target: LOG_TARGET,  squad = &self.config.squad; "[{:?}]New tip notify blocks added to share chain, new tip added [{}]", algo, new_tip);
                                 },
                                 Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist {
                                     missing_parents,
@@ -907,11 +910,12 @@ where S: ShareChain
         let local_peer_id = *self.swarm.local_peer_id();
         let squad = self.config.squad.clone();
         tokio::spawn(async move {
-            let response = ShareChainSyncResponse::new(
-                local_peer_id,
-                request.algo(),
-                &share_chain.get_blocks(request.missing_blocks()).await,
-            );
+            let blocks = share_chain.get_blocks(request.missing_blocks()).await;
+            if blocks.is_empty() {
+                warn!(target: LOG_TARGET, squad; "No blocks found for sync request");
+                return;
+            }
+            let response = ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks);
 
             if tx.send(InnerRequest::SyncChainRequest((channel, response))).is_err() {
                 error!(target: LOG_TARGET, squad; "Failed to send block sync response");
@@ -929,6 +933,11 @@ where S: ShareChain
             trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
             return;
         }
+
+        if response.blocks.is_empty() {
+            trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent 0 blocks", peer);
+            return;
+        }
         let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
@@ -940,13 +949,14 @@ where S: ShareChain
         };
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
+        info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
-                    info!(target: LOG_TARGET, squad; "Synced blocks added to share chain, new tip added [{}]",new_tip);
+                    info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain, new tip added [{}]",algo, new_tip);
+                    info!(target: LOG_TARGET, squad; "[{:?}] blocks for the following heights where added : {:?}", algo, blocks.iter().map(|block| block.height.to_string()).collect::<Vec<String>>());
                 },
                 Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
                     let sync_share_chain = SyncShareChain {
