@@ -1,7 +1,11 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{
+    fmt,
+    fmt::{Display, Formatter},
+    sync::Arc,
+};
 
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
@@ -228,6 +232,22 @@ pub struct NotifyNewTipBlock {
     pub total_accumulated_difficulty: u128,
     pub timestamp: u64,
 }
+
+impl Display for NotifyNewTipBlock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        writeln!(f, "--------- new tip notify Block -----------------")?;
+        writeln!(f, "version: {}", self.version)?;
+        writeln!(f, "from: {}", self.peer_id.to_base58())?;
+        writeln!(f, "total_accumulated_difficulty: {}", self.total_accumulated_difficulty)?;
+        writeln!(f, "timestamp: {}", self.timestamp)?;
+        writeln!(f, "--------- p2pblocks -----------------")?;
+        for block in &self.new_blocks {
+            writeln!(f, "height: {}, hash: {}", block.height, block.hash)?;
+        }
+        Ok(())
+    }
+}
+
 impl_conversions!(NotifyNewTipBlock);
 
 impl NotifyNewTipBlock {
