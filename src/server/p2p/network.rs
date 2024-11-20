@@ -1448,14 +1448,14 @@ where S: ShareChain
                         crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
                             // This should not happen though, catchup should return all blocks
                             warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
-                            let sync_share_chain = SyncShareChain {
-                                algo,
-                                peer,
-                                missing_parents,
-                                is_from_new_block_notify: false,
-                            };
-                            let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                            return;
+                            // let sync_share_chain = SyncShareChain {
+                            //     algo,
+                            //     peer,
+                            //     missing_parents,
+                            //     is_from_new_block_notify: false,
+                            // };
+                            // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                            // return;
                         },
                         _ => {
                             error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
