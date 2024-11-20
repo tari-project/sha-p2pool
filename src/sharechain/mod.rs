@@ -129,7 +129,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<Vec<Arc<P2Block>>, ShareChainError>;
+    ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError>;
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 

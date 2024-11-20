@@ -137,7 +137,7 @@ impl P2Chain {
         self.lwma.add_back(block.timestamp, block.target_difficulty);
         if self.get_tip().is_none() || (self.get_tip().map(|tip| tip.height).unwrap_or(0) == 0 && new_height == 0) {
             self.total_accumulated_tip_difficulty =
-                AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
+                AccumulatedDifficulty::from_u128(u128::from(block.target_difficulty.as_u64()))
                     .expect("Difficulty will always fit into accumulated difficulty");
         } else {
             self.total_accumulated_tip_difficulty = self
@@ -332,7 +332,7 @@ impl P2Chain {
                 let level = self
                     .level_at_height_mut(new_block_height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
-                let _ = level.blocks.insert(hash, Arc::new(block));
+                level.blocks.insert(hash, Arc::new(block));
             }
         }
 

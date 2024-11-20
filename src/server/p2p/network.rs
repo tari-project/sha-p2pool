@@ -787,6 +787,7 @@ where S: ShareChain
 
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             let known_peers = peer_store_read_lock.get_known_peers();
+            drop(peer_store_read_lock);
             self.swarm
                 .behaviour_mut()
                 .direct_peer_exchange
@@ -826,14 +827,17 @@ where S: ShareChain
             } else {
                 NUM_PEERS_TO_SYNC_PER_ALGO
             };
-            let peer_store_read_lock = self.network_peer_store.read().await;
-            let mut my_best_peers =
-                peer_store_read_lock.best_peers_to_share(num_peers, PowAlgorithm::RandomX, &request.known_peer_ids);
-            my_best_peers.extend(peer_store_read_lock.best_peers_to_share(
-                num_peers,
-                PowAlgorithm::Sha3x,
-                &request.known_peer_ids,
-            ));
+            let my_best_peers = {
+                let peer_store_read_lock = self.network_peer_store.read().await;
+                let mut my_best_peers =
+                    peer_store_read_lock.best_peers_to_share(num_peers, PowAlgorithm::RandomX, &request.known_peer_ids);
+                my_best_peers.extend(peer_store_read_lock.best_peers_to_share(
+                    num_peers,
+                    PowAlgorithm::Sha3x,
+                    &request.known_peer_ids,
+                ));
+                my_best_peers
+            };
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             if self
                 .swarm
@@ -1000,6 +1004,7 @@ where S: ShareChain
             info!(target: LOG_TARGET, squad = &self.config.squad; "Peer is not whitelisted, will still try to sync");
             // return;
         }
+        drop(peer_store_read_lock);
 
         if is_from_new_block_notify {
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to {} for blocks {} from notify", algo, peer, missing_parents.iter().map(|a| a.0.to_string()).join(", "));
@@ -1382,26 +1387,19 @@ where S: ShareChain
         let squad = self.config.squad.clone();
 
         tokio::spawn(async move {
-            let blocks = match share_chare
+            let (blocks, our_tip, our_achieved_pow) = match share_chare
                 .request_sync(request.i_have(), 20, request.last_block_received())
                 .await
             {
-                Ok(blocks) => blocks,
+                Ok((blocks, our_tip, our_achieved_pow)) => {
+                    (blocks, our_tip.unwrap_or_default(), our_achieved_pow.as_u128())
+                },
                 Err(error) => {
-                    error!(target: LOG_TARGET, squad; "Failed to get blocks from height: {error:?}");
+                    error!(target: LOG_TARGET, squad; "Failed to get blocks, tip and pow from share chain: {error:?}");
                     return;
                 },
             };
 
-            let our_tip = share_chare
-                .get_tip()
-                .await
-                .inspect_err(|e| warn!(target: LOG_TARGET, squad; "Failed to get tip after sync: {}", e))
-                .as_ref()
-                .map(|tip| tip.unwrap_or_default())
-                .unwrap_or_default();
-
-            let our_achieved_pow = share_chare.chain_pow().await.as_u128();
             let catch_up_sync = CatchUpSync {
                 algo,
                 our_peer_id,
@@ -1608,7 +1606,7 @@ where S: ShareChain
         // }
 
         // let tx = self.inner_request_tx.clone();
-        let mut i_have_blocks = share_chain
+        let i_have_blocks = share_chain
             .create_catchup_sync_blocks(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE)
             .await;
 
@@ -2054,12 +2052,6 @@ where S: ShareChain
 
         let mut peer_with_better_pow = false;
         for algo in &algos {
-            // Find any blocks we are missing.
-            let _chain = match algo {
-                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-            };
-
             let mut best_peers = self
                 .network_peer_store
                 .read()
@@ -2280,15 +2272,11 @@ where S: ShareChain
         seed_peers.iter().for_each(|(peer_id, addr)| {
             info!(target: LOG_TARGET, squad = &self.config.squad; "Adding seed peer: {:?} -> {:?}", peer_id, addr);
             // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
-            self.swarm.add_peer_address(peer_id.clone(), addr.clone());
-            peers_to_add.push(peer_id.clone());
+            self.swarm.add_peer_address(*peer_id, addr.clone());
+            peers_to_add.push(*peer_id);
             let _ = self
                 .swarm
-                .dial(
-                    DialOpts::peer_id(peer_id.clone())
-                        .condition(PeerCondition::Always)
-                        .build(),
-                )
+                .dial(DialOpts::peer_id(*peer_id).condition(PeerCondition::Always).build())
                 .inspect_err(|e| {
                     warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to dial seed peer: {e:?}");
                 });
@@ -2377,7 +2365,7 @@ where S: ShareChain
                 // .behaviour_mut()
                 // .kademlia
                 // .add_address(&record.peer_id, address.clone());
-                self.swarm.add_peer_address(record.peer_id.clone(), address);
+                self.swarm.add_peer_address(record.peer_id, address);
             }
         }
         self.main_loop().await?;

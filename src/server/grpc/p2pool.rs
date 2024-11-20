@@ -250,7 +250,9 @@ where S: ShareChain
                 .map_err(|e| Status::internal(format!("Could not convert gprc block to tari block: {}", e)))?;
             // we set the nonce to 0 in order to find the template again.
             tari_block.header.nonce = 0;
-            new_tip_block.populate_tari_data(tari_block);
+            new_tip_block
+                .populate_tari_data(tari_block)
+                .map_err(|e| Status::internal(format!("Could not convert gprc block to p2p block: {}", e)))?;
             let tari_hash = new_tip_block.original_header.hash();
 
             let height = grpc_block

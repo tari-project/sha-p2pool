@@ -4,7 +4,6 @@
 use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
-use libp2p::futures::AsyncWriteExt;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
@@ -20,7 +19,7 @@ use tari_core::{
     },
 };
 use tari_utilities::epoch_time::EpochTime;
-use tokio::sync::{RwLock, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
     MAIN_REWARD_SHARE,
@@ -155,7 +154,7 @@ impl InMemoryShareChain {
             return Err(ValidationError::UnclesBeforeStartHeight);
         }
         // let test the age of the uncles
-        for uncle in block.uncles.iter() {
+        for uncle in &block.uncles {
             if uncle.0 < block.height.saturating_sub(MAX_UNCLE_AGE) {
                 warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too old! {:?}", self.pow_algo, uncle.0);
                 return Err(ValidationError::UncleTooOld);
@@ -266,7 +265,7 @@ impl InMemoryShareChain {
             MAIN_REWARD_SHARE,
             cur_block.miner_coinbase_extra.clone(),
         );
-        for uncle in cur_block.uncles.iter() {
+        for uncle in &cur_block.uncles {
             let uncle_block = p2_chain
                 .level_at_height(uncle.0)
                 .ok_or(ShareChainError::UncleBlockNotFound)?
@@ -290,7 +289,7 @@ impl InMemoryShareChain {
                 MAIN_REWARD_SHARE,
                 cur_block.miner_coinbase_extra.clone(),
             );
-            for uncle in cur_block.uncles.iter() {
+            for uncle in &cur_block.uncles {
                 let uncle_block = p2_chain
                     .level_at_height(uncle.0)
                     .ok_or(ShareChainError::UncleBlockNotFound)?
@@ -307,6 +306,59 @@ impl InMemoryShareChain {
         }
         p2_chain.cached_shares = Some(miners_to_shares.clone());
         Ok(miners_to_shares)
+    }
+
+    fn all_blocks_with_lock(
+        &self,
+        p2_chain: &RwLockReadGuard<'_, P2Chain>,
+        start_height: Option<u64>,
+        page_size: usize,
+        main_chain_only: bool,
+    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+        let mut res = Vec::with_capacity(page_size);
+        let mut num_main_chain_blocks = 0;
+        let mut level = if let Some(level) = p2_chain.level_at_height(start_height.unwrap_or(0)) {
+            level
+        } else {
+            // we dont have that block, see if we have a higher lowest block than they are asking for and start there
+            if start_height.unwrap_or(0) < p2_chain.levels.back().map(|l| l.height).unwrap_or(0) {
+                p2_chain.levels.back().unwrap()
+            } else {
+                return Ok(res);
+            }
+        };
+
+        loop {
+            for block in level.blocks.values() {
+                if block.hash == level.chain_block {
+                    num_main_chain_blocks += 1;
+                    if main_chain_only {
+                        for uncle in &block.uncles {
+                            // Always include all the uncles, if we have them
+                            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                                // Uncles should never exist in the main chain, so we don't need to worry about
+                                // duplicates
+                                res.push(uncle_block.clone());
+                            }
+                        }
+                    }
+                }
+
+                res.push(block.clone());
+                // Always include at least 2 main chain blocks so that if we called
+                // this function with the starting mainchain block we can continue asking for more
+                // blocks
+                if res.len() >= page_size && (!main_chain_only || num_main_chain_blocks >= 2) {
+                    return Ok(res);
+                }
+            }
+            level = if let Some(new_level) = p2_chain.level_at_height(level.height + 1) {
+                new_level
+            } else {
+                break;
+            };
+        }
+        Ok(res)
     }
 }
 
@@ -480,7 +532,7 @@ impl ShareChain for InMemoryShareChain {
             new_tip_block.miner_wallet_address.to_base58(),
             (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
         );
-        for uncle in new_tip_block.uncles.iter() {
+        for uncle in &new_tip_block.uncles {
             let uncle_block = chain_read_lock
                 .level_at_height(uncle.0)
                 .ok_or(ShareChainError::UncleBlockNotFound)?
@@ -630,7 +682,7 @@ impl ShareChain for InMemoryShareChain {
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+    ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError> {
         let p2_chain_read = self.p2_chain.read().await;
 
         // Assume their blocks are in order highest first.
@@ -663,8 +715,13 @@ impl ShareChain for InMemoryShareChain {
             }
         }
 
-        self.all_blocks(Some(cmp::max(split_height, split_height2)), limit, true)
-            .await
+        let blocks =
+            self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?;
+        let tip_level = p2_chain_read
+            .get_tip()
+            .map(|tip_level| (tip_level.height, tip_level.chain_block));
+        let chain_pow = p2_chain_read.total_accumulated_tip_difficulty();
+        Ok((blocks, tip_level, chain_pow))
     }
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty {
@@ -702,51 +759,8 @@ impl ShareChain for InMemoryShareChain {
         page_size: usize,
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
-        let chain_read_lock = self.p2_chain.read().await;
-        let mut res = Vec::with_capacity(page_size);
-        let mut num_main_chain_blocks = 0;
-        let mut level = if let Some(level) = chain_read_lock.level_at_height(start_height.unwrap_or(0)) {
-            level
-        } else {
-            // we dont have that block, see if we have a higher lowest block than they are asking for and start there
-            if start_height.unwrap_or(0) < chain_read_lock.levels.back().map(|l| l.height).unwrap_or(0) {
-                chain_read_lock.levels.back().unwrap()
-            } else {
-                return Ok(res);
-            }
-        };
-
-        loop {
-            for block in level.blocks.values() {
-                if block.hash == level.chain_block {
-                    num_main_chain_blocks += 1;
-                    if main_chain_only {
-                        for uncle in &block.uncles {
-                            // Always include all the uncles, if we have them
-                            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
-                                // Uncles should never exist in the main chain, so we don't need to worry about
-                                // duplicates
-                                res.push(uncle_block.clone());
-                            }
-                        }
-                    }
-                }
-
-                res.push(block.clone());
-                // Always include at least 2 main chain blocks so that if we called
-                // this function with the starting mainchain block we can continue asking for more
-                // blocks
-                if res.len() >= page_size && (!main_chain_only || num_main_chain_blocks >= 2) {
-                    return Ok(res);
-                }
-            }
-            level = if let Some(new_level) = chain_read_lock.level_at_height(level.height + 1) {
-                new_level
-            } else {
-                break;
-            };
-        }
-        Ok(res)
+        let p2_chain_read = self.p2_chain.read().await;
+        self.all_blocks_with_lock(&p2_chain_read, start_height, page_size, main_chain_only)
     }
 
     async fn has_block(&self, height: u64, hash: &FixedHash) -> bool {
@@ -1027,7 +1041,7 @@ pub mod test {
         let mut their_blocks = Vec::new();
         their_blocks.push((3, blocks[3].hash));
 
-        let res = chain.request_sync(&their_blocks, 10, None).await.unwrap();
+        let res = chain.request_sync(&their_blocks, 10, None).await.unwrap().0;
         assert_eq!(res.len(), 7);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
         assert_eq!(heights, vec![3, 4, 5, 6, 7, 8, 9]);
@@ -1036,7 +1050,8 @@ pub mod test {
         let res = chain
             .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         assert_eq!(res.len(), 5);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
@@ -1047,7 +1062,8 @@ pub mod test {
         let res = chain
             .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         assert_eq!(res.len(), 3);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
@@ -1065,7 +1081,8 @@ pub mod test {
         let res = chain
             .request_sync(&their_blocks, 10, Some((5, blocks[5].hash)))
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         assert_eq!(res.len(), 3);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
