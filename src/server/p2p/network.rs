@@ -26,7 +26,7 @@ use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
     connection_limits::{self},
     dcutr,
-    futures::StreamExt,
+    futures::{AsyncReadExt, StreamExt},
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
     identify::{self, Info},
     identity::Keypair,
@@ -777,13 +777,7 @@ where S: ShareChain
                 return;
             }
             let peer_store_read_lock = self.network_peer_store.read().await;
-            let mut my_best_peers =
-                peer_store_read_lock.best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX, &[]);
-            my_best_peers.extend(peer_store_read_lock.best_peers_to_share(
-                NUM_PEERS_TO_SYNC_PER_ALGO,
-                PowAlgorithm::Sha3x,
-                &[],
-            ));
+            let my_best_peers = peer_store_read_lock.best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, &[]);
 
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             let known_peers = peer_store_read_lock.get_known_peers();
@@ -827,17 +821,12 @@ where S: ShareChain
             } else {
                 NUM_PEERS_TO_SYNC_PER_ALGO
             };
-            let my_best_peers = {
-                let peer_store_read_lock = self.network_peer_store.read().await;
-                let mut my_best_peers =
-                    peer_store_read_lock.best_peers_to_share(num_peers, PowAlgorithm::RandomX, &request.known_peer_ids);
-                my_best_peers.extend(peer_store_read_lock.best_peers_to_share(
-                    num_peers,
-                    PowAlgorithm::Sha3x,
-                    &request.known_peer_ids,
-                ));
-                my_best_peers
-            };
+
+            let my_best_peers = self
+                .network_peer_store
+                .read()
+                .await
+                .best_peers_to_share(num_peers, &request.known_peer_ids);
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             if self
                 .swarm

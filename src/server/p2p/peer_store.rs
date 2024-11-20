@@ -211,12 +211,7 @@ impl PeerStore {
             .collect()
     }
 
-    pub fn best_peers_to_share(
-        &self,
-        count: usize,
-        _algo: PowAlgorithm,
-        other_nodes_peers: &[PeerId],
-    ) -> Vec<PeerStoreRecord> {
+    pub fn best_peers_to_share(&self, count: usize, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 10 minutes
         // let timestamp = EpochTime::now().as_u64() - 600;
