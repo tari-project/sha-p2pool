@@ -49,7 +49,6 @@ pub(crate) struct PeerStoreRecord {
     pub num_grey_listings: u64,
     pub last_grey_list_reason: Option<String>,
     pub catch_up_attempts: u64,
-    pub last_new_tip_notify: Option<Arc<NotifyNewTipBlock>>,
     pub last_ping: Option<EpochTime>,
 }
 
@@ -64,7 +63,6 @@ impl PeerStoreRecord {
             created: Instant::now(),
             last_grey_list_reason: None,
             catch_up_attempts: 0,
-            last_new_tip_notify: None,
             last_ping: None,
         }
     }
@@ -75,12 +73,8 @@ impl PeerStoreRecord {
     }
 
     pub fn last_seen(&self) -> EpochTime {
-        self.last_ping.unwrap_or_else(|| {
-            self.last_new_tip_notify
-                .as_ref()
-                .map(|n| EpochTime::from(n.timestamp))
-                .unwrap_or(EpochTime::from(self.peer_info.timestamp))
-        })
+        self.last_ping
+            .unwrap_or_else(|| EpochTime::from(self.peer_info.timestamp))
     }
 }
 
@@ -157,19 +151,6 @@ impl PeerStore {
         self.whitelist_peers
             .get(&peer.to_base58())
             .map(|record| record.catch_up_attempts as usize)
-    }
-
-    pub fn add_last_new_tip_notify(&mut self, peer_id: &PeerId, notify: Arc<NotifyNewTipBlock>) {
-        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
-            let mut new_record = entry.clone();
-            new_record.last_new_tip_notify = Some(notify.clone());
-            *entry = new_record;
-        }
-        if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
-            let mut new_record = entry.clone();
-            new_record.last_new_tip_notify = Some(notify);
-            *entry = new_record;
-        }
     }
 
     pub fn add_catch_up_attempt(&mut self, peer_id: &PeerId) {
