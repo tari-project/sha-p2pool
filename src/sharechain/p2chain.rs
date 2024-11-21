@@ -490,13 +490,22 @@ impl P2Chain {
         let mut next_level_data = Vec::new();
 
         // let see if we already have a block that builds on top of this
-        if let Some(next_level) = self.level_at_height(new_block_height + 1) {
+        let mut checking_height = new_block_height + 1;
+        while let Some(next_level) = self.level_at_height(checking_height) {
             // we have a height here, lets check the blocks
+            let mut found_child = false;
             for block in next_level.blocks.iter() {
                 if block.1.prev_hash == hash {
                     next_level_data.push((next_level.height, *block.0));
+                    found_child = true;
+                    break;
                 }
             }
+            // if we did not find a next parent to check, then we can break
+            if !found_child {
+                break;
+            }
+            checking_height += 1;
         }
 
         // let search if this block is an uncle of some higher block
