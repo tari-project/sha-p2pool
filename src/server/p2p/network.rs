@@ -197,7 +197,7 @@ impl Default for Config {
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(60 * 15),
             black_list_clear_interval: Duration::from_secs(60 * 60),
-            sync_interval: Duration::from_secs(10),
+            sync_interval: Duration::from_secs(30),
             is_seed_peer: false,
             debug_print_chain: false,
             num_peers_to_sync: 2,
@@ -873,7 +873,7 @@ where S: ShareChain
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if self.add_peer(response.info, peer_id).await {
+                if self.add_peer(response.info.clone(), peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
                 for mut peer in response.best_peers {
@@ -887,6 +887,34 @@ where S: ShareChain
                 if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
                     warn!(target: LOG_TARGET, squad = &self.config.squad; "Disconnecting from seed peer {}", peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
+
+                let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
+
+                if response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
+                    let perform_catch_up_sync = PerformCatchUpSync {
+                        algo: PowAlgorithm::Sha3x,
+                        peer: peer_id,
+                        last_block_from_them: None,
+                        their_height: response.info.current_sha3x_height,
+                    };
+                    let _ = self
+                        .inner_request_tx
+                        .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
+                }
+                let our_tip_rx = self.share_chain_random_x.chain_pow().await;
+
+                if response.info.current_random_x_pow > our_tip_rx.as_u128() {
+                    let perform_catch_up_sync = PerformCatchUpSync {
+                        algo: PowAlgorithm::RandomX,
+                        peer: peer_id,
+                        last_block_from_them: None,
+                        their_height: response.info.current_random_x_height,
+                    };
+                    let _ = self
+                        .inner_request_tx
+                        .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
                 }
             },
             Err(error) => {
@@ -958,17 +986,18 @@ where S: ShareChain
                     info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain, new tip added [{}]",algo, new_tip);
                     info!(target: LOG_TARGET, squad; "[{:?}] blocks for the following heights where added : {:?}", algo, blocks.iter().map(|block| block.height.to_string()).collect::<Vec<String>>());
                 },
-                Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
-                    let sync_share_chain = SyncShareChain {
-                        algo,
-                        peer,
-                        missing_parents,
-                        is_from_new_block_notify: false,
-                    };
+                // Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
+                //     // TODO: We should not keep asking for missing blocks otherwise we can get into an infinite loop
+                // of     // asking. let sync_share_chain = SyncShareChain {
+                //     //     algo,
+                //     //     peer,
+                //     //     missing_parents,
+                //     //     is_from_new_block_notify: false,
+                //     // };
 
-                    let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                    return;
-                },
+                //     // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                //     return;
+                // },
                 Err(error) => {
                     error!(target: LOG_TARGET, squad; "Failed to add synced blocks to share chain: {error:?}");
                     peer_store
@@ -1439,8 +1468,8 @@ where S: ShareChain
 
         tokio::spawn(async move {
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
-            for b in blocks {
-                match share_chain.add_synced_blocks(&[b]).await {
+            for b in &blocks {
+                match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
                         info!(target: LOG_TARGET, "Block added");
                     },
@@ -1472,9 +1501,9 @@ where S: ShareChain
             let our_pow = share_chain.get_total_chain_pow().await;
             let mut must_continue_sync = their_pow > our_pow.as_u128();
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
-            // Check if we have their tip in our chain.
-            if share_chain.has_block(their_height, &their_tip_hash).await {
-                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} because we have their tip in our chain already", algo, peer);
+            // Check if we have recieved their tip
+            if blocks.iter().any(|b| b.hash == their_tip_hash) {
+                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {}", algo, peer);
                 must_continue_sync = false;
             }
             let mut peer_store_write_lock = network_peer_store.write().await;
@@ -1918,7 +1947,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        if self.swarm.connected_peers().count() > 13 {
+                        if self.swarm.connected_peers().count() > 20 {
                             continue;
                         }
                         let mut num_dialed = 0;
@@ -1927,10 +1956,10 @@ where S: ShareChain
                             // dbg!("Connecting");
                             // dbg!("Dialing peer: {:?} on {:?}", record.peer_id, record.peer_info.public_addresses());
                             // let peer_id = peers.0;
-                            if !self.swarm.is_connected(&record.peer_id) && store_read_lock.is_seed_peer(&record.peer_id)  {
+                            if !self.swarm.is_connected(&record.peer_id) && !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _ = self.swarm.dial(record.peer_id.clone());
                                 num_dialed += 1;
-                                if num_dialed > 32 {
+                                if num_dialed > 128 {
                                     break;
                                 }
                             }
@@ -1988,7 +2017,25 @@ where S: ShareChain
                 _ = sync_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
-                        self.try_sync_from_best_peer().await;
+                        for peer in self.swarm.connected_peers().cloned().collect::<Vec::<_>>() {
+                            // Update their latest tip.
+                            self.initiate_direct_peer_exchange(&peer).await;
+
+
+                            // let _ = self.perform_catch_up_sync(PerformCatchUpSync {
+                            //     algo: PowAlgorithm::RandomX,
+                            //     peer,
+                            //     last_block_from_them: None,
+                            //     their_height: 0,
+                            // });
+                            // let _ = self.perform_catch_up_sync(PerformCatchUpSync {
+                            //     algo: PowAlgorithm::Sha3x,
+                            //     peer,
+                            //     last_block_from_them: None,
+                            //     their_height: 0,
+                            // });
+                        }
+                        // self.try_sync_from_best_peer().await;
                     }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Syncing took too long: {:?}", timer.elapsed());
