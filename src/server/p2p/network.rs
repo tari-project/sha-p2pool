@@ -525,7 +525,11 @@ where S: ShareChain
 
     /// Main method to handle any message comes from gossipsub.
     #[allow(clippy::too_many_lines)]
-    async fn handle_new_gossipsub_message(&mut self, message: Message) -> Result<MessageAcceptance, Error> {
+    async fn handle_new_gossipsub_message(
+        &mut self,
+        message: Message,
+        propagation_source: PeerId,
+    ) -> Result<MessageAcceptance, Error> {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
         let _ = self.stats_broadcast_client.send_gossipsub_message_received();
         let source_peer = message.source;
@@ -583,11 +587,7 @@ where S: ShareChain
                             }
                             // lets check age
                             // if this timestamp is older than 60 seconds, we reject it
-                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(20) {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
-                                return Ok(MessageAcceptance::Reject);
-                            }
-                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(10) {
+                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
@@ -661,25 +661,7 @@ where S: ShareChain
                                 .map(|payload| payload.height)
                                 .max()
                                 .unwrap_or(0);
-                            // Either the tip is too far ahead and we need to catch up, or the chain is below ours but
-                            // with a higher proof of work, so we then need to reorg to that chain.
-                            // In both cases catchup sync will be better than simple sync
-                            if max_payload_height > our_tip.saturating_add(2) ||
-                                max_payload_height < our_tip.saturating_sub(5)
-                            {
-                                debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is too far ahead, we need to initiate chatchup sync", message_peer);
-                                let perform_catch_up_sync = PerformCatchUpSync {
-                                    algo,
-                                    peer: *message_peer,
-                                    last_block_from_them: None,
-                                    their_height: max_payload_height,
-                                };
-                                let _ = self
-                                    .inner_request_tx
-                                    .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
-                                // .await;
-                                return Ok(MessageAcceptance::Ignore);
-                            }
+
                             let mut blocks: Vec<P2Block> = payload.new_blocks.iter().cloned().collect();
                             for block in &mut blocks {
                                 block.verified = false;
@@ -692,9 +674,15 @@ where S: ShareChain
                                 Err(crate::sharechain::error::ShareChainError::BlockParentDoesNotExist {
                                     missing_parents,
                                 }) => {
+                                    let num_missing_parents = missing_parents.len();
+                                    if num_missing_parents > 5 {
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
+                                        return Ok(MessageAcceptance::Accept);
+                                    }
+                                    info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
                                     let sync_share_chain = SyncShareChain {
                                         algo,
-                                        peer: *message_peer,
+                                        peer: propagation_source,
                                         missing_parents,
                                         is_from_new_block_notify: false,
                                     };
@@ -1121,7 +1109,7 @@ where S: ShareChain
                         message,
                         message_id,
                         propagation_source,
-                    } => match self.handle_new_gossipsub_message(message).await {
+                    } => match self.handle_new_gossipsub_message(message, propagation_source).await {
                         Ok(res) => {
                             let _ = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
                             &message_id,
