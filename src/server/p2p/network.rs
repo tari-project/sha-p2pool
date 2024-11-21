@@ -665,7 +665,10 @@ where S: ShareChain
                                     missing_parents,
                                 }) => {
                                     let num_missing_parents = missing_parents.len();
-                                    if num_missing_parents > 5 {
+                                    if num_missing_parents > 5 ||
+                                        our_tip > max_payload_height.saturating_sub(10) ||
+                                        our_tip < max_payload_height.saturating_add(5)
+                                    {
                                         info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
                                         return Ok(MessageAcceptance::Accept);
                                     }
