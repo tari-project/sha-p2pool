@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Display,
     fs,
     hash::Hash,
@@ -1452,6 +1452,7 @@ where S: ShareChain
 
         tokio::spawn(async move {
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
+            let mut missing_blocks = HashSet::new();
             for b in &blocks {
                 match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
@@ -1461,6 +1462,9 @@ where S: ShareChain
                         crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
                             // This should not happen though, catchup should return all blocks
                             warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_parents.len());
+                            for (height, hash) in missing_parents {
+                                missing_blocks.insert((height, hash));
+                            }
                             // let sync_share_chain = SyncShareChain {
                             //     algo,
                             //     peer,
@@ -1480,10 +1484,20 @@ where S: ShareChain
                     },
                 };
             }
+            if missing_blocks.len() > 0 {
+                let sync_share_chain = SyncShareChain {
+                    algo,
+                    peer,
+                    missing_parents: missing_blocks.into_iter().collect(),
+                    is_from_new_block_notify: false,
+                };
+                let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                return;
+            }
 
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
             let our_pow = share_chain.get_total_chain_pow().await;
-            let mut must_continue_sync = their_pow > our_pow.as_u128();
+            let mut must_continue_sync = missing_blocks.is_empty && their_pow > our_pow.as_u128();
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
             // Check if we have recieved their tip
             if blocks.iter().any(|b| b.hash == their_tip_hash) {
