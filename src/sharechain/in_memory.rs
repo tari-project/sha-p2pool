@@ -30,7 +30,6 @@ use super::{
     UNCLE_REWARD_SHARE,
 };
 use crate::{
-    main,
     server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
@@ -328,7 +327,6 @@ impl InMemoryShareChain {
                 return Ok(res);
             }
         };
-
 
         loop {
             for block in level.blocks.values() {
@@ -698,7 +696,7 @@ impl ShareChain for InMemoryShareChain {
         if let Some(last_block_received) = last_block_received {
             if let Some(level) = p2_chain_read.level_at_height(last_block_received.0) {
                 if let Some(block) = level.blocks.get(&last_block_received.1) {
-                    split_height = block.height;
+                    split_height = block.height.saturating_add(1);
                 }
             }
         }
@@ -715,7 +713,7 @@ impl ShareChain for InMemoryShareChain {
                 if let Some(block) = level.blocks.get(&their_block.1) {
                     // Only split if the block is in the main chain
                     if level.chain_block == block.hash {
-                        split_height2 = block.height;
+                        split_height2 = block.height.saturating_add(1);
                         break;
                     }
                 }

@@ -7,7 +7,6 @@ use std::{
     io::{BufReader, Write},
     path::Path,
     str::FromStr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -17,7 +16,6 @@ use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use super::messages::NotifyNewTipBlock;
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
 
 const LOG_TARGET: &str = "tari::p2pool::peer_store";
