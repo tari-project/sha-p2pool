@@ -1494,12 +1494,12 @@ where S: ShareChain
                     is_from_new_block_notify: false,
                 };
                 let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                return;
+                // return;
             }
 
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
             let our_pow = share_chain.get_total_chain_pow().await;
-            let mut must_continue_sync = missing_blocks.is_empty() && their_pow > our_pow.as_u128();
+            let mut must_continue_sync = their_pow > our_pow.as_u128();
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
             // Check if we have recieved their tip
             if blocks.iter().any(|b| b.hash == their_tip_hash) {
