@@ -178,7 +178,15 @@ impl InMemoryShareChain {
     ) -> Result<bool, ShareChainError> {
         let new_block_p2pool_height = block.height;
 
-        if p2_chain.get_tip().is_none() || block.height == 0 || syncing {
+        // Check if already added.
+        if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
+            if level.blocks.contains_key(&block.hash) {
+                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
+                return Ok(false);
+            }
+        }
+
+        if p2_chain.get_tip().is_none() {
             let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
             return p2_chain.add_block_to_chain(block.clone());
         }
@@ -191,14 +199,6 @@ impl InMemoryShareChain {
             return Err(ShareChainError::BlockValidation(
                 "Block is older than share window".to_string(),
             ));
-        }
-
-        // Check if already added.
-        if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
-            if level.blocks.contains_key(&block.hash) {
-                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
-                return Ok(false);
-            }
         }
 
         // validate
@@ -432,19 +432,19 @@ impl ShareChain for InMemoryShareChain {
             {
                 Ok(tip_change) => {
                     debug!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully. Tip changed: {}", self.pow_algo, height, tip_change);
-                    new_tip = tip_change;
+                    if tip_change {
+                        new_tip = true;
+                    }
                 },
                 Err(e) => {
                     if let ShareChainError::BlockParentDoesNotExist {
                         missing_parents: new_missing_parents,
                     } = e
                     {
-                        let mut missing_heights = Vec::new();
                         for new_missing_parent in new_missing_parents {
                             if known_blocks_incoming.contains(&new_missing_parent.1) {
                                 continue;
                             }
-                            missing_heights.push(new_missing_parent.0);
                             missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
                             if missing_parents.len() > MAX_MISSING_PARENTS {
                                 break 'outer;
@@ -464,7 +464,7 @@ impl ShareChain for InMemoryShareChain {
         );
 
         if !missing_parents.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.values().map(|height| height.to_string()).collect::<Vec<String>>());
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
             return Err(ShareChainError::BlockParentDoesNotExist {
                 missing_parents: missing_parents
                     .into_iter()
