@@ -1442,7 +1442,7 @@ where S: ShareChain
         let their_tip_hash = *response.tip_hash();
         let their_height = response.tip_height();
         let their_pow = response.achieved_pow();
-        let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
+        let mut blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
         if blocks.is_empty() {
             return;
@@ -1453,6 +1453,7 @@ where S: ShareChain
         let synced_bool = self.are_we_synced_with_p2pool.clone();
 
         tokio::spawn(async move {
+            blocks.sort_by(|a, b| a.height.cmp(&b.height));
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
             let mut missing_blocks = HashSet::new();
             for b in &blocks {
