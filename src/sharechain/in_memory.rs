@@ -329,11 +329,6 @@ impl InMemoryShareChain {
             }
         };
 
-        // A -> B [unc B1]
-        // B -> C
-        // B1 -> C [unc C1]
-        // C1 -> D
-        // C -> D
 
         loop {
             for block in level.blocks.values() {
