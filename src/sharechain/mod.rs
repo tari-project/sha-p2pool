@@ -50,8 +50,8 @@ pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 
 pub const BLOCK_TARGET_TIME: u64 = 10;
 
-pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 4;
-pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1;
+pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every ten seconds
+pub const MIN_SHA3X_DIFFICULTY: u64 = 10_000; // 1 Mhs every ten seconds
 
 pub mod error;
 pub mod in_memory;

@@ -24,12 +24,13 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use super::{
     MAIN_REWARD_SHARE,
     MAX_BLOCKS_COUNT,
-    MIN_RANDOMX_SCALING_FACTOR,
-    MIN_SHA3X_SCALING_FACTOR,
+    MIN_RANDOMX_DIFFICULTY,
+    MIN_SHA3X_DIFFICULTY,
     SHARE_WINDOW,
     UNCLE_REWARD_SHARE,
 };
 use crate::{
+    main,
     server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
@@ -316,7 +317,7 @@ impl InMemoryShareChain {
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
         let mut res = Vec::with_capacity(page_size);
-        let mut num_main_chain_blocks = 0;
+        let mut num_actual_blocks = 0;
         let mut level = if let Some(level) = p2_chain.level_at_height(start_height.unwrap_or(0)) {
             level
         } else {
@@ -328,27 +329,38 @@ impl InMemoryShareChain {
             }
         };
 
+        // A -> B [unc B1]
+        // B -> C
+        // B1 -> C [unc C1]
+        // C1 -> D
+        // C -> D
+
         loop {
             for block in level.blocks.values() {
-                if block.hash == level.chain_block {
-                    num_main_chain_blocks += 1;
-                    if main_chain_only {
+                if main_chain_only {
+                    if block.hash == level.chain_block {
                         for uncle in &block.uncles {
                             // Always include all the uncles, if we have them
-                            if let Some(uncle_block) = level.blocks.get(&uncle.1) {
+                            if let Some(uncle_block) =
+                                p2_chain.level_at_height(uncle.0).and_then(|l| l.blocks.get(&uncle.1))
+                            {
                                 // Uncles should never exist in the main chain, so we don't need to worry about
                                 // duplicates
                                 res.push(uncle_block.clone());
                             }
                         }
-                    }
-                }
 
-                res.push(block.clone());
+                        num_actual_blocks += 1;
+                        res.push(block.clone());
+                    }
+                } else {
+                    num_actual_blocks += 1;
+                    res.push(block.clone());
+                }
                 // Always include at least 2 main chain blocks so that if we called
                 // this function with the starting mainchain block we can continue asking for more
                 // blocks
-                if res.len() >= page_size && (!main_chain_only || num_main_chain_blocks >= 2) {
+                if num_actual_blocks > page_size {
                     return Ok(res);
                 }
             }
@@ -725,18 +737,10 @@ impl ShareChain for InMemoryShareChain {
     }
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty {
-        let mut min = self
-            .consensus_manager
-            .consensus_constants(height)
-            .min_pow_difficulty(self.pow_algo);
-        match self.pow_algo {
-            PowAlgorithm::RandomX => {
-                min = Difficulty::from_u64(min.as_u64() / MIN_RANDOMX_SCALING_FACTOR).unwrap();
-            },
-            PowAlgorithm::Sha3x => {
-                min = Difficulty::from_u64(min.as_u64() / MIN_SHA3X_SCALING_FACTOR).unwrap();
-            },
-        }
+        let min = match self.pow_algo {
+            PowAlgorithm::RandomX => Difficulty::from_u64(MIN_RANDOMX_DIFFICULTY).unwrap(),
+            PowAlgorithm::Sha3x => Difficulty::from_u64(MIN_SHA3X_DIFFICULTY).unwrap(),
+        };
         let max = self
             .consensus_manager
             .consensus_constants(height)

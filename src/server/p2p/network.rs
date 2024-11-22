@@ -854,6 +854,11 @@ where S: ShareChain
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
+                if response.info.squad != self.config.squad.to_string() {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is not in the same squad, skipping", peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
                 if self.add_peer(response.info.clone(), peer_id).await {
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
