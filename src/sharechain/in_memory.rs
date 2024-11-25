@@ -465,11 +465,13 @@ impl ShareChain for InMemoryShareChain {
                 },
             }
         }
-        let _ = self.stat_client.send_chain_changed(
-            self.pow_algo,
-            p2_chain_write_lock.get_height(),
-            p2_chain_write_lock.get_max_chain_length() as u64,
-        );
+        if new_tip {
+            let _ = self.stat_client.send_chain_changed(
+                self.pow_algo,
+                p2_chain_write_lock.get_height(),
+                p2_chain_write_lock.get_max_chain_length() as u64,
+            );
+        }
 
         if !missing_parents.is_empty() {
             info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
