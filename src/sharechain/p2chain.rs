@@ -918,6 +918,47 @@ mod test {
     }
 
     #[test]
+    fn test_sets_tip_when_adding_blocks_from_both_side() {
+        // this test test if we can add blocks in rev order and when it gets 5 verified blocks it sets the tip
+        // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
+        // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
+        // window + 1 blocks in chain--
+        let mut chain = P2Chain::new_empty(10, 5);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut blocks = Vec::new();
+        for i in 0..20 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            blocks.push(block.clone());
+        }
+        for i in 0..9 {
+            chain.add_block_to_chain(blocks[i].clone()).unwrap();
+            assert_eq!(chain.get_tip().unwrap().height, i as u64);
+            chain.add_block_to_chain(blocks[19 - i].clone()).unwrap_err();
+            assert_eq!(chain.get_tip().unwrap().height, i as u64);
+        }
+
+        chain.add_block_to_chain(blocks[9].clone()).unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 9);
+
+        chain.add_block_to_chain(blocks[10].clone()).unwrap();
+        assert_eq!(chain.get_tip().unwrap().height, 19);
+
+        chain.assert_share_window_verified();
+    }
+
+    #[test]
     fn test_sets_tip_when_full_with_uncles() {
         // this test test if we can add blocks in rev order and when it gets 5 verified blocks it sets the tip
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter

@@ -1456,25 +1456,21 @@ where S: ShareChain
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
             let mut missing_blocks = HashSet::new();
+            let mut new_tip = false;
+            let mut blocks_added = Vec::new();
             for b in &blocks {
                 match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
-                        info!(target: LOG_TARGET, "[new tip: {}] Block added {}:{}:{}", result, algo, b.height, &b.hash.to_hex()[0..8]);
+                        blocks_added.push(format!("{}({})", b.height, &b.hash.to_hex()[0..8]));
+                        if result {
+                            new_tip = result;
+                        }
                     },
                     Err(error) => match error {
                         crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
-                            // This should not happen though, catchup should return all blocks
                             for (height, hash) in missing_parents {
                                 missing_blocks.insert((height, hash));
                             }
-                            // let sync_share_chain = SyncShareChain {
-                            //     algo,
-                            //     peer,
-                            //     missing_parents,
-                            //     is_from_new_block_notify: false,
-                            // };
-                            // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                            // return;
                         },
                         _ => {
                             error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
@@ -1486,6 +1482,7 @@ where S: ShareChain
                     },
                 };
             }
+            info!(target: LOG_TARGET, "[{:?}][new tip: {}] Blocks added {:?}", new_tip, algo, blocks_added);
             if missing_blocks.len() > 0 {
                 warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_blocks.len());
                 let sync_share_chain = SyncShareChain {

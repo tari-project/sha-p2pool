@@ -181,7 +181,7 @@ impl InMemoryShareChain {
         // Check if already added.
         if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
             if level.blocks.contains_key(&block.hash) {
-                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
+                debug!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
                 return Ok(false);
             }
         }
