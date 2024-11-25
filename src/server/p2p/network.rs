@@ -1482,6 +1482,7 @@ where S: ShareChain
                                 .write()
                                 .await
                                 .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                            return;
                         },
                     },
                 };
