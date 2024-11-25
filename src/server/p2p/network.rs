@@ -674,11 +674,15 @@ where S: ShareChain
                                     missing_parents,
                                 }) => {
                                     let num_missing_parents = missing_parents.len();
-                                    if num_missing_parents > 5 ||
-                                        our_tip > max_payload_height.saturating_sub(10) ||
+                                    if num_missing_parents > 5 {
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
+                                        return Ok(MessageAcceptance::Accept);
+                                    }
+
+                                    if our_tip > max_payload_height.saturating_sub(10) ||
                                         our_tip < max_payload_height.saturating_add(5)
                                     {
-                                        info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
                                         return Ok(MessageAcceptance::Accept);
                                     }
                                     info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
@@ -1466,41 +1470,35 @@ where S: ShareChain
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
             let mut missing_blocks = HashSet::new();
+            let mut new_tip = false;
+            let mut blocks_added = Vec::new();
             for b in &blocks {
                 match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
-                        info!(target: SYNC_REQUEST_LOG_TARGET, "[new tip: {}] Block added {}:{}:{}", result, algo, b.height, &b.hash.to_hex()[0..8]);
-                    },
-                    Err(error) => {
-                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Error adding block {}:{}:{} - {:?}", algo, b.height, &b.hash.to_hex()[0..8], error);
-                        match error {
-                            crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
-                                // This should not happen though, catchup should return all blocks
-                                for (height, hash) in missing_parents {
-                                    missing_blocks.insert((height, hash));
-                                }
-                                // let sync_share_chain = SyncShareChain {
-                                //     algo,
-                                //     peer,
-                                //     missing_parents,
-                                //     is_from_new_block_notify: false,
-                                // };
-                                // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                                // return;
-                            },
-                            _ => {
-                                error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
-                                network_peer_store
-                                    .write()
-                                    .await
-                                    .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                            },
+                        blocks_added.push(format!("{}({})", b.height, &b.hash.to_hex()[0..8]));
+                        if result {
+                            new_tip = result;
                         }
+                    },
+                    Err(error) => match error {
+                        crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
+                            for (height, hash) in missing_parents {
+                                missing_blocks.insert((height, hash));
+                            }
+                        },
+                        _ => {
+                            error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
+                            network_peer_store
+                                .write()
+                                .await
+                                .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                        },
                     },
                 }
             }
+            info!(target: LOG_TARGET, "[{:?}][new tip: {}] Blocks added {:?}", new_tip, algo, blocks_added);
             if missing_blocks.len() > 0 {
-                warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_blocks.len());
+                warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks({}): {:?}", missing_blocks.len(), missing_blocks.iter().map(|(height, hash)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
                 let sync_share_chain = SyncShareChain {
                     algo,
                     peer,
