@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use human_format::Formatter;
-use log::{error, info};
+use log::{debug, error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
