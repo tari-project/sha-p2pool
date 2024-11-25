@@ -435,6 +435,13 @@ impl P2Chain {
                     self.cached_shares = None;
                     self.current_tip = new_block.height;
                     // lets fix the chain
+                    // lets first go up and reset all chain block links
+                    let mut current_height = new_block.height;
+                    while self.level_at_height(current_height.saturating_add(1)).is_some() {
+                        let mut_child_level = self.level_at_height_mut(current_height.saturating_add(1)).unwrap();
+                        mut_child_level.chain_block = FixedHash::zero();
+                        current_height += 1;
+                    }
                     let mut current_block = new_block;
                     while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                         let parent_level =
@@ -448,7 +455,6 @@ impl P2Chain {
                                     "FATAL: Reorging (block in chain) failed because parent block was not found and \
                                      chain data is corrupted."
                                 );
-                                // return Err(ShareChainError::BlockNotFound);
                             }
                             // fix the main chain
                             let mut_parent_level = self
@@ -1211,7 +1217,6 @@ mod test {
         prev_hash = block_29.generate_hash();
         timestamp = block_29.timestamp;
 
-        // for i in 10..12 {
         let address = new_random_address();
         timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
         tari_block.header.nonce = 30 * 2;
@@ -1494,6 +1499,60 @@ mod test {
             }
         }
         assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 100);
+    }
+
+    #[test]
+    fn rests_levels_after_reorg() {
+        let mut chain = P2Chain::new_empty(20, 15);
+
+        let mut prev_hash = BlockHash::zero();
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..10 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2Block::builder()
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_target_difficulty(Difficulty::from_u64(9).unwrap())
+                .with_miner_wallet_address(address.clone())
+                .with_prev_hash(prev_hash)
+                .build();
+            prev_hash = block.generate_hash();
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+        }
+        let level = chain.get_tip().unwrap();
+        assert_eq!(level.height, 9);
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 90);
+        assert_eq!(chain.level_at_height(9).unwrap().chain_block, prev_hash);
+
+        // lets create a new tip to reorg to branching off 2 from the tip
+        let mut prev_hash = chain.level_at_height(7).unwrap().chain_block;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+
+        tari_block.header.nonce = 100;
+        let address = new_random_address();
+        let block = P2Block::builder()
+            .with_timestamp(EpochTime::now())
+            .with_height(8)
+            .with_tari_block(tari_block.clone())
+            .unwrap()
+            .with_target_difficulty(Difficulty::from_u64(100).unwrap())
+            .with_miner_wallet_address(address.clone())
+            .with_prev_hash(prev_hash)
+            .build();
+        prev_hash = block.generate_hash();
+        assert!(chain.add_block_to_chain(block.clone()).unwrap());
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(level.height, 8);
+        assert_eq!(chain.total_accumulated_tip_difficulty.as_u128(), 172);
+        assert_eq!(chain.level_at_height(9).unwrap().chain_block, FixedHash::default());
     }
 
     #[test]

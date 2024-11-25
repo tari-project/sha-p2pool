@@ -664,11 +664,15 @@ where S: ShareChain
                                     missing_parents,
                                 }) => {
                                     let num_missing_parents = missing_parents.len();
-                                    if num_missing_parents > 5 ||
-                                        our_tip > max_payload_height.saturating_sub(10) ||
+                                    if num_missing_parents > 5 {
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
+                                        return Ok(MessageAcceptance::Accept);
+                                    }
+
+                                    if our_tip > max_payload_height.saturating_sub(10) ||
                                         our_tip < max_payload_height.saturating_add(5)
                                     {
-                                        info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", num_missing_parents);
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
                                         return Ok(MessageAcceptance::Accept);
                                     }
                                     info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
@@ -1484,7 +1488,7 @@ where S: ShareChain
             }
             info!(target: LOG_TARGET, "[{:?}][new tip: {}] Blocks added {:?}", new_tip, algo, blocks_added);
             if missing_blocks.len() > 0 {
-                warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_blocks.len());
+                warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks({}): {:?}", missing_blocks.len(), missing_blocks.iter().map(|(height, hash)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
                 let sync_share_chain = SyncShareChain {
                     algo,
                     peer,

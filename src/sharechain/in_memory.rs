@@ -1039,9 +1039,9 @@ pub mod test {
         their_blocks.push((3, blocks[3].hash));
 
         let res = chain.request_sync(&their_blocks, 10, None).await.unwrap().0;
-        assert_eq!(res.len(), 7);
+        assert_eq!(res.len(), 6);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
-        assert_eq!(heights, vec![3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(heights, vec![4, 5, 6, 7, 8, 9]);
 
         // if last block is higher, then we should start from the highest match
         let res = chain
@@ -1050,9 +1050,9 @@ pub mod test {
             .unwrap()
             .0;
 
-        assert_eq!(res.len(), 5);
+        assert_eq!(res.len(), 4);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
-        assert_eq!(heights, vec![5, 6, 7, 8, 9]);
+        assert_eq!(heights, vec![6, 7, 8, 9]);
 
         // if there is a match in the middle, we should start from the highest match
         their_blocks.push((7, blocks[7].hash));
@@ -1062,9 +1062,9 @@ pub mod test {
             .unwrap()
             .0;
 
-        assert_eq!(res.len(), 3);
+        assert_eq!(res.len(), 2);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
-        assert_eq!(heights, vec![7, 8, 9]);
+        assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
         let missing_block = P2Block::builder()
@@ -1081,8 +1081,8 @@ pub mod test {
             .unwrap()
             .0;
 
-        assert_eq!(res.len(), 3);
+        assert_eq!(res.len(), 2);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
-        assert_eq!(heights, vec![7, 8, 9]);
+        assert_eq!(heights, vec![8, 9]);
     }
 }
