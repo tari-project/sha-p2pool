@@ -29,6 +29,7 @@ use std::{
 use log::{debug, error, info};
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, Difficulty};
+use tari_utilities::hex::Hex;
 
 use crate::sharechain::{
     error::ShareChainError,
@@ -353,7 +354,7 @@ impl P2Chain {
         if new_block.verified {
             if self.get_tip().is_some() && self.get_tip().unwrap().chain_block == new_block.prev_hash {
                 // easy this builds on the tip
-                info!(target: LOG_TARGET, "[{:?}] New block added to tip, and is now the new tip: {:?}", algo, new_block_height);
+                info!(target: LOG_TARGET, "[{:?}] New block added to tip, and is now the new tip: {:?}:{}", algo, new_block_height, &new_block.hash.to_hex()[0..8]);
                 self.set_new_tip(new_block_height, hash)?;
                 new_tip = true;
             } else {

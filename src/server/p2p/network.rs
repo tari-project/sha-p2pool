@@ -603,7 +603,7 @@ where S: ShareChain
                             if message_peer.to_string() != source_peer.to_string() {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
                             }
-                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
+                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> [{}] Blocks: {}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","));
 
                             // If we don't have this peer, try do peer exchange
                             // if !self.network_peer_store.exists(message_peer) {
@@ -641,6 +641,16 @@ where S: ShareChain
                                     our_tip.saturating_sub(4)
                             {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", message_peer);
+                                return Ok(MessageAcceptance::Ignore);
+                            }
+
+                            // If the tip is much higher than ours, it may be either a fake block or on a part of the
+                            // network that we can't get to
+                            if payload.new_blocks.iter().map(|b| b.height).max().unwrap_or(0) >
+                                our_tip.saturating_add(10)
+                            {
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is much higher than ours, skipping", message_peer);
+                                // Is reject too harsh? Maybe we should just ignore it
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
@@ -1459,32 +1469,35 @@ where S: ShareChain
             for b in &blocks {
                 match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
-                        info!(target: LOG_TARGET, "[new tip: {}] Block added {}:{}:{}", result, algo, b.height, &b.hash.to_hex()[0..8]);
+                        info!(target: SYNC_REQUEST_LOG_TARGET, "[new tip: {}] Block added {}:{}:{}", result, algo, b.height, &b.hash.to_hex()[0..8]);
                     },
-                    Err(error) => match error {
-                        crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
-                            // This should not happen though, catchup should return all blocks
-                            for (height, hash) in missing_parents {
-                                missing_blocks.insert((height, hash));
-                            }
-                            // let sync_share_chain = SyncShareChain {
-                            //     algo,
-                            //     peer,
-                            //     missing_parents,
-                            //     is_from_new_block_notify: false,
-                            // };
-                            // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                            // return;
-                        },
-                        _ => {
-                            error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
-                            network_peer_store
-                                .write()
-                                .await
-                                .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                        },
+                    Err(error) => {
+                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Error adding block {}:{}:{} - {:?}", algo, b.height, &b.hash.to_hex()[0..8], error);
+                        match error {
+                            crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
+                                // This should not happen though, catchup should return all blocks
+                                for (height, hash) in missing_parents {
+                                    missing_blocks.insert((height, hash));
+                                }
+                                // let sync_share_chain = SyncShareChain {
+                                //     algo,
+                                //     peer,
+                                //     missing_parents,
+                                //     is_from_new_block_notify: false,
+                                // };
+                                // let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                // return;
+                            },
+                            _ => {
+                                error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
+                                network_peer_store
+                                    .write()
+                                    .await
+                                    .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                            },
+                        }
                     },
-                };
+                }
             }
             if missing_blocks.len() > 0 {
                 warn!(target: SYNC_REQUEST_LOG_TARGET, squad; "Catchup sync Reporting missing blocks {}", missing_blocks.len());

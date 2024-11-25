@@ -18,7 +18,7 @@ use tari_core::{
         PowAlgorithm,
     },
 };
-use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
@@ -181,7 +181,10 @@ impl InMemoryShareChain {
         // Check if already added.
         if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
             if level.blocks.contains_key(&block.hash) {
-                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {:?}", self.pow_algo, block.height);
+                let block_in_chain = level.blocks.get(&block.hash).unwrap();
+
+                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo, block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
+
                 return Ok(false);
             }
         }
