@@ -74,9 +74,12 @@ impl P2ChainLevel {
 #[cfg(test)]
 mod test {
     use tari_utilities::epoch_time::EpochTime;
-    use crate::sharechain::p2block::P2BlockBuilder;
 
-    use crate::sharechain::{in_memory::test::new_random_address, p2chain_level::P2ChainLevel};
+    use crate::sharechain::{
+        in_memory::test::new_random_address,
+        p2block::P2BlockBuilder,
+        p2chain_level::P2ChainLevel,
+    };
 
     #[test]
     fn it_gets_the_block_chain() {
@@ -85,7 +88,8 @@ mod test {
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address.clone())
-            .build();
+            .build()
+            .unwrap();
         let mut chain_level = P2ChainLevel::new(block.clone());
         chain_level.chain_block = block.generate_hash();
 
@@ -98,7 +102,8 @@ mod test {
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address.clone())
-            .build();
+            .build()
+            .unwrap();
 
         chain_level.add_block(block_2.clone()).unwrap();
         assert_eq!(
@@ -111,7 +116,8 @@ mod test {
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address)
-            .build();
+            .build()
+            .unwrap();
 
         chain_level.add_block(block_3.clone()).unwrap();
         chain_level.chain_block = block_3.generate_hash();

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     fmt::Display,
     fs,
     hash::Hash,
@@ -96,10 +96,10 @@ use crate::{
     },
     sharechain::{
         p2block::{P2Block, CURRENT_CHAIN_ID},
+        p2chain::ChainAddResult,
         ShareChain,
     },
 };
-use crate::sharechain::p2chain::ChainAddResult;
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
@@ -1475,13 +1475,13 @@ where S: ShareChain
                         blocks_added.push(format!("{}({})", b.height, &b.hash.to_hex()[0..8]));
                         new_tip.combine(result);
                     },
-                    Err(error) =>  {
-                            error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
-                            network_peer_store
-                                .write()
-                                .await
-                                .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                            return;
+                    Err(error) => {
+                        error!(target: SYNC_REQUEST_LOG_TARGET, squad; "Failed to add Catchup synced blocks to share chain: {error:?}");
+                        network_peer_store
+                            .write()
+                            .await
+                            .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                        return;
                     },
                 }
             }

@@ -30,8 +30,7 @@ use tari_core::{
     proof_of_work::{randomx_factory::RandomXFactory, AccumulatedDifficulty, Difficulty},
 };
 
-use crate::sharechain::{error::ShareChainError, p2block::P2Block};
-use crate::sharechain::p2chain::ChainAddResult;
+use crate::sharechain::{error::ShareChainError, p2block::P2Block, p2chain::ChainAddResult};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.

@@ -33,14 +33,12 @@ use crate::{
     server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
-        p2block::P2Block,
-        p2chain::P2Chain,
+        p2block::{P2Block, P2BlockBuilder},
+        p2chain::{ChainAddResult, P2Chain},
         BlockValidationParams,
         ShareChain,
     },
 };
-use crate::sharechain::p2block::P2BlockBuilder;
-use crate::sharechain::p2chain::ChainAddResult;
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 // The max allowed uncles per block
@@ -434,7 +432,7 @@ impl ShareChain for InMemoryShareChain {
             {
                 Ok(tip_change) => {
                     debug!(target: LOG_TARGET, "[{:?}] ✅ added Block({}): {} ", self.pow_algo, height, tip_change);
-                    match (&mut add_result.new_tip, tip_change.new_tip){
+                    match (&mut add_result.new_tip, tip_change.new_tip) {
                         (Some(current_tip), Some(other_tip)) => {
                             if other_tip.1 > current_tip.1 {
                                 add_result.new_tip = Some(other_tip);
@@ -443,11 +441,11 @@ impl ShareChain for InMemoryShareChain {
                         (None, Some(new_tip)) => {
                             add_result.new_tip = Some(new_tip);
                         },
-                        _ => {}
+                        _ => {},
                     }
-                    if !tip_change.missing_blocks.is_empty(){
-                        for missing_block in tip_change.missing_blocks.iter(){
-                            if known_blocks_incoming.contains(missing_block.0){
+                    if !tip_change.missing_blocks.is_empty() {
+                        for missing_block in tip_change.missing_blocks.iter() {
+                            if known_blocks_incoming.contains(missing_block.0) {
                                 continue;
                             }
                             add_result.missing_blocks.insert(*missing_block.0, *missing_block.1);
@@ -458,9 +456,8 @@ impl ShareChain for InMemoryShareChain {
                     }
                 },
                 Err(e) => {
-
-                        warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
-                        return Err(e);
+                    warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
+                    return Err(e);
                 },
             }
         }
@@ -645,7 +642,7 @@ impl ShareChain for InMemoryShareChain {
             for excluded in &excluded_uncles {
                 uncles.retain(|uncle| &uncle.hash != excluded);
             }
-            //limit remaining to uncle limit
+            // limit remaining to uncle limit
             uncles.truncate(UNCLE_LIMIT);
         }
 
@@ -655,7 +652,7 @@ impl ShareChain for InMemoryShareChain {
             .with_uncles(&uncles)?
             .with_miner_wallet_address(miner_address.clone())
             .with_miner_coinbase_extra(coinbase_extra)
-            .build())
+            .build()?)
     }
 
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>> {
@@ -859,7 +856,8 @@ pub mod test {
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
-                .build();
+                .build()
+                .unwrap();
 
             prev_block = Some((*block).clone());
 
@@ -911,7 +909,8 @@ pub mod test {
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
-                .build();
+                .build()
+                .unwrap();
 
             prev_block = Some((*block).clone());
 
@@ -975,7 +974,8 @@ pub mod test {
                     .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                     .unwrap()
                     .with_miner_coinbase_extra(static_coinbase_extra.clone())
-                    .build();
+                    .build()
+                    .unwrap();
                 uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
@@ -985,9 +985,11 @@ pub mod test {
                 .with_miner_wallet_address(address.clone())
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
-                .with_uncles(&uncles).unwrap()
+                .with_uncles(&uncles)
+                .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
-                .build();
+                .build()
+                .unwrap();
 
             prev_block = Some((*block).clone());
 
@@ -1026,7 +1028,8 @@ pub mod test {
                 .with_height(i)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
-                .build();
+                .build()
+                .unwrap();
             prev_block = Some((*block).clone());
             blocks.push(block);
         }
@@ -1069,7 +1072,8 @@ pub mod test {
             .with_height(11)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .unwrap()
-            .build();
+            .build()
+            .unwrap();
         their_blocks.push((11, missing_block.hash));
 
         let res = chain

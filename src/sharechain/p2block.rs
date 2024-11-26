@@ -82,8 +82,6 @@ impl Default for P2Block {
 impl_conversions!(P2Block);
 
 impl P2Block {
-
-
     pub fn generate_hash(&self) -> BlockHash {
         DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
             .chain(&self.prev_hash)
@@ -131,6 +129,7 @@ impl P2Block {
 pub struct P2BlockBuilder {
     block: P2Block,
     use_specific_hash: bool,
+    added_target_difficulty: bool,
 }
 
 impl P2BlockBuilder {
@@ -148,7 +147,8 @@ impl P2BlockBuilder {
         }
         Self {
             use_specific_hash: false,
-            block
+            added_target_difficulty: false,
+            block,
         }
     }
 
@@ -157,13 +157,13 @@ impl P2BlockBuilder {
         self
     }
 
-
     pub fn with_height(mut self, height: u64) -> Self {
         self.block.height = height;
         self
     }
 
     pub fn with_target_difficulty(mut self, target_difficulty: Difficulty) -> Result<Self, ShareChainError> {
+        self.added_target_difficulty = true;
         self.block.target_difficulty = target_difficulty;
         self.block.total_pow = self
             .block
@@ -202,10 +202,22 @@ impl P2BlockBuilder {
         Ok(self)
     }
 
-    pub fn build(mut self) -> Arc<P2Block> {
+    pub fn build(mut self) -> Result<Arc<P2Block>, ShareChainError> {
         if !self.use_specific_hash {
             self.block.hash = self.block.generate_hash();
         }
-        Arc::new(self.block)
+        if !self.added_target_difficulty {
+            if self.block.prev_hash == BlockHash::zero() {
+                self.block.total_pow = AccumulatedDifficulty::from_u128(self.block.target_difficulty.as_u64() as u128).map_err(|_| ShareChainError::DifficultyOverflow)?;
+            } else {
+                self.block.total_pow = self
+                    .block
+                    .total_pow
+                    .checked_add_difficulty(self.block.target_difficulty)
+                    .ok_or(ShareChainError::DifficultyOverflow)?;
+            }
+        }
+        dbg!(self.block.total_pow);
+        Ok(Arc::new(self.block))
     }
 }
