@@ -147,7 +147,7 @@ where S: ShareChain
                     .map(|block| Arc::<P2Block>::unwrap_or_clone(block))
                     .collect();
                 new_blocks.append(&mut uncles);
-                if new_tip {
+                if new_tip.new_tip.is_some() {
                     let total_pow = share_chain.get_total_chain_pow().await;
                     let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks, total_pow);
                     let res = self

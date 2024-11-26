@@ -39,6 +39,8 @@ use crate::{
         ShareChain,
     },
 };
+use crate::sharechain::p2block::P2BlockBuilder;
+use crate::sharechain::p2chain::ChainAddResult;
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 // The max allowed uncles per block
@@ -175,7 +177,7 @@ impl InMemoryShareChain {
         block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
-    ) -> Result<bool, ShareChainError> {
+    ) -> Result<ChainAddResult, ShareChainError> {
         let new_block_p2pool_height = block.height;
 
         // Check if already added.
@@ -185,7 +187,7 @@ impl InMemoryShareChain {
 
                 info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo, block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
 
-                return Ok(false);
+                return Ok(ChainAddResult::default());
             }
         }
 
@@ -372,7 +374,7 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
             return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));
         }
@@ -393,28 +395,19 @@ impl ShareChain for InMemoryShareChain {
             p2_chain_write_lock.get_max_chain_length() as u64,
         );
         match &res {
-            Ok(false) => {
-                info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, no tip change", self.pow_algo, height)
-            },
-            Ok(true) => {
-                info!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully, tip changed", self.pow_algo, height)
-            },
-            Err(ShareChainError::BlockParentDoesNotExist { missing_parents }) => {
-                let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
-                info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_heights);
+            Ok(tip) => {
+                info!(target: LOG_TARGET, "[{:?}] ✅ added Block({}): {} ", self.pow_algo, height, tip)
             },
             Err(e) => warn!(target: LOG_TARGET, "Failed to add block from submit (height {}): {}", height, e),
         }
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, ShareChainError> {
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<ChainAddResult, ShareChainError> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
-        let mut new_tip = false;
 
         let mut blocks = blocks.to_vec();
         let mut known_blocks_incoming = Vec::new();
-        let mut missing_parents = HashMap::new();
         if !blocks.is_sorted_by_key(|block| block.height) {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
             //  return Err(ShareChainError::BlockValidation("Blocks are not sorted by height".to_string()));
@@ -422,6 +415,7 @@ impl ShareChain for InMemoryShareChain {
         for block in blocks.iter() {
             known_blocks_incoming.push(block.hash);
         }
+        let mut add_result = ChainAddResult::default();
 
         'outer: for block in blocks {
             if block.version != PROTOCOL_VERSION {
@@ -439,33 +433,38 @@ impl ShareChain for InMemoryShareChain {
                 .await
             {
                 Ok(tip_change) => {
-                    debug!(target: LOG_TARGET, "[{:?}] ✅ added Block: {:?} successfully. Tip changed: {}", self.pow_algo, height, tip_change);
-                    if tip_change {
-                        new_tip = true;
+                    debug!(target: LOG_TARGET, "[{:?}] ✅ added Block({}): {} ", self.pow_algo, height, tip_change);
+                    match (&mut add_result.new_tip, tip_change.new_tip){
+                        (Some(current_tip), Some(other_tip)) => {
+                            if other_tip.1 > current_tip.1 {
+                                add_result.new_tip = Some(other_tip);
+                            }
+                        },
+                        (None, Some(new_tip)) => {
+                            add_result.new_tip = Some(new_tip);
+                        },
+                        _ => {}
                     }
-                },
-                Err(e) => {
-                    if let ShareChainError::BlockParentDoesNotExist {
-                        missing_parents: new_missing_parents,
-                    } = e
-                    {
-                        for new_missing_parent in new_missing_parents {
-                            if known_blocks_incoming.contains(&new_missing_parent.1) {
+                    if !tip_change.missing_blocks.is_empty(){
+                        for missing_block in tip_change.missing_blocks.iter(){
+                            if known_blocks_incoming.contains(missing_block.0){
                                 continue;
                             }
-                            missing_parents.insert(new_missing_parent.1, new_missing_parent.0);
-                            if missing_parents.len() > MAX_MISSING_PARENTS {
+                            add_result.missing_blocks.insert(*missing_block.0, *missing_block.1);
+                            if add_result.missing_blocks.len() > MAX_MISSING_PARENTS {
                                 break 'outer;
                             }
                         }
-                    } else {
+                    }
+                },
+                Err(e) => {
+
                         warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
                         return Err(e);
-                    }
                 },
             }
         }
-        if new_tip {
+        if add_result.new_tip.is_some() {
             let _ = self.stat_client.send_chain_changed(
                 self.pow_algo,
                 p2_chain_write_lock.get_height(),
@@ -473,16 +472,10 @@ impl ShareChain for InMemoryShareChain {
             );
         }
 
-        if !missing_parents.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, missing_parents.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
-            return Err(ShareChainError::BlockParentDoesNotExist {
-                missing_parents: missing_parents
-                    .into_iter()
-                    .map(|(hash, height)| (height, hash))
-                    .collect(),
-            });
+        if !add_result.missing_blocks.is_empty() {
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, add_result.missing_blocks.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         }
-        Ok(new_tip)
+        Ok(add_result)
     }
 
     async fn tip_height(&self) -> Result<u64, ShareChainError> {
@@ -587,16 +580,14 @@ impl ShareChain for InMemoryShareChain {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
-        let (last_block_hash, new_height) = match chain_read_lock.get_tip() {
-            Some(tip) => {
-                let hash = match tip.block_in_main_chain() {
-                    Some(block) => block.hash,
-                    None => FixedHash::zero(),
-                };
-                (hash, tip.height.saturating_add(1))
+        let prev_block = match chain_read_lock.get_tip() {
+            Some(tip) => match tip.block_in_main_chain() {
+                Some(block) => block.clone(),
+                None => Arc::new(P2Block::default()),
             },
-            None => (FixedHash::zero(), 0),
+            None => Arc::new(P2Block::default()),
         };
+        let new_height = prev_block.height.saturating_add(1);
 
         // lets calculate the uncles
         // uncle rules are:
@@ -605,8 +596,9 @@ impl ShareChain for InMemoryShareChain {
         // 3. The uncle must link back to the main chain
         // 4. The chain height must be above 5
         let mut excluded_uncles: Vec<FixedHash> = vec![];
-        let mut uncles: Vec<(u64, FixedHash)> = vec![];
+        let mut uncles: Vec<Arc<P2Block>> = vec![];
         if new_height >= UNCLE_START_HEIGHT {
+            // gather potential uncles
             for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
                 if let Some(older_level) = chain_read_lock.level_at_height(height) {
                     let chain_block = older_level
@@ -614,54 +606,53 @@ impl ShareChain for InMemoryShareChain {
                         .ok_or(ShareChainError::BlockNotFound)?;
                     // Blocks in the main chain can't be uncles
                     excluded_uncles.push(chain_block.hash);
+                    // Blocks can only be an uncle once
                     for uncle in &chain_block.uncles {
                         excluded_uncles.push(uncle.1);
                     }
-                    for block in &older_level.blocks {
-                        uncles.push((height, *block.0));
+                    for block in older_level.blocks.values() {
+                        uncles.push(block.clone());
                     }
                 }
             }
+
             for uncle in &uncles {
-                if chain_read_lock.level_at_height(uncle.0).is_none() {
-                    excluded_uncles.push((*uncle.1).into());
+                if chain_read_lock.level_at_height(uncle.height).is_none() {
+                    excluded_uncles.push((*uncle.hash).into());
                     continue;
                 }
-                if let Some(level) = chain_read_lock.level_at_height(uncle.0) {
-                    if let Some(uncle_block) = level.blocks.get(&uncle.1) {
-                        let parent = match chain_read_lock.get_parent_block(uncle_block) {
-                            Some(parent) => parent,
-                            None => {
-                                excluded_uncles.push(uncle.1);
-                                continue;
-                            },
-                        };
-                        if chain_read_lock
-                            .level_at_height(parent.height)
-                            .ok_or(ShareChainError::BlockLevelNotFound)?
-                            .chain_block !=
-                            parent.hash
-                        {
-                            excluded_uncles.push(uncle.1);
-                        }
-                    } else {
-                        excluded_uncles.push(uncle.1);
-                    }
+
+                // parent block needs to exist
+                let parent = match chain_read_lock.get_parent_block(&*uncle) {
+                    Some(parent) => parent,
+                    None => {
+                        excluded_uncles.push(uncle.hash);
+                        continue;
+                    },
+                };
+                // parent needs to be in the current main chain
+                if chain_read_lock
+                    .level_at_height(parent.height)
+                    .ok_or(ShareChainError::BlockLevelNotFound)?
+                    .chain_block !=
+                    parent.hash
+                {
+                    excluded_uncles.push(uncle.hash);
                 }
             }
 
             // Remove excluded.
             for excluded in &excluded_uncles {
-                uncles.retain(|uncle| &uncle.1 != excluded);
+                uncles.retain(|uncle| &uncle.hash != excluded);
             }
+            //limit remaining to uncle limit
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2Block::builder()
+        Ok(P2BlockBuilder::new(Some(&prev_block))
             .with_timestamp(EpochTime::now())
-            .with_prev_hash(last_block_hash)
             .with_height(new_height)
-            .with_uncles(uncles)
+            .with_uncles(&uncles)?
             .with_miner_wallet_address(miner_address.clone())
             .with_miner_coinbase_extra(coinbase_extra)
             .build())
@@ -812,7 +803,7 @@ impl ShareChain for InMemoryShareChain {
 #[cfg(test)]
 pub mod test {
     use tari_common::configuration::Network;
-    use tari_common_types::{tari_address::TariAddressFeatures, types::BlockHash};
+    use tari_common_types::tari_address::TariAddressFeatures;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 
     use super::*;
@@ -855,22 +846,22 @@ pub mod test {
         .unwrap();
 
         let mut timestamp = EpochTime::now();
-        let mut prev_hash = BlockHash::zero();
+        let mut prev_block = None;
         let static_coinbase_extra = Vec::new();
 
         for i in 0..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2Block::builder()
+            let block = P2BlockBuilder::new(prev_block.as_ref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
-                .with_prev_hash(prev_hash)
+                .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
-            prev_hash = block.generate_hash();
+            prev_block = Some((*block).clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -903,7 +894,7 @@ pub mod test {
         .unwrap();
 
         let mut timestamp = EpochTime::now();
-        let mut prev_hash = BlockHash::zero();
+        let mut prev_block = None;
         let mut miners = Vec::new();
         for _ in 0..5 {
             let address = new_random_address();
@@ -913,16 +904,16 @@ pub mod test {
         for i in 0..15 {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2Block::builder()
+            let block = P2BlockBuilder::new(prev_block.as_ref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
-                .with_prev_hash(prev_hash)
+                .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
-            prev_hash = block.generate_hash();
+            prev_block = Some((*block).clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -955,7 +946,7 @@ pub mod test {
         .unwrap();
 
         let mut timestamp = EpochTime::now();
-        let mut prev_hash = BlockHash::zero();
+        let mut prev_block = None;
         let mut miners = Vec::new();
         for _ in 0..5 {
             let address = new_random_address();
@@ -967,36 +958,38 @@ pub mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 10 {
-                let prev_hash_uncle = share_chain
+                let prev_uncle = share_chain
                     .p2_chain
                     .read()
                     .await
                     .level_at_height(i as u64 - 2)
                     .unwrap()
-                    .chain_block;
+                    .block_in_main_chain()
+                    .unwrap()
+                    .clone();
                 // lets create an uncle block
-                let block = P2Block::builder()
+                let block = P2BlockBuilder::new(Some(&prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i as u64 - 1)
                     .with_miner_wallet_address(address.clone())
                     .with_target_difficulty(Difficulty::from_u64(1).unwrap())
-                    .with_prev_hash(prev_hash_uncle)
+                    .unwrap()
                     .with_miner_coinbase_extra(static_coinbase_extra.clone())
                     .build();
-                uncles.push((i as u64 - 1, block.hash));
+                uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
-            let block = P2Block::builder()
+            let block = P2BlockBuilder::new(prev_block.as_ref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
-                .with_uncles(uncles)
-                .with_prev_hash(prev_hash)
+                .unwrap()
+                .with_uncles(&uncles).unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build();
 
-            prev_hash = block.generate_hash();
+            prev_block = Some((*block).clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -1027,14 +1020,14 @@ pub mod test {
     async fn test_request_sync_starts_from_highest_match() {
         let chain = new_chain();
         let mut blocks = Vec::new();
-        let mut prev_hash = BlockHash::zero();
+        let mut prev_block = None;
         for i in 0..10 {
-            let block = P2Block::builder()
+            let block = P2BlockBuilder::new(prev_block.as_ref())
                 .with_height(i)
-                .with_prev_hash(prev_hash)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
+                .unwrap()
                 .build();
-            prev_hash = block.generate_hash();
+            prev_block = Some((*block).clone());
             blocks.push(block);
         }
         chain.add_synced_blocks(&blocks).await.unwrap();
@@ -1072,12 +1065,11 @@ pub mod test {
         assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
-        let missing_block = P2Block::builder()
+        let missing_block = P2BlockBuilder::new(prev_block.as_ref())
             .with_height(11)
-            .with_prev_hash(prev_hash)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+            .unwrap()
             .build();
-        // prev_hash = block.generate_hash();
         their_blocks.push((11, missing_block.hash));
 
         let res = chain

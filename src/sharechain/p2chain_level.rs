@@ -56,7 +56,7 @@ impl P2ChainLevel {
         }
     }
 
-    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), crate::sharechain::error::ShareChainError> {
+    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
         if self.height != block.height {
             return Err(ShareChainError::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
@@ -74,13 +74,14 @@ impl P2ChainLevel {
 #[cfg(test)]
 mod test {
     use tari_utilities::epoch_time::EpochTime;
+    use crate::sharechain::p2block::P2BlockBuilder;
 
-    use crate::sharechain::{in_memory::test::new_random_address, p2block::P2Block, p2chain_level::P2ChainLevel};
+    use crate::sharechain::{in_memory::test::new_random_address, p2chain_level::P2ChainLevel};
 
     #[test]
     fn it_gets_the_block_chain() {
         let address = new_random_address();
-        let block = P2Block::builder()
+        let block = P2BlockBuilder::new(None)
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address.clone())
@@ -92,12 +93,10 @@ mod test {
             chain_level.block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
-
-        let block_2 = P2Block::builder()
+        // this is not correct, but we want the hashes to be different from the blocks
+        let block_2 = P2BlockBuilder::new(Some(&block))
             .with_timestamp(EpochTime::now())
             .with_height(0)
-            // this is not correct, but we want the hashes to be different from the blocks
-            .with_prev_hash(block.generate_hash())
             .with_miner_wallet_address(address.clone())
             .build();
 
@@ -107,11 +106,10 @@ mod test {
             block.generate_hash()
         );
 
-        let block_3 = P2Block::builder()
+        // this is not correct, but we want the hashes to be different from the blocks
+        let block_3 = P2BlockBuilder::new(Some(&block_2))
             .with_timestamp(EpochTime::now())
             .with_height(0)
-            // this is not correct, but we want the hashes to be different from the blocks
-            .with_prev_hash(block_2.generate_hash())
             .with_miner_wallet_address(address)
             .build();
 

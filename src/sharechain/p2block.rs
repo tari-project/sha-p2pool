@@ -15,7 +15,7 @@ use tari_common_types::{
 use tari_core::{
     blocks::{genesis_block::get_genesis_block, Block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
-    proof_of_work::Difficulty,
+    proof_of_work::{AccumulatedDifficulty, Difficulty},
     transactions::transaction_components::TransactionOutput,
 };
 use tari_script::script;
@@ -55,13 +55,34 @@ pub(crate) struct P2Block {
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
     pub verified: bool,
+    pub total_pow: AccumulatedDifficulty,
+}
+
+impl Default for P2Block {
+    fn default() -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            hash: Default::default(),
+            timestamp: EpochTime::now(),
+            prev_hash: Default::default(),
+            height: 0,
+            original_header: BlockHeader::new(0),
+            coinbases: Vec::new(),
+            other_output_hash: Default::default(),
+            miner_wallet_address: Default::default(),
+            sent_to_main_chain: false,
+            target_difficulty: Difficulty::min(),
+            uncles: Vec::new(),
+            miner_coinbase_extra: vec![],
+            verified: false,
+            total_pow: AccumulatedDifficulty::default(),
+        }
+    }
 }
 impl_conversions!(P2Block);
 
 impl P2Block {
-    pub fn builder() -> BlockBuilder {
-        BlockBuilder::new()
-    }
+
 
     pub fn generate_hash(&self) -> BlockHash {
         DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
@@ -74,6 +95,7 @@ impl P2Block {
             .chain(&self.target_difficulty)
             .chain(&self.uncles)
             .chain(&self.miner_coinbase_extra)
+            .chain(&self.total_pow.as_u128())
             .finalize()
             .into()
     }
@@ -106,31 +128,27 @@ impl P2Block {
     }
 }
 
-pub(crate) struct BlockBuilder {
+pub struct P2BlockBuilder {
     block: P2Block,
     use_specific_hash: bool,
 }
 
-impl BlockBuilder {
-    pub fn new() -> Self {
+impl P2BlockBuilder {
+    pub fn new(prev_block: Option<&P2Block>) -> Self {
+        let mut block = P2Block::default();
+        match prev_block {
+            Some(prev_block) => {
+                block.prev_hash = prev_block.hash;
+                block.total_pow = prev_block.total_pow.clone();
+            },
+            None => {
+                block.prev_hash = BlockHash::zero();
+                block.total_pow = AccumulatedDifficulty::default();
+            },
+        }
         Self {
             use_specific_hash: false,
-            block: P2Block {
-                version: PROTOCOL_VERSION,
-                hash: Default::default(),
-                timestamp: EpochTime::now(),
-                prev_hash: Default::default(),
-                height: 0,
-                original_header: BlockHeader::new(0),
-                coinbases: Vec::new(),
-                other_output_hash: Default::default(),
-                miner_wallet_address: Default::default(),
-                sent_to_main_chain: false,
-                target_difficulty: Difficulty::min(),
-                uncles: Vec::new(),
-                miner_coinbase_extra: vec![],
-                verified: false,
-            },
+            block
         }
     }
 
@@ -139,19 +157,20 @@ impl BlockBuilder {
         self
     }
 
-    pub fn with_prev_hash(mut self, prev_hash: BlockHash) -> Self {
-        self.block.prev_hash = prev_hash;
-        self
-    }
 
     pub fn with_height(mut self, height: u64) -> Self {
         self.block.height = height;
         self
     }
 
-    pub fn with_target_difficulty(mut self, target_difficulty: Difficulty) -> Self {
+    pub fn with_target_difficulty(mut self, target_difficulty: Difficulty) -> Result<Self, ShareChainError> {
         self.block.target_difficulty = target_difficulty;
-        self
+        self.block.total_pow = self
+            .block
+            .total_pow
+            .checked_add_difficulty(target_difficulty)
+            .ok_or(ShareChainError::DifficultyOverflow)?;
+        Ok(self)
     }
 
     pub fn with_tari_block(mut self, block: Block) -> Result<Self, ShareChainError> {
@@ -169,9 +188,18 @@ impl BlockBuilder {
         self
     }
 
-    pub fn with_uncles(mut self, uncles: Vec<(u64, BlockHash)>) -> Self {
-        self.block.uncles = uncles;
-        self
+    pub fn with_uncles(mut self, uncles: &Vec<Arc<P2Block>>) -> Result<Self, ShareChainError> {
+        let mut block_uncles = Vec::new();
+        for uncle in uncles {
+            block_uncles.push((uncle.height, uncle.hash));
+            self.block.total_pow = self
+                .block
+                .total_pow
+                .checked_add_difficulty(uncle.target_difficulty)
+                .ok_or(ShareChainError::DifficultyOverflow)?;
+        }
+        self.block.uncles = block_uncles;
+        Ok(self)
     }
 
     pub fn build(mut self) -> Arc<P2Block> {

@@ -31,6 +31,7 @@ use tari_core::{
 };
 
 use crate::sharechain::{error::ShareChainError, p2block::P2Block};
+use crate::sharechain::p2chain::ChainAddResult;
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
@@ -95,10 +96,10 @@ impl BlockValidationParams {
 pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError>;
+    async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<bool, ShareChainError>;
+    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<ChainAddResult, ShareChainError>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, ShareChainError>;

@@ -37,12 +37,14 @@ pub enum ShareChainError {
     BlockLevelNotFound,
     #[error("Validation error: {0}")]
     ValidationError(#[from] ValidationError),
-    #[error("Missing parents")]
-    BlockParentDoesNotExist { missing_parents: Vec<(u64, FixedHash)> },
     #[error("Missing block validation params!")]
     MissingBlockValidationParams,
     #[error("Uncle block was in main chain. Height: {height}, Hash: {hash}")]
     UncleInMainChain { height: u64, hash: FixedHash },
+    #[error("Uncle block does not link back to main chain")]
+    UncleParentNotInMainChain,
+    #[error("Block does not have correct total work accumulated")]
+    BlockTotalWorkMismatch,
 }
 
 #[derive(Error, Debug)]
