@@ -443,7 +443,6 @@ where S: ShareChain
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
     async fn broadcast_block(&mut self, result: Result<NotifyNewTipBlock, RecvError>) {
-        dbg!("Broadcast block");
         // if self.sync_in_progress.load(Ordering::SeqCst) {
         //     return;
         // }
@@ -1702,8 +1701,6 @@ where S: ShareChain
     }
 
     async fn attempt_relay_reservation(&mut self) {
-        dbg!("Attempt relay reservation");
-
         // Can happen that a previous lock already set the relaty
         if self.swarm.external_addresses().count() > 0 {
             warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");

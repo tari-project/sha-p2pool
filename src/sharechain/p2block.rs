@@ -203,12 +203,10 @@ impl P2BlockBuilder {
     }
 
     pub fn build(mut self) -> Result<Arc<P2Block>, ShareChainError> {
-        if !self.use_specific_hash {
-            self.block.hash = self.block.generate_hash();
-        }
-        if !self.added_target_difficulty {
+        if !self.added_target_difficulty || self.block.prev_hash == BlockHash::zero() {
             if self.block.prev_hash == BlockHash::zero() {
-                self.block.total_pow = AccumulatedDifficulty::from_u128(self.block.target_difficulty.as_u64() as u128).map_err(|_| ShareChainError::DifficultyOverflow)?;
+                self.block.total_pow = AccumulatedDifficulty::from_u128(self.block.target_difficulty.as_u64() as u128)
+                    .map_err(|_| ShareChainError::DifficultyOverflow)?;
             } else {
                 self.block.total_pow = self
                     .block
@@ -217,7 +215,9 @@ impl P2BlockBuilder {
                     .ok_or(ShareChainError::DifficultyOverflow)?;
             }
         }
-        dbg!(self.block.total_pow);
+        if !self.use_specific_hash {
+            self.block.hash = self.block.generate_hash();
+        }
         Ok(Arc::new(self.block))
     }
 }
