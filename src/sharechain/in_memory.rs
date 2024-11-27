@@ -577,14 +577,11 @@ impl ShareChain for InMemoryShareChain {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
-        let prev_block = match chain_read_lock.get_tip() {
-            Some(tip) => match tip.block_in_main_chain() {
-                Some(block) => block.clone(),
-                None => Arc::new(P2Block::default()),
-            },
-            None => Arc::new(P2Block::default()),
+        let prev_block = chain_read_lock.get_tip().map(|tip| tip.block_in_main_chain()).flatten();
+        let new_height = match prev_block {
+            Some(prev_block) => prev_block.height.saturating_add(1),
+            None => 0,
         };
-        let new_height = prev_block.height.saturating_add(1);
 
         // lets calculate the uncles
         // uncle rules are:
@@ -646,7 +643,7 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2BlockBuilder::new(Some(&prev_block))
+        Ok(P2BlockBuilder::new(prev_block)
             .with_timestamp(EpochTime::now())
             .with_height(new_height)
             .with_uncles(&uncles)?
@@ -859,7 +856,7 @@ pub mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -912,7 +909,7 @@ pub mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -991,7 +988,7 @@ pub mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             share_chain.submit_block(block).await.unwrap();
         }
@@ -1030,7 +1027,7 @@ pub mod test {
                 .unwrap()
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             blocks.push(block);
         }
         chain.add_synced_blocks(&blocks).await.unwrap();
@@ -1085,5 +1082,38 @@ pub mod test {
         assert_eq!(res.len(), 2);
         let heights = res.iter().map(|block| block.height).collect::<Vec<u64>>();
         assert_eq!(heights, vec![8, 9]);
+    }
+
+    #[tokio::test]
+    async fn chain_start() {
+        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+        let share_chain = InMemoryShareChain::new(
+            PowAlgorithm::Sha3x,
+            None,
+            consensus_manager,
+            coinbase_extras,
+            stats_broadcast_client,
+        )
+        .unwrap();
+
+        let mut timestamp = EpochTime::now();
+        let static_coinbase_extra = Vec::new();
+        let mut new_tip = share_chain
+            .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())
+            .await
+            .unwrap();
+        assert_eq!(new_tip.height, 0);
+        share_chain.submit_block(new_tip).await.unwrap();
+        for i in 1..10 {
+            new_tip = share_chain
+                .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())
+                .await
+                .unwrap();
+            assert_eq!(new_tip.height, i);
+            share_chain.submit_block(new_tip).await.unwrap();
+        }
     }
 }

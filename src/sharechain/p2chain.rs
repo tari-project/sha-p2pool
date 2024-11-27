@@ -836,7 +836,7 @@ mod test {
                 .unwrap()
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block.clone()).unwrap();
         }
@@ -870,7 +870,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -898,7 +898,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
             assert!(chain.get_tip().is_none());
         }
@@ -945,7 +945,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             blocks.push(block.clone());
         }
         chain.add_block_to_chain(blocks[6].clone()).unwrap();
@@ -988,7 +988,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             blocks.push(block.clone());
         }
         for i in 0..9 {
@@ -1029,7 +1029,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             blocks.push(block.clone());
         }
         tari_block.header.nonce = 55;
@@ -1095,7 +1095,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -1111,7 +1111,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        prev_block = Some((*block).clone());
+        prev_block = Some(block.clone());
         let address = new_random_address();
         let block = P2BlockBuilder::new(prev_block.as_ref())
             .with_timestamp(EpochTime::now())
@@ -1121,7 +1121,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        prev_block = Some((*block).clone());
+        prev_block = Some(block.clone());
 
         chain.add_block_to_chain(block.clone()).unwrap();
 
@@ -1137,7 +1137,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        prev_block = Some((*block).clone());
+        prev_block = Some(block.clone());
         let address = new_random_address();
         let block = P2BlockBuilder::new(prev_block.as_ref())
             .with_timestamp(EpochTime::now())
@@ -1172,7 +1172,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
         }
 
@@ -1207,7 +1207,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block).unwrap();
 
@@ -1242,7 +1242,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block).unwrap();
         }
         let level = chain.get_tip().unwrap();
@@ -1259,7 +1259,7 @@ mod test {
         );
 
         let block_29 = chain.level_at_height(29).unwrap().block_in_main_chain().unwrap();
-        prev_block = Some((**block_29).clone());
+        prev_block = Some((*block_29).clone());
         timestamp = block_29.timestamp;
 
         let address = new_random_address();
@@ -1276,7 +1276,7 @@ mod test {
             .build()
             .unwrap();
 
-        prev_block = Some((*block).clone());
+        prev_block = Some(block.clone());
 
         chain.add_block_to_chain(block).unwrap();
         let level = chain.get_tip().unwrap();
@@ -1333,7 +1333,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block).unwrap();
         }
@@ -1379,7 +1379,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block).unwrap();
         }
@@ -1431,7 +1431,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block).unwrap();
         }
@@ -1483,7 +1483,7 @@ mod test {
                 .build()
                 .unwrap();
 
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block).unwrap();
         }
@@ -1503,7 +1503,7 @@ mod test {
             .unwrap();
         uncles.push(block.clone());
         chain.add_block_to_chain(block).unwrap();
-        prev_block = Some((**chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
+        prev_block = Some((*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
         let block = P2BlockBuilder::new(prev_block.as_ref())
             .with_timestamp(timestamp)
             .with_height(8)
@@ -1572,7 +1572,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -1598,7 +1598,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -1634,7 +1634,7 @@ mod test {
                 .with_miner_wallet_address(address.clone())
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -1647,7 +1647,7 @@ mod test {
         assert_eq!(chain.level_at_height(9).unwrap().chain_block, prev_block.unwrap().hash);
 
         // lets create a new tip to reorg to branching off 2 from the tip
-        let mut prev_block = Some((**chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
+        let mut prev_block = Some((*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
 
         tari_block.header.nonce = 100;
@@ -1662,7 +1662,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        prev_block = Some((*block).clone());
+        prev_block = Some(block.clone());
         assert_eq!(chain.add_block_to_chain(block.clone()).unwrap().missing_blocks.len(), 0);
 
         let level = chain.get_tip().unwrap();
@@ -1702,7 +1702,7 @@ mod test {
                 .unwrap()
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
@@ -1741,7 +1741,7 @@ mod test {
                 .unwrap()
                 .build()
                 .unwrap();
-            prev_block = Some((*block).clone());
+            prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
 
             let level = chain.get_tip().unwrap();
