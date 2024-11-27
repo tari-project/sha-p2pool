@@ -2200,7 +2200,7 @@ where S: ShareChain
                     &b.height,
                     &b.hash.to_hex()[0..8],
                     if b.verified { "v" } else { "x" },
-                    formatter.format(b.target_difficulty.as_u64() as f64)
+                    formatter.format(b.target_difficulty().as_u64() as f64)
                 )
                 .as_bytes(),
             )

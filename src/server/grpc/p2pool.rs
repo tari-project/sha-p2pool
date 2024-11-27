@@ -275,8 +275,9 @@ where S: ShareChain
                     .insert(height, actual_diff),
             };
             let target_difficulty = share_chain.get_target_difficulty(height).await;
-            new_tip_block.target_difficulty = target_difficulty;
-            new_tip_block.fix_hash();
+            new_tip_block
+                .change_target_difficulty(target_difficulty)
+                .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
 
             if let Some(miner_data) = response.miner_data.as_mut() {
                 match Difficulty::from_u64(miner_data.target_difficulty) {

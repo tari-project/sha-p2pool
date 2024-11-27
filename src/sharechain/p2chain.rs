@@ -150,7 +150,7 @@ impl P2Chain {
         match self.get_tip() {
             Some(tip) => tip
                 .block_in_main_chain()
-                .map(|block| block.total_pow)
+                .map(|block| block.total_pow())
                 .unwrap_or(AccumulatedDifficulty::min()),
             None => AccumulatedDifficulty::min(),
         }
@@ -222,7 +222,7 @@ impl P2Chain {
         // edge case for first block
         // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
         // the newly added block == 0
-        self.lwma.add_back(block.timestamp, block.target_difficulty);
+        self.lwma.add_back(block.timestamp, block.target_difficulty());
         let level = self
             .level_at_height_mut(new_height)
             .ok_or(ShareChainError::BlockLevelNotFound)?;
@@ -417,13 +417,13 @@ impl P2Chain {
                 let next_level_data = self.calculate_next_level_data(new_block_height, hash);
                 return Ok((new_tip, next_level_data));
             }
-            if block.total_pow > self.total_accumulated_tip_difficulty() {
+            if block.total_pow() > self.total_accumulated_tip_difficulty() {
                 new_tip.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
                     .expect("Failed to create LWMA");
-                self.lwma.add_front(block.timestamp, block.target_difficulty);
+                self.lwma.add_front(block.timestamp, block.target_difficulty());
                 let chain_height = self
                     .level_at_height_mut(block.height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
@@ -458,7 +458,7 @@ impl P2Chain {
                         mut_parent_level.chain_block = current_block.prev_hash;
                         current_block = nextblock.unwrap().clone();
                         self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
+                            .add_front(current_block.timestamp, current_block.target_difficulty());
                     } else if !self.lwma.is_full() {
                         // we still need more blocks to fill up the lwma
                         let nextblock = parent_level.blocks.get(&current_block.prev_hash);
@@ -473,7 +473,7 @@ impl P2Chain {
                         current_block = nextblock.unwrap().clone();
 
                         self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
+                            .add_front(current_block.timestamp, current_block.target_difficulty());
                     } else {
                         break;
                     }
@@ -527,20 +527,20 @@ impl P2Chain {
         let mut verified = true;
 
         // lets check the total accumulated difficulty
-        let mut total_work = AccumulatedDifficulty::from_u128(block.target_difficulty.as_u64() as u128)
+        let mut total_work = AccumulatedDifficulty::from_u128(block.target_difficulty().as_u64() as u128)
             .expect("Difficulty will always fit into accumulated difficulty");
         for uncle in block.uncles.iter() {
             let uncle_block = self
                 .get_block_at_height(uncle.0, &uncle.1)
                 .ok_or(ShareChainError::BlockNotFound)?;
             total_work = total_work
-                .checked_add_difficulty(uncle_block.target_difficulty)
+                .checked_add_difficulty(uncle_block.target_difficulty())
                 .ok_or(ShareChainError::DifficultyOverflow)?;
         }
 
         // special edge case for start, there is no parent
         if height == 0 {
-            if block.total_pow.as_u128() != total_work.as_u128() {
+            if block.total_pow().as_u128() != total_work.as_u128() {
                 return Err(ShareChainError::BlockTotalWorkMismatch);
             }
             let mut actual_block = block.deref().clone();
@@ -557,7 +557,7 @@ impl P2Chain {
             .get_block_at_height(block.height.saturating_sub(1), &block.prev_hash)
             .ok_or(ShareChainError::BlockNotFound)?;
 
-        if block.total_pow.as_u128() != parent.total_pow.as_u128() + total_work.as_u128() {
+        if block.total_pow().as_u128() != parent.total_pow().as_u128() + total_work.as_u128() {
             return Err(ShareChainError::BlockTotalWorkMismatch);
         }
 
@@ -1213,7 +1213,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(
-                level.block_in_main_chain().unwrap().target_difficulty,
+                level.block_in_main_chain().unwrap().target_difficulty(),
                 Difficulty::from_u64(i + 1).unwrap()
             );
         }
@@ -1248,7 +1248,7 @@ mod test {
         let level = chain.get_tip().unwrap();
         let tip_hash = level.block_in_main_chain().unwrap().generate_hash();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty,
+            level.block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 31);
@@ -1303,7 +1303,7 @@ mod test {
         // now it should be the new tip
         assert_ne!(tip_hash, level.block_in_main_chain().unwrap().generate_hash());
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty,
+            level.block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(32).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 31 * 2);
@@ -1385,7 +1385,7 @@ mod test {
         }
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty,
+            level.block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().height, 9);
@@ -1437,7 +1437,7 @@ mod test {
         }
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty,
+            level.block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().height, 19);
@@ -1543,7 +1543,7 @@ mod test {
         chain.add_block_to_chain(block).unwrap();
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty,
+            level.block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(11).unwrap()
         );
         assert_eq!(level.block_in_main_chain().unwrap().height, 9);

@@ -49,13 +49,13 @@ pub(crate) struct P2Block {
     pub other_output_hash: FixedHash,
     pub miner_wallet_address: TariAddress,
     pub sent_to_main_chain: bool,
-    pub target_difficulty: Difficulty,
+    target_difficulty: Difficulty,
     // list of uncles blocks confirmed by this block
     // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
     pub verified: bool,
-    pub total_pow: AccumulatedDifficulty,
+    total_pow: AccumulatedDifficulty,
 }
 
 impl Default for P2Block {
@@ -96,6 +96,28 @@ impl P2Block {
             .chain(&self.total_pow.as_u128())
             .finalize()
             .into()
+    }
+
+    pub fn change_target_difficulty(&mut self, target_difficulty: Difficulty) -> Result<(), ShareChainError> {
+        self.total_pow = self
+            .total_pow
+            .checked_add_difficulty(target_difficulty)
+            .ok_or(ShareChainError::DifficultyOverflow)?;
+        self.total_pow = self
+            .total_pow
+            .checked_sub_difficulty(self.target_difficulty)
+            .ok_or(ShareChainError::DifficultyOverflow)?;
+        self.target_difficulty = target_difficulty;
+        self.fix_hash();
+        Ok(())
+    }
+
+    pub fn target_difficulty(&self) -> Difficulty {
+        self.target_difficulty
+    }
+
+    pub fn total_pow(&self) -> AccumulatedDifficulty {
+        self.total_pow
     }
 
     pub fn fix_hash(&mut self) {
@@ -219,5 +241,43 @@ impl P2BlockBuilder {
             self.block.hash = self.block.generate_hash();
         }
         Ok(Arc::new(self.block))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use tari_core::proof_of_work::Difficulty;
+    use tari_utilities::epoch_time::EpochTime;
+
+    use crate::sharechain::p2block::P2BlockBuilder;
+
+    #[test]
+    fn correctly_updates_block_target_difficulty() {
+        let time = EpochTime::now();
+        let block = (*P2BlockBuilder::new(None)
+            .with_timestamp(time)
+            .with_height(0)
+            .with_target_difficulty(Difficulty::from_u64(15).unwrap())
+            .unwrap()
+            .build()
+            .unwrap())
+        .clone();
+
+        let mut block2 = (*P2BlockBuilder::new(None)
+            .with_timestamp(time)
+            .with_height(0)
+            .with_target_difficulty(Difficulty::from_u64(5).unwrap())
+            .unwrap()
+            .build()
+            .unwrap())
+        .clone();
+
+        assert_ne!(block, block2);
+
+        block2
+            .change_target_difficulty(Difficulty::from_u64(15).unwrap())
+            .unwrap();
+
+        assert_eq!(block, block2);
     }
 }

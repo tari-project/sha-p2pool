@@ -175,7 +175,7 @@ pub(crate) async fn handle_chain(
             height: block.height,
             miner_wallet_address: block.miner_wallet_address.to_base58(),
             sent_to_main_chain: block.sent_to_main_chain,
-            target_difficulty: block.target_difficulty.as_u64(),
+            target_difficulty: block.target_difficulty().as_u64(),
             candidate_block_height: block.original_header.height,
             algo: pow_algo.to_string().to_lowercase(),
         });

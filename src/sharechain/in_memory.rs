@@ -134,8 +134,8 @@ impl InMemoryShareChain {
             },
             PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?,
         };
-        if curr_difficulty < block.target_difficulty {
-            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty, curr_difficulty);
+        if curr_difficulty < block.target_difficulty() {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty(), curr_difficulty);
             return Err(ValidationError::DifficultyTarget);
         }
 
@@ -1099,7 +1099,6 @@ pub mod test {
         )
         .unwrap();
 
-        let mut timestamp = EpochTime::now();
         let static_coinbase_extra = Vec::new();
         let mut new_tip = share_chain
             .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())
