@@ -676,8 +676,8 @@ where S: ShareChain
                                             return Ok(MessageAcceptance::Accept);
                                         }
 
-                                        if our_tip.saturating_sub(10) < max_payload_height ||
-                                            our_tip.saturating_add(5) > max_payload_height
+                                        if our_tip < max_payload_height.saturating_sub(10) ||
+                                            our_tip > max_payload_height.saturating_add(5)
                                         {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
                                             return Ok(MessageAcceptance::Accept);
