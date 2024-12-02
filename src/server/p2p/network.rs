@@ -642,7 +642,7 @@ where S: ShareChain
                                             our_tip > max_payload_height.saturating_add(5)
                                         {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
-                                            return Ok(MessageAcceptance::Ignore);
+                                            return Ok(MessageAcceptance::Accept);
                                         }
                                         info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
                                         let sync_share_chain = SyncShareChain {
@@ -654,7 +654,7 @@ where S: ShareChain
 
                                         let _unused =
                                             self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                                        return Ok(MessageAcceptance::Ignore);
+                                        return Ok(MessageAcceptance::Accept);
                                     }
                                 },
                                 Err(error) => {
