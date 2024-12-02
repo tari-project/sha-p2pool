@@ -1005,7 +1005,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, sync_share_chain: SyncShareChain) {
+    async fn sync_missing_blocks(&mut self, sync_share_chain: SyncShareChain) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
         let SyncShareChain {
             peer,
@@ -1037,23 +1037,32 @@ where S: ShareChain
         // };
 
         // ask our connected peers rather than everyone swarming the original peer
-        let mut sent_to_original_peer = false;
+        // let mut sent_to_original_peer = false;
         let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
+        let read_lock = self.network_peer_store.read().await;
+        let min_height = missing_parents.iter().map(|(height, _)| height).min().unwrap_or(&0);
         for connected_peer in connected_peers {
-            if connected_peer == peer {
-                sent_to_original_peer = true;
+            if let Some(p) = read_lock.get(&connected_peer) {
+                match algo {
+                    PowAlgorithm::RandomX => {
+                        if p.peer_info.current_random_x_height.saturating_sub(10) < *min_height {
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for RandomX sync", connected_peer);
+                            continue;
+                        }
+                    },
+                    PowAlgorithm::Sha3x => {
+                        if p.peer_info.current_sha3x_height.saturating_sub(10) < *min_height {
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for Sha3x sync", connected_peer);
+                            continue;
+                        }
+                    },
+                }
             }
+
             let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
                 &connected_peer,
                 SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
             );
-        }
-        if !sent_to_original_peer && !is_from_new_block_notify {
-            let _outbound_id = self
-                .swarm
-                .behaviour_mut()
-                .share_chain_sync
-                .send_request(&peer, SyncMissingBlocksRequest::new(algo, missing_parents.clone()));
         }
     }
 
@@ -1874,7 +1883,7 @@ where S: ShareChain
     async fn handle_inner_request(&mut self, req: InnerRequest) {
         match req {
             InnerRequest::DoSyncChain(sync_chain) => {
-                self.sync_share_chain(sync_chain).await;
+                self.sync_missing_blocks(sync_chain).await;
             },
             InnerRequest::PerformCatchUpSync(perform_catch_up_sync) => {
                 if let Err(e) = self.perform_catch_up_sync(perform_catch_up_sync).await {
@@ -1964,9 +1973,9 @@ where S: ShareChain
                              && !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _unused = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
-                                // We can only do 80 connections
-                                // Dropping outbound because at capacity
-                                if num_dialed > 80 {
+                                // We can only do 30 connections
+                                // after 30 it starts cancelling dials
+                                if num_dialed > 30 {
                                     break;
                                 }
                             }
