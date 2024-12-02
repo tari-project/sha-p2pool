@@ -41,7 +41,6 @@ libp2p = {git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918c
   "ping",
   "quic",
 ]}
-libp2p-peersync = {git = "https://github.com/tari-project/tari-dan.git", branch = "development"}
 log = {version = "0.4.21", features = ["kv"]}
 log4rs = "1.3.0"
 minotari_app_grpc = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
