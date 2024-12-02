@@ -269,22 +269,14 @@ impl P2Chain {
         // do we know of the parent
         // we should not check the chain start for parents
         if block.height != 0 {
-            let mut is_parent_missing = false;
-            let mut is_parent_in_main_chain = false;
             if self
                 .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
                 .is_none()
             {
-                is_parent_missing = true;
                 // we dont know the parent
                 new_tip
                     .missing_blocks
                     .insert(block.prev_hash, new_block_height.saturating_sub(1));
-            } else {
-                is_parent_in_main_chain = self
-                    .level_at_height(new_block_height.saturating_sub(1))
-                    .map(|level| level.chain_block == block.prev_hash)
-                    .unwrap_or(false);
             }
             // now lets check the uncles
             for uncle in &block.uncles {

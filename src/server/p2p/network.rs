@@ -8,7 +8,6 @@ use std::{
     hash::Hash,
     io::Write,
     net::IpAddr,
-    num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -202,14 +201,6 @@ struct SyncShareChain {
     pub peer: PeerId,
     pub missing_parents: Vec<(u64, FixedHash)>,
     pub is_from_new_block_notify: bool,
-}
-
-struct CatchUpSync {
-    pub algo: PowAlgorithm,
-    pub our_peer_id: PeerId,
-    pub blocks: Vec<Arc<P2Block>>,
-    pub tip: (u64, FixedHash),
-    pub achieved_pow: u128,
 }
 
 struct PerformCatchUpSync {
@@ -774,7 +765,8 @@ where S: ShareChain
     ) {
         if request.my_info.version != PROTOCOL_VERSION {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", request.peer_id);
-            self.swarm
+            let _ = self
+                .swarm
                 .behaviour_mut()
                 .direct_peer_exchange
                 .send_response(channel, Err("Peer has an outdated version".to_string()))
@@ -919,7 +911,6 @@ where S: ShareChain
         from: &PeerId,
     ) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request of len: {}", request.missing_blocks().len());
-        let tx = self.inner_request_tx.clone();
         let share_chain = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -1405,7 +1396,6 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let tx = self.inner_request_tx.clone();
         let squad = self.config.squad.clone();
 
         let (blocks, our_tip, our_achieved_pow) = match share_chare
