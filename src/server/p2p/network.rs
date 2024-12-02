@@ -1041,17 +1041,25 @@ where S: ShareChain
         let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
         let read_lock = self.network_peer_store.read().await;
         let min_height = missing_parents.iter().map(|(height, _)| height).min().unwrap_or(&0);
+        let mut peers_asked = 0;
+        let mut highest_peer_height = 0;
         for connected_peer in connected_peers {
             if let Some(p) = read_lock.get(&connected_peer) {
                 match algo {
                     PowAlgorithm::RandomX => {
-                        if p.peer_info.current_random_x_height.saturating_sub(10) < *min_height {
+                        if p.peer_info.current_random_x_height > highest_peer_height {
+                            highest_peer_height = p.peer_info.current_random_x_height;
+                        }
+                        if p.peer_info.current_random_x_height.saturating_add(20) < *min_height {
                             info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for RandomX sync", connected_peer);
                             continue;
                         }
                     },
                     PowAlgorithm::Sha3x => {
-                        if p.peer_info.current_sha3x_height.saturating_sub(10) < *min_height {
+                        if p.peer_info.current_sha3x_height > highest_peer_height {
+                            highest_peer_height = p.peer_info.current_sha3x_height;
+                        }
+                        if p.peer_info.current_sha3x_height.saturating_add(20) < *min_height {
                             info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for Sha3x sync", connected_peer);
                             continue;
                         }
@@ -1063,6 +1071,11 @@ where S: ShareChain
                 &connected_peer,
                 SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
             );
+            peers_asked += 1;
+        }
+
+        if peers_asked == 0 {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "[{}] No connected peers had a high enough chain to ask for this missing block. Highest peer height:{}", algo, highest_peer_height);
         }
     }
 
