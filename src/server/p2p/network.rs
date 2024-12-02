@@ -485,9 +485,9 @@ where S: ShareChain
 
     /// Subscribes to all topics we need.
     async fn subscribe_to_topics(&mut self) {
-        // if self.config.is_seed_peer {
-        //     return;
-        // }
+        if self.config.is_seed_peer {
+            return;
+        }
         self.subscribe(PEER_INFO_TOPIC, true);
         self.subscribe(BLOCK_NOTIFY_TOPIC, true);
     }
@@ -570,25 +570,17 @@ where S: ShareChain
                             }
                             let payload = Arc::new(payload);
                             let message_peer = payload.peer_id();
-                            if message_peer.to_string() != source_peer.to_string() {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
-                            }
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> [{}] Blocks: {}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","));
-
-                            // If we don't have this peer, try do peer exchange
-                            // if !self.network_peer_store.exists(message_peer) {
-                            //     self.initiate_direct_peer_exchange(message_peer).await;
-                            // }
-
-                            if self.config.is_seed_peer {
-                                return Ok(MessageAcceptance::Accept);
-                            }
 
                             // verify payload
                             if payload.new_blocks.is_empty() {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", message_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
+
+                            // if self.config.is_seed_peer {
+                            //     return Ok(MessageAcceptance::Accept);
+                            // }
 
                             info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}]🆕 New block from broadcast: {:?}", &payload.new_blocks.first().unwrap().original_header.pow.pow_algo ,&payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>());
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New blocks from broadcast:
@@ -643,14 +635,14 @@ where S: ShareChain
                                     if !missing_parents.is_empty() {
                                         if missing_parents.len() > 5 {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", missing_parents.len());
-                                            return Ok(MessageAcceptance::Accept);
+                                            return Ok(MessageAcceptance::Ignore);
                                         }
 
                                         if our_tip < max_payload_height.saturating_sub(10) ||
                                             our_tip > max_payload_height.saturating_add(5)
                                         {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
-                                            return Ok(MessageAcceptance::Accept);
+                                            return Ok(MessageAcceptance::Ignore);
                                         }
                                         info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
                                         let sync_share_chain = SyncShareChain {
@@ -662,6 +654,7 @@ where S: ShareChain
 
                                         let _unused =
                                             self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                        return Ok(MessageAcceptance::Ignore);
                                     }
                                 },
                                 Err(error) => {
@@ -872,6 +865,11 @@ where S: ShareChain
                     return;
                 }
 
+                // if we are a seed peer, end here
+                if self.config.is_seed_peer {
+                    return;
+                }
+
                 let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
 
                 if response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
@@ -1024,18 +1022,18 @@ where S: ShareChain
             // panic!("Sync called but with no missing parents.");
             return;
         }
-        // Always ask for at least 20 blocks to avoid too many requests,
-        // Unless it's from new block notify, in which case we'll only want a single block in most cases
-        // Not sure if this is necessary anymore
 
-        // if !is_from_new_block_notify && missing_parents.len() < 20 {
-        //     let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
-        //     // We checked it's less than 20 above
-        //     for i in 0..(20 - missing_parents.len()) {
-        //         missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
-        //     }
-        // };
+        // If it's not from new_block_notify, ask only the peer that sent the blocks
+        if !is_from_new_block_notify {
+            info!(target: LOG_TARGET, squad = &self.config.squad; "Sending sync request direct to peer {} for blocks {:?} because we did not receive it from new tip notify", peer, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
 
+            let _outbound_id = self
+                .swarm
+                .behaviour_mut()
+                .share_chain_sync
+                .send_request(&peer, SyncMissingBlocksRequest::new(algo, missing_parents.clone()));
+            return;
+        }
         // ask our connected peers rather than everyone swarming the original peer
         // let mut sent_to_original_peer = false;
         let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
