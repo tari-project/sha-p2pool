@@ -96,12 +96,12 @@ impl PeerInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ShareChainSyncRequest {
+pub struct SyncMissingBlocksRequest {
     algo: u64,
     missing_blocks: Vec<(u64, FixedHash)>,
 }
 
-impl ShareChainSyncRequest {
+impl SyncMissingBlocksRequest {
     pub fn new(algo: PowAlgorithm, missing_blocks: Vec<(u64, FixedHash)>) -> Self {
         Self {
             algo: algo.as_u64(),
@@ -276,14 +276,14 @@ impl NotifyNewTipBlock {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ShareChainSyncResponse {
+pub struct SyncMissingBlocksResponse {
     version: u64,
     peer_id: PeerId,
     algo: u64,
     pub blocks: Vec<P2Block>,
 }
 
-impl ShareChainSyncResponse {
+impl SyncMissingBlocksResponse {
     pub fn new(peer_id: PeerId, algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
         Self {
             version: PROTOCOL_VERSION,

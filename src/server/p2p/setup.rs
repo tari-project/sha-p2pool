@@ -40,7 +40,7 @@ use super::{
 };
 use crate::server::{
     config,
-    p2p::messages::{ShareChainSyncRequest, ShareChainSyncResponse},
+    p2p::messages::{SyncMissingBlocksRequest, SyncMissingBlocksResponse},
 };
 
 /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
@@ -146,21 +146,21 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
             Ok(ServerNetworkBehaviour {
                 gossipsub,
                 mdns: mdns_service,
-                share_chain_sync: cbor::Behaviour::<ShareChainSyncRequest, ShareChainSyncResponse>::new(
+                share_chain_sync: cbor::Behaviour::<SyncMissingBlocksRequest, Result<SyncMissingBlocksResponse, String>>::new(
                     [(
                         StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
                         request_response::ProtocolSupport::Full,
                     )],
                     request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
                 ),
-                direct_peer_exchange: cbor::Behaviour::<DirectPeerInfoRequest, DirectPeerInfoResponse>::new(
+                direct_peer_exchange: cbor::Behaviour::<DirectPeerInfoRequest, Result<DirectPeerInfoResponse, String>>::new(
                     [(
                         StreamProtocol::new(DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL),
                         request_response::ProtocolSupport::Full,
                     )],
                     request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
                 ),
-                catch_up_sync: cbor::Behaviour::<CatchUpSyncRequest, CatchUpSyncResponse>::new(
+                catch_up_sync: cbor::Behaviour::<CatchUpSyncRequest, Result<CatchUpSyncResponse, String>>::new(
                     [(
                         StreamProtocol::new(CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL),
                         request_response::ProtocolSupport::Full,
