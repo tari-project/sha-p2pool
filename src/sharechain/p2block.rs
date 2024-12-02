@@ -229,8 +229,9 @@ impl P2BlockBuilder {
     pub fn build(mut self) -> Result<Arc<P2Block>, ShareChainError> {
         if !self.added_target_difficulty || self.block.prev_hash == BlockHash::zero() {
             if self.block.prev_hash == BlockHash::zero() {
-                self.block.total_pow = AccumulatedDifficulty::from_u128(self.block.target_difficulty.as_u64() as u128)
-                    .map_err(|_| ShareChainError::DifficultyOverflow)?;
+                self.block.total_pow =
+                    AccumulatedDifficulty::from_u128(u128::from(self.block.target_difficulty.as_u64()))
+                        .map_err(|_| ShareChainError::DifficultyOverflow)?;
             } else {
                 self.block.total_pow = self
                     .block

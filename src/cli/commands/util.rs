@@ -33,7 +33,7 @@ pub async fn server(
     enable_logging: bool,
 ) -> anyhow::Result<Server<InMemoryShareChain>> {
     if enable_logging {
-        let _ = fs::remove_file(cli.base_dir().join("configs/logs.yml"));
+        let _unused = fs::remove_file(cli.base_dir().join("configs/logs.yml"));
         // logger setup
         if let Err(e) = initialize_logging(
             &cli.base_dir().join("configs/logs.yml"),

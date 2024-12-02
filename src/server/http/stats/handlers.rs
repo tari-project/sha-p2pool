@@ -167,7 +167,7 @@ pub(crate) async fn handle_chain(
     }
 
     let mut return_value = Vec::with_capacity(res.len());
-    for block in res.iter_mut() {
+    for block in &mut res {
         return_value.push(BlockResult {
             hash: block.hash.to_hex(),
             timestamp: block.timestamp,

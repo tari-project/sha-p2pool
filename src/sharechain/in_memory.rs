@@ -387,7 +387,7 @@ impl ShareChain for InMemoryShareChain {
                 false,
             )
             .await;
-        let _ = self.stat_client.send_chain_changed(
+        let _unused = self.stat_client.send_chain_changed(
             self.pow_algo,
             p2_chain_write_lock.get_height(),
             p2_chain_write_lock.get_max_chain_length() as u64,
@@ -410,7 +410,7 @@ impl ShareChain for InMemoryShareChain {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
             //  return Err(ShareChainError::BlockValidation("Blocks are not sorted by height".to_string()));
         }
-        for block in blocks.iter() {
+        for block in &blocks {
             known_blocks_incoming.push(block.hash);
         }
         let mut add_result = ChainAddResult::default();
@@ -444,7 +444,7 @@ impl ShareChain for InMemoryShareChain {
                         _ => {},
                     }
                     if !tip_change.missing_blocks.is_empty() {
-                        for missing_block in tip_change.missing_blocks.iter() {
+                        for missing_block in &tip_change.missing_blocks {
                             if known_blocks_incoming.contains(missing_block.0) {
                                 continue;
                             }
@@ -462,7 +462,7 @@ impl ShareChain for InMemoryShareChain {
             }
         }
         if add_result.new_tip.is_some() {
-            let _ = self.stat_client.send_chain_changed(
+            let _unused = self.stat_client.send_chain_changed(
                 self.pow_algo,
                 p2_chain_write_lock.get_height(),
                 p2_chain_write_lock.get_max_chain_length() as u64,

@@ -138,7 +138,7 @@ where S: ShareChain
         };
         match share_chain.submit_block(block.clone()).await {
             Ok(new_tip) => {
-                let _ = self.stats_broadcast.send_miner_block_accepted(pow_algo);
+                let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
                 let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(block.clone())];
                 let mut uncles = share_chain
                     .get_blocks(&block.uncles)
@@ -163,7 +163,7 @@ where S: ShareChain
             },
             Err(error) => {
                 warn!(target: LOG_TARGET, "Failed to add new block: {error:?}");
-                let _ = self.stats_broadcast.send_miner_block_rejected(pow_algo);
+                let _unused = self.stats_broadcast.send_miner_block_rejected(pow_algo);
                 Ok(())
             },
         }
@@ -282,7 +282,7 @@ where S: ShareChain
             if let Some(miner_data) = response.miner_data.as_mut() {
                 match Difficulty::from_u64(miner_data.target_difficulty) {
                     Ok(diff) => {
-                        let _ = self.stats_broadcast.send_network_difficulty(pow_algo, diff);
+                        let _unused = self.stats_broadcast.send_network_difficulty(pow_algo, diff);
                     },
                     Err(e) => {
                         error!(target: LOG_TARGET, "Invalid target difficulty: {e:?}");
@@ -297,7 +297,7 @@ where S: ShareChain
                 }
             }
 
-            let _ = self.stats_broadcast.send_target_difficulty(pow_algo, target_difficulty);
+            let _unused = self.stats_broadcast.send_target_difficulty(pow_algo, target_difficulty);
 
             // save template
             match pow_algo {
@@ -466,7 +466,7 @@ where S: ShareChain
                 match self.client.write().await.submit_block(grpc_request).await {
                     Ok(_resp) => {
                         *max_difficulty = Difficulty::min();
-                        let _ = self.stats_broadcast.send_pool_block_accepted(pow_algo);
+                        let _unused = self.stats_broadcast.send_pool_block_accepted(pow_algo);
                         info!(
                         target: LOG_TARGET,
                         "💰 New matching block found and sent to network! Block hash: {}",
@@ -481,7 +481,7 @@ where S: ShareChain
                         mined_tari_hash
                     );
                         warn!(target: LOG_TARGET, "here 1: {}",  timer.elapsed().as_millis());
-                        let _ = self.stats_broadcast.send_pool_block_rejected(pow_algo);
+                        let _unused = self.stats_broadcast.send_pool_block_rejected(pow_algo);
                         p2pool_block.sent_to_main_chain = false;
 
                         if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {

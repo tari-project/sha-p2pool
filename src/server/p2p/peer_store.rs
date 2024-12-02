@@ -131,10 +131,10 @@ impl PeerStore {
         self.seed_peers.contains(peer_id)
     }
 
-    pub fn num_catch_ups(&self, peer: &PeerId) -> Option<usize> {
+    pub fn num_catch_ups(&self, peer: &PeerId) -> Option<u64> {
         self.whitelist_peers
             .get(&peer.to_base58())
-            .map(|record| record.catch_up_attempts as usize)
+            .map(|record| record.catch_up_attempts)
     }
 
     pub fn add_catch_up_attempt(&mut self, peer_id: &PeerId) {
@@ -266,7 +266,7 @@ impl PeerStore {
 
         self.whitelist_peers
             .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
-        let _ = self.stats_broadcast_client.send_new_peer(
+        let _unused = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
@@ -327,7 +327,7 @@ impl PeerStore {
                 self.whitelist_peers.insert(peer_id.clone(), record.clone());
             }
         }
-        let _ = self.stats_broadcast_client.send_new_peer(
+        let _unused = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
@@ -341,7 +341,7 @@ impl PeerStore {
             record.num_grey_listings = 0;
             self.whitelist_peers.insert(peer_id, record);
         }
-        let _ = self.stats_broadcast_client.send_new_peer(
+        let _unused = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
@@ -396,7 +396,7 @@ impl PeerStore {
                 record.last_grey_list_reason = Some(reason.clone());
                 record.num_grey_listings += 1;
                 self.greylist_peers.insert(peer_id.to_base58(), record);
-                let _ = self.stats_broadcast_client.send_new_peer(
+                let _unused = self.stats_broadcast_client.send_new_peer(
                     self.whitelist_peers.len() as u64,
                     self.greylist_peers.len() as u64,
                     self.blacklist_peers.len() as u64,

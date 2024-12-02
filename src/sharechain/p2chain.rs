@@ -484,8 +484,8 @@ impl P2Chain {
         // let see if we already have a block is a missing block of some other block
         for height in height..height + MAX_UNCLE_AGE {
             if let Some(level) = self.level_at_height(height) {
-                for block in level.blocks.iter() {
-                    for uncles in block.1.uncles.iter() {
+                for block in &level.blocks {
+                    for uncles in &block.1.uncles {
                         if uncles.1 == hash {
                             next_level_data.push((block.1.height, block.1.hash));
                         }
@@ -511,9 +511,9 @@ impl P2Chain {
         let verified = true;
 
         // lets check the total accumulated difficulty
-        let mut total_work = AccumulatedDifficulty::from_u128(block.target_difficulty().as_u64() as u128)
+        let mut total_work = AccumulatedDifficulty::from_u128(u128::from(block.target_difficulty().as_u64()))
             .expect("Difficulty will always fit into accumulated difficulty");
-        for uncle in block.uncles.iter() {
+        for uncle in &block.uncles {
             let uncle_block = self
                 .get_block_at_height(uncle.0, &uncle.1)
                 .ok_or(ShareChainError::BlockNotFound)?;
@@ -658,7 +658,7 @@ impl P2Chain {
             // lets go forward
             current_block_hash = block.hash;
             'outer_loop: loop {
-                for orphan_block in self.sync_store.iter() {
+                for orphan_block in &self.sync_store {
                     if orphan_block.1.prev_hash == current_block_hash {
                         blocks_to_add.push(current_block_hash);
                         current_block_hash = orphan_block.1.hash;
@@ -671,7 +671,7 @@ impl P2Chain {
             let mut new_tip = ChainAddResult::default();
             if blocks_to_add.len() > 150 {
                 // we have a potential long chain, lets see if we can do anything with it.
-                for block in blocks_to_add.iter() {
+                for block in &blocks_to_add {
                     let p2_block = self
                         .sync_store
                         .get(block)
@@ -696,7 +696,7 @@ impl P2Chain {
                     .insert(block.prev_hash, new_block_height.saturating_sub(1));
             }
             // now lets check the uncles
-            for uncle in block.uncles.iter() {
+            for uncle in &block.uncles {
                 if self.get_block_at_height(uncle.0, &uncle.1).is_some() {
                     if let Some(level) = self.level_at_height(uncle.0) {
                         if level.chain_block == uncle.1 && is_parent_in_main_chain {
