@@ -66,7 +66,7 @@ impl P2ChainLevel {
         Ok(())
     }
 
-    pub fn block_in_main_chain(&self) -> Option<Arc<P2Block>> {
+    pub fn get_block_in_main_chain(&self) -> Option<Arc<P2Block>> {
         self.blocks.get(&self.chain_block).cloned()
     }
 }
@@ -94,7 +94,7 @@ mod test {
         chain_level.chain_block = block.generate_hash();
 
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
         // this is not correct, but we want the hashes to be different from the blocks
@@ -107,7 +107,7 @@ mod test {
 
         chain_level.add_block(block_2.clone()).unwrap();
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
 
@@ -123,7 +123,7 @@ mod test {
         chain_level.chain_block = block_3.generate_hash();
 
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block_3.generate_hash()
         );
     }

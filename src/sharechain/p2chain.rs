@@ -140,7 +140,7 @@ impl P2Chain {
     pub fn total_accumulated_tip_difficulty(&self) -> AccumulatedDifficulty {
         match self.get_tip() {
             Some(tip) => tip
-                .block_in_main_chain()
+                .get_block_in_main_chain()
                 .map(|block| block.total_pow())
                 .unwrap_or(AccumulatedDifficulty::min()),
             None => AccumulatedDifficulty::min(),
@@ -767,7 +767,7 @@ impl P2Chain {
     #[cfg(test)]
     fn assert_share_window_verified(&self) {
         let tip = self.get_tip().unwrap();
-        let mut current_block = tip.block_in_main_chain().unwrap().clone();
+        let mut current_block = tip.get_block_in_main_chain().unwrap().clone();
         if !current_block.verified {
             panic!("Tip block is not verified");
         }
@@ -832,11 +832,11 @@ mod test {
 
         for i in 10..41 {
             let level = chain.level_at_height(i).unwrap();
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
 
         let level = chain.level_at_height(10).unwrap();
-        assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 10);
+        assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, 10);
 
         assert!(chain.level_at_height(0).is_none());
     }
@@ -863,7 +863,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(level.height, i);
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
     }
 
@@ -1166,13 +1166,13 @@ mod test {
 
         for i in 11..41 {
             let level = chain.level_at_height(i).unwrap();
-            let block = level.block_in_main_chain().unwrap();
+            let block = level.get_block_in_main_chain().unwrap();
             let parent = chain.get_parent_block(&*block).unwrap();
             assert_eq!(parent.original_header.nonce, i - 1);
         }
 
         let level = chain.level_at_height(10).unwrap();
-        let block = level.block_in_main_chain().unwrap();
+        let block = level.get_block_in_main_chain().unwrap();
         assert!(chain.get_parent_block(&*block).is_none());
     }
 
@@ -1201,7 +1201,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(
-                level.block_in_main_chain().unwrap().target_difficulty(),
+                level.get_block_in_main_chain().unwrap().target_difficulty(),
                 Difficulty::from_u64(i + 1).unwrap()
             );
         }
@@ -1234,19 +1234,19 @@ mod test {
             chain.add_block_to_chain(block).unwrap();
         }
         let level = chain.get_tip().unwrap();
-        let tip_hash = level.block_in_main_chain().unwrap().generate_hash();
+        let tip_hash = level.get_block_in_main_chain().unwrap().generate_hash();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty(),
+            level.get_block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
-        assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 31);
-        assert_eq!(level.block_in_main_chain().unwrap().height, 31);
+        assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, 31);
+        assert_eq!(level.get_block_in_main_chain().unwrap().height, 31);
         assert_eq!(
             chain.total_accumulated_tip_difficulty(),
             AccumulatedDifficulty::from_u128(320).unwrap()
         );
 
-        let block_29 = chain.level_at_height(29).unwrap().block_in_main_chain().unwrap();
+        let block_29 = chain.level_at_height(29).unwrap().get_block_in_main_chain().unwrap();
         timestamp = block_29.timestamp;
         prev_block = Some(block_29);
 
@@ -1269,7 +1269,7 @@ mod test {
         chain.add_block_to_chain(block).unwrap();
         let level = chain.get_tip().unwrap();
         // still the old tip
-        assert_eq!(tip_hash, level.block_in_main_chain().unwrap().generate_hash());
+        assert_eq!(tip_hash, level.get_block_in_main_chain().unwrap().generate_hash());
 
         let address = new_random_address();
 
@@ -1289,13 +1289,13 @@ mod test {
         chain.add_block_to_chain(block).unwrap();
         let level = chain.get_tip().unwrap();
         // now it should be the new tip
-        assert_ne!(tip_hash, level.block_in_main_chain().unwrap().generate_hash());
+        assert_ne!(tip_hash, level.get_block_in_main_chain().unwrap().generate_hash());
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty(),
+            level.get_block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(32).unwrap()
         );
-        assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 31 * 2);
-        assert_eq!(level.block_in_main_chain().unwrap().height, 31);
+        assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, 31 * 2);
+        assert_eq!(level.get_block_in_main_chain().unwrap().height, 31);
         assert_eq!(
             chain.total_accumulated_tip_difficulty(),
             AccumulatedDifficulty::from_u128(341).unwrap()
@@ -1469,7 +1469,7 @@ mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 1 {
-                let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
+                let prev_uncle = chain.level_at_height(i - 2).unwrap().get_block_in_main_chain().unwrap();
                 // lets create an uncle block
                 let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
@@ -1499,10 +1499,10 @@ mod test {
         }
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty(),
+            level.get_block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
-        assert_eq!(level.block_in_main_chain().unwrap().height, 9);
+        assert_eq!(level.get_block_in_main_chain().unwrap().height, 9);
         assert_eq!(
             chain.total_accumulated_tip_difficulty(),
             AccumulatedDifficulty::from_u128(172).unwrap()
@@ -1521,7 +1521,7 @@ mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 1 {
-                let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
+                let prev_uncle = chain.level_at_height(i - 2).unwrap().get_block_in_main_chain().unwrap();
                 // lets create an uncle block
                 let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
@@ -1551,10 +1551,10 @@ mod test {
         }
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty(),
+            level.get_block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(10).unwrap()
         );
-        assert_eq!(level.block_in_main_chain().unwrap().height, 19);
+        assert_eq!(level.get_block_in_main_chain().unwrap().height, 19);
         assert_eq!(
             chain.total_accumulated_tip_difficulty(),
             AccumulatedDifficulty::from_u128(362).unwrap() //(10+9)*20 - (9*2)
@@ -1573,7 +1573,7 @@ mod test {
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let mut uncles = Vec::new();
             if i > 1 {
-                let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
+                let prev_uncle = chain.level_at_height(i - 2).unwrap().get_block_in_main_chain().unwrap();
                 // lets create an uncle block
                 let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
@@ -1605,7 +1605,7 @@ mod test {
         let address = new_random_address();
         timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
         let mut uncles = Vec::new();
-        let prev_uncle = chain.level_at_height(6).unwrap().block_in_main_chain().unwrap();
+        let prev_uncle = chain.level_at_height(6).unwrap().get_block_in_main_chain().unwrap();
         // lets create an uncle block
         let block = P2BlockBuilder::new(Some(prev_uncle))
             .with_timestamp(timestamp)
@@ -1617,7 +1617,7 @@ mod test {
             .unwrap();
         uncles.push(block.clone());
         chain.add_block_to_chain(block).unwrap();
-        prev_block = Some(chain.level_at_height(7).unwrap().block_in_main_chain().unwrap());
+        prev_block = Some(chain.level_at_height(7).unwrap().get_block_in_main_chain().unwrap());
         let block = P2BlockBuilder::new(prev_block.clone())
             .with_timestamp(timestamp)
             .with_height(8)
@@ -1657,10 +1657,10 @@ mod test {
         chain.add_block_to_chain(block).unwrap();
         let level = chain.get_tip().unwrap();
         assert_eq!(
-            level.block_in_main_chain().unwrap().target_difficulty(),
+            level.get_block_in_main_chain().unwrap().target_difficulty(),
             Difficulty::from_u64(11).unwrap()
         );
-        assert_eq!(level.block_in_main_chain().unwrap().height, 9);
+        assert_eq!(level.get_block_in_main_chain().unwrap().height, 9);
         assert_eq!(
             chain.total_accumulated_tip_difficulty(),
             AccumulatedDifficulty::from_u128(176).unwrap()
@@ -1691,7 +1691,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(level.height, i);
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
 
         assert_eq!(chain.total_accumulated_tip_difficulty().as_u128(), 90);
@@ -1720,10 +1720,10 @@ mod test {
             assert_eq!(level.height, 9);
             if i < 9 {
                 // less than 9 it has not reorged yet
-                assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 9);
+                assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, 9);
             } else {
                 // new tip, chain has reorged
-                assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 109);
+                assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, 109);
             }
         }
         assert_eq!(chain.total_accumulated_tip_difficulty().as_u128(), 100);
@@ -1753,7 +1753,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(level.height, i);
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
         let level = chain.get_tip().unwrap();
         assert_eq!(level.height, 9);
@@ -1761,7 +1761,7 @@ mod test {
         assert_eq!(chain.level_at_height(9).unwrap().chain_block, prev_block.unwrap().hash);
 
         // lets create a new tip to reorg to branching off 2 from the tip
-        let prev_block = Some(chain.level_at_height(7).unwrap().block_in_main_chain().unwrap());
+        let prev_block = Some(chain.level_at_height(7).unwrap().get_block_in_main_chain().unwrap());
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
 
         tari_block.header.nonce = 100;
@@ -1820,7 +1820,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(level.height, i);
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
     }
     #[test]
@@ -1859,7 +1859,7 @@ mod test {
 
             let level = chain.get_tip().unwrap();
             assert_eq!(level.height, i);
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
     }
 

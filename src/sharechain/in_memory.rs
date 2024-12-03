@@ -562,7 +562,7 @@ impl ShareChain for InMemoryShareChain {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
-        let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
+        let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.get_block_in_main_chain());
         let new_height = match &prev_block {
             Some(prev_block) => prev_block.height.saturating_add(1),
             None => 0,
@@ -581,7 +581,7 @@ impl ShareChain for InMemoryShareChain {
             for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
                 if let Some(older_level) = chain_read_lock.level_at_height(height) {
                     let chain_block = older_level
-                        .block_in_main_chain()
+                        .get_block_in_main_chain()
                         .ok_or(ShareChainError::BlockNotFound)?;
                     // Blocks in the main chain can't be uncles
                     excluded_uncles.push(chain_block.hash);
@@ -644,7 +644,7 @@ impl ShareChain for InMemoryShareChain {
             Some(level) => level,
             None => return Ok(result),
         };
-        result.push(tip_level.block_in_main_chain().ok_or(ShareChainError::BlockNotFound)?);
+        result.push(tip_level.get_block_in_main_chain().ok_or(ShareChainError::BlockNotFound)?);
         let uncles = result[0].uncles.clone();
         for uncle in uncles {
             let block = p2_chain_read_lock
@@ -666,7 +666,7 @@ impl ShareChain for InMemoryShareChain {
                 } else {
                     // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it wont
                     // find this hash, so we return the curent chain block
-                    if let Some(block) = level.block_in_main_chain() {
+                    if let Some(block) = level.get_block_in_main_chain() {
                         blocks.push(block.clone());
                     }
                 }
@@ -768,7 +768,7 @@ impl ShareChain for InMemoryShareChain {
                     } else {
                         // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it
                         // wont find this hash, so we return the curent chain block
-                        if let Some(block) = level.block_in_main_chain() {
+                        if let Some(block) = level.get_block_in_main_chain() {
                             block.clone()
                         } else {
                             break;
@@ -959,7 +959,7 @@ pub mod test {
                     .await
                     .level_at_height(i as u64 - 2)
                     .unwrap()
-                    .block_in_main_chain()
+                    .get_block_in_main_chain()
                     .unwrap()
                     .clone();
                 // lets create an uncle block
