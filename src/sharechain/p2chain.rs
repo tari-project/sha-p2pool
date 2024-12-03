@@ -352,6 +352,7 @@ impl P2Chain {
             // lets search for either the beginning of the chain, the fork or 2160 block back
             loop {
                 if current_counting_block.height == 0 {
+                    counter = self.share_window;
                     break;
                 }
                 if let Some(parent) = self.get_parent_block(&current_counting_block) {
@@ -401,7 +402,7 @@ impl P2Chain {
                 let next_level_data = self.calculate_next_level_data(new_block_height, hash);
                 return Ok((new_tip, next_level_data));
             }
-            if block.total_pow() > self.total_accumulated_tip_difficulty() {
+            if block.total_pow() > self.total_accumulated_tip_difficulty() && counter >= self.share_window {
                 new_tip.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
@@ -430,6 +431,8 @@ impl P2Chain {
                         let nextblock = parent_level.blocks.get(&current_block.prev_hash);
                         if nextblock.is_none() {
                             error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
+                            error!(target: LOG_TARGET, "current_block: {:?}", current_block);
+                            error!(target: LOG_TARGET, "current tip: {:?}", self.get_tip());
                             panic!(
                                 "FATAL: Reorging (block in chain) failed because parent block was not found and chain \
                                  data is corrupted."
