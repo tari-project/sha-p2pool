@@ -388,6 +388,7 @@ impl P2Chain {
                     .level_at_height(current_counting_block.height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
                 if level.chain_block == current_counting_block.hash {
+                    counter = self.share_window;
                     break;
                 }
                 // we can unwrap as we now the parent exists
