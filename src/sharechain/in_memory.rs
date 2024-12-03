@@ -496,21 +496,6 @@ impl ShareChain for InMemoryShareChain {
         }
     }
 
-    // async fn get_tip_and_uncles(&self) -> Vec<(u64, FixedHash)> {
-    //     let mut res = Vec::new();
-    //     let bl = self.p2_chain.read().await;
-    //     let tip_level = bl.get_tip();
-    //     if let Some(tip_level) = tip_level {
-    //         res.push((tip_level.height, tip_level.chain_block));
-    //         tip_level.block_in_main_chain().inspect(|block| {
-    //             for uncle in block.uncles.iter() {
-    //                 res.push((uncle.0, uncle.1));
-    //             }
-    //         });
-    //     }
-    //     res
-    // }
-
     async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, ShareChainError> {
         let mut chain_read_lock = self.p2_chain.read().await;
         // first check if there is a cached hashmap of shares
@@ -578,7 +563,7 @@ impl ShareChain for InMemoryShareChain {
 
         // edge case for chain start
         let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
-        let new_height = match prev_block {
+        let new_height = match &prev_block {
             Some(prev_block) => prev_block.height.saturating_add(1),
             None => 0,
         };
@@ -650,6 +635,24 @@ impl ShareChain for InMemoryShareChain {
             .with_miner_wallet_address(miner_address.clone())
             .with_miner_coinbase_extra(coinbase_extra)
             .build()?)
+    }
+
+    async fn get_tip_and_uncle_blocks(&self) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+        let p2_chain_read_lock = self.p2_chain.read().await;
+        let mut result = Vec::new();
+        let tip_level = match p2_chain_read_lock.get_tip() {
+            Some(level) => level,
+            None => return Ok(result),
+        };
+        result.push(tip_level.block_in_main_chain().ok_or(ShareChainError::BlockNotFound)?);
+        let uncles = result[0].uncles.clone();
+        for uncle in uncles {
+            let block = p2_chain_read_lock
+                .get_block_at_height(uncle.0, &uncle.1)
+                .ok_or(ShareChainError::BlockNotFound)?;
+            result.push(block);
+        }
+        Ok(result)
     }
 
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>> {
@@ -840,7 +843,7 @@ pub mod test {
         for i in 0..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -894,7 +897,7 @@ pub mod test {
         for i in 0..15 {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -960,7 +963,7 @@ pub mod test {
                     .unwrap()
                     .clone();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(&prev_uncle))
+                let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i as u64 - 1)
                     .with_miner_wallet_address(address.clone())
@@ -972,7 +975,7 @@ pub mod test {
                 uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -1017,7 +1020,7 @@ pub mod test {
         let mut blocks = Vec::new();
         let mut prev_block = None;
         for i in 0..10 {
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_height(i)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
@@ -1061,7 +1064,7 @@ pub mod test {
         assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
-        let missing_block = P2BlockBuilder::new(prev_block.as_ref())
+        let missing_block = P2BlockBuilder::new(prev_block)
             .with_height(11)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .unwrap()

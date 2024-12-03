@@ -556,7 +556,7 @@ where S: ShareChain
                             }
                             // lets check age
                             // if this timestamp is older than 60 seconds, we reject it
-                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
+                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(90) {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a notify message that is too old, skipping", source_peer);
                                 return Ok(MessageAcceptance::Ignore);
                             }
@@ -585,10 +585,6 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Reject);
                             }
 
-                            // if self.config.is_seed_peer {
-                            //     return Ok(MessageAcceptance::Accept);
-                            // }
-
                             info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}]🆕 New block from broadcast: {:?}", &payload.new_blocks.first().unwrap().original_header.pow.pow_algo ,&payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>());
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New blocks from broadcast:
                             // {:?}", &payload.new_blocks.iter().map(|b| b.hash.to_hex()).collect::<Vec<String>>());
@@ -600,7 +596,7 @@ where S: ShareChain
 
                             let our_tip = share_chain.tip_height().await.unwrap_or(0);
                             let our_pow = share_chain.get_total_chain_pow().await;
-                            if payload.total_accumulated_difficulty < our_pow.as_u128() &&
+                            if payload.total_proof_of_work() < our_pow &&
                                 payload
                                     .new_blocks
                                     .iter()
@@ -623,13 +619,6 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
-                            let max_payload_height = payload
-                                .new_blocks
-                                .iter()
-                                .map(|payload| payload.height)
-                                .max()
-                                .unwrap_or(0);
-
                             let mut blocks: Vec<P2Block> = payload.new_blocks.to_vec();
                             for block in &mut blocks {
                                 block.verified = false;
@@ -645,12 +634,6 @@ where S: ShareChain
                                             return Ok(MessageAcceptance::Ignore);
                                         }
 
-                                        if our_tip < max_payload_height.saturating_sub(10) ||
-                                            our_tip > max_payload_height.saturating_add(5)
-                                        {
-                                            info!(target: LOG_TARGET, squad = &self.config.squad; "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
-                                            return Ok(MessageAcceptance::Accept);
-                                        }
                                         info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
                                         let sync_share_chain = SyncShareChain {
                                             algo,
@@ -661,7 +644,7 @@ where S: ShareChain
 
                                         let _unused =
                                             self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
-                                        return Ok(MessageAcceptance::Accept);
+                                        return Ok(MessageAcceptance::Ignore);
                                     }
                                 },
                                 Err(error) => {
@@ -985,10 +968,22 @@ where S: ShareChain
         info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
+        let notify_channel = self.client_broadcast_block_tx.clone();
+        let local_peer_id = *self.swarm.local_peer_id();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
+                    let tip_blocks: Vec<P2Block> = match share_chain.get_tip_and_uncle_blocks().await {
+                        Ok(tip_blocks) => tip_blocks.into_iter().map(|b| (*b).clone()).collect(),
+                        Err(e) => {
+                            error!(target: LOG_TARGET, squad; "Failed to get tip and uncle blocks: {e:?}");
+                            return;
+                        },
+                    };
+                    let notify = NotifyNewTipBlock::new(local_peer_id, tip_blocks);
+                    let _unused = notify_channel.send(notify);
+
                     let missing_parents = new_tip.into_missing_parents_vec();
                     if !missing_parents.is_empty() {
                         let sync_share_chain = SyncShareChain {

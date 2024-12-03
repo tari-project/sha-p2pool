@@ -66,8 +66,8 @@ impl P2ChainLevel {
         Ok(())
     }
 
-    pub fn block_in_main_chain(&self) -> Option<&Arc<P2Block>> {
-        self.blocks.get(&self.chain_block)
+    pub fn block_in_main_chain(&self) -> Option<Arc<P2Block>> {
+        self.blocks.get(&self.chain_block).cloned()
     }
 }
 
@@ -98,7 +98,7 @@ mod test {
             block.generate_hash()
         );
         // this is not correct, but we want the hashes to be different from the blocks
-        let block_2 = P2BlockBuilder::new(Some(&block))
+        let block_2 = P2BlockBuilder::new(Some(block.clone()))
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address.clone())
@@ -112,7 +112,7 @@ mod test {
         );
 
         // this is not correct, but we want the hashes to be different from the blocks
-        let block_3 = P2BlockBuilder::new(Some(&block_2))
+        let block_3 = P2BlockBuilder::new(Some(block_2))
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address)
