@@ -865,6 +865,13 @@ where S: ShareChain
                     return;
                 }
 
+                // If they are talking an older version, disconnect
+                if response.info.version != PROTOCOL_VERSION {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, disconnecting", peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
+
                 // if we are a seed peer, end here
                 if self.config.is_seed_peer {
                     return;
@@ -1244,7 +1251,6 @@ where S: ShareChain
                                 response,
                             } => match response {
                                 Ok(response) => {
-                                    info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES share chain sync response: {response:?}");
                                     self.handle_sync_missing_blocks_response(response).await;
                                 },
                                 Err(error) => {
@@ -1298,7 +1304,6 @@ where S: ShareChain
                             request_response::Message::Response { request_id, response } => {
                                 match response {
                                     Ok(response) => {
-                                        info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES catch up sync response: {response:?}");
                                         self.handle_catch_up_sync_response(response).await;
                                     },
                                     Err(error) => {
