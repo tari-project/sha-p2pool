@@ -229,6 +229,8 @@ pub struct NotifyNewTipBlock {
     pub version: u64,
     peer_id: PeerId,
     pub new_blocks: Vec<P2Block>,
+    // remove next version
+    pub total_accumulated_difficulty: u128,
     pub timestamp: u64,
 }
 
@@ -250,11 +252,18 @@ impl_conversions!(NotifyNewTipBlock);
 
 impl NotifyNewTipBlock {
     pub fn new(peer_id: PeerId, new_blocks: Vec<P2Block>) -> Self {
+        let max_block = new_blocks.iter().max_by_key(|x| x.height);
+        let pow = match max_block {
+            Some(block) => block.total_pow(),
+            None => AccumulatedDifficulty::min(),
+        }
+        .as_u128();
         let timestamp = EpochTime::now().as_u64();
         Self {
             version: PROTOCOL_VERSION,
             peer_id,
             new_blocks,
+            total_accumulated_difficulty: pow,
             timestamp,
         }
     }

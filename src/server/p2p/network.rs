@@ -968,21 +968,22 @@ where S: ShareChain
         info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
-        let notify_channel = self.client_broadcast_block_tx.clone();
-        let local_peer_id = *self.swarm.local_peer_id();
+        // let notify_channel = self.client_broadcast_block_tx.clone();
+        // let local_peer_id = *self.swarm.local_peer_id();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
-                    let tip_blocks: Vec<P2Block> = match share_chain.get_tip_and_uncle_blocks().await {
-                        Ok(tip_blocks) => tip_blocks.into_iter().map(|b| (*b).clone()).collect(),
-                        Err(e) => {
-                            error!(target: LOG_TARGET, squad; "Failed to get tip and uncle blocks: {e:?}");
-                            return;
-                        },
-                    };
-                    let notify = NotifyNewTipBlock::new(local_peer_id, tip_blocks);
-                    let _unused = notify_channel.send(notify);
+                    // I think we should do this
+                    // let tip_blocks: Vec<P2Block> = match share_chain.get_tip_and_uncle_blocks().await {
+                    //     Ok(tip_blocks) => tip_blocks.into_iter().map(|b| (*b).clone()).collect(),
+                    //     Err(e) => {
+                    //         error!(target: LOG_TARGET, squad; "Failed to get tip and uncle blocks: {e:?}");
+                    //         return;
+                    //     },
+                    // };
+                    // let notify = NotifyNewTipBlock::new(local_peer_id, tip_blocks);
+                    // let _unused = notify_channel.send(notify);
 
                     let missing_parents = new_tip.into_missing_parents_vec();
                     if !missing_parents.is_empty() {

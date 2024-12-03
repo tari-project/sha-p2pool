@@ -637,23 +637,27 @@ impl ShareChain for InMemoryShareChain {
             .build()?)
     }
 
-    async fn get_tip_and_uncle_blocks(&self) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
-        let p2_chain_read_lock = self.p2_chain.read().await;
-        let mut result = Vec::new();
-        let tip_level = match p2_chain_read_lock.get_tip() {
-            Some(level) => level,
-            None => return Ok(result),
-        };
-        result.push(tip_level.get_block_in_main_chain().ok_or(ShareChainError::BlockNotFound)?);
-        let uncles = result[0].uncles.clone();
-        for uncle in uncles {
-            let block = p2_chain_read_lock
-                .get_block_at_height(uncle.0, &uncle.1)
-                .ok_or(ShareChainError::BlockNotFound)?;
-            result.push(block);
-        }
-        Ok(result)
-    }
+    // async fn get_tip_and_uncle_blocks(&self) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+    //     let p2_chain_read_lock = self.p2_chain.read().await;
+    //     let mut result = Vec::new();
+    //     let tip_level = match p2_chain_read_lock.get_tip() {
+    //         Some(level) => level,
+    //         None => return Ok(result),
+    //     };
+    //     result.push(
+    //         tip_level
+    //             .get_block_in_main_chain()
+    //             .ok_or(ShareChainError::BlockNotFound)?,
+    //     );
+    //     let uncles = result[0].uncles.clone();
+    //     for uncle in uncles {
+    //         let block = p2_chain_read_lock
+    //             .get_block_at_height(uncle.0, &uncle.1)
+    //             .ok_or(ShareChainError::BlockNotFound)?;
+    //         result.push(block);
+    //     }
+    //     Ok(result)
+    // }
 
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>> {
         let p2_chain_read_lock = self.p2_chain.read().await;
