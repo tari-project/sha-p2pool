@@ -258,6 +258,9 @@ impl PeerStore {
             new_record.last_rx_sync_attempt = previous_record.last_rx_sync_attempt;
             new_record.last_sha3x_sync_attempt = previous_record.last_sha3x_sync_attempt;
             new_record.created = entry.created;
+            new_record.last_ping = entry.last_ping;
+            new_record.num_grey_listings = entry.num_grey_listings;
+            new_record.last_grey_list_reason = entry.last_grey_list_reason.clone();
 
             *entry = new_record;
             // self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));

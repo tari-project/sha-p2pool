@@ -570,7 +570,14 @@ where S: ShareChain
                             }
                             let payload = Arc::new(payload);
                             let message_peer = payload.peer_id();
-                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> [{}] Blocks: {}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","));
+                            let message_age = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_else(|_| Duration::from_secs(0))
+                                .checked_sub(Duration::from_secs(payload.timestamp))
+                                .unwrap_or_else(|| Duration::from_secs(0));
+                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} via {propagation_source}-> [{}] Blocks: {} Age:{}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","), humantime::format_duration(
+                              message_age
+                            ));
 
                             // verify payload
                             if payload.new_blocks.is_empty() {
