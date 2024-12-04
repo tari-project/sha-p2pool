@@ -18,7 +18,8 @@ async fn main() -> anyhow::Result<()> {
     panic::set_hook(Box::new(|panic_info| {
         let location = panic_info
             .location()
-            .map(|loc| format!("file: '{}', line: {}", loc.file(), loc.line()))
+            .map(|loc| format!("{} file: '{}', line: {}", SystemTime::now(), loc.file(), loc.line()))
+
             .unwrap_or_else(|| "unknown location".to_string());
 
         let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
