@@ -196,15 +196,21 @@ impl P2Chain {
     }
 
     pub fn is_full(&self) -> bool {
-        let first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
-        let current_chain_length = self.current_tip.saturating_sub(first_index);
-        // let see if we are the limit for the current chain
-        if current_chain_length >= self.total_size + SAFETY_MARGIN {
-            return true;
-        }
         // lets check to see if we are over the max sync length
         // Ideally this limit should not be reached ever
         self.levels.len() as u64 >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
+    }
+
+    fn cleanup_chain(&mut self) -> Result<(), ShareChainError>{
+        let mut first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
+        let mut current_chain_length = self.current_tip.saturating_sub(first_index);
+        // let see if we are the limit for the current chain
+        while current_chain_length > self.total_size + SAFETY_MARGIN{
+            self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
+            first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
+            current_chain_length = self.current_tip.saturating_sub(first_index);
+        }
+        Ok(())
     }
 
     fn set_new_tip(&mut self, new_height: u64, hash: FixedHash) -> Result<(), ShareChainError> {
@@ -222,7 +228,7 @@ impl P2Chain {
         level.chain_block = hash;
         self.current_tip = level.height;
 
-        Ok(())
+        self.cleanup_chain()
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<ChainAddResult, ShareChainError> {
@@ -638,7 +644,6 @@ impl P2Chain {
                 }
             },
         }
-
         // so the chain is full, we should not add below the height of the lowest block
         Ok(ChainAddResult::default())
     }
@@ -1184,6 +1189,7 @@ mod test {
         let mut prev_block = None;
 
         for i in 0..32 {
+            dbg!(i);
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let block = P2BlockBuilder::new(prev_block.as_ref())
