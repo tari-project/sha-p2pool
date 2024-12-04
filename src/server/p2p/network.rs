@@ -160,7 +160,7 @@ pub(crate) struct Config {
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
     pub black_list_clear_interval: Duration,
-    pub sync_interval: Duration,
+    pub chain_height_exchange_interval: Duration,
     pub is_seed_peer: bool,
     pub debug_print_chain: bool,
     pub sync_job_enabled: bool,
@@ -186,7 +186,7 @@ impl Default for Config {
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(60 * 15),
             black_list_clear_interval: Duration::from_secs(60 * 60),
-            sync_interval: Duration::from_secs(5),
+            chain_height_exchange_interval: Duration::from_secs(5),
             is_seed_peer: false,
             debug_print_chain: false,
             sync_job_enabled: true,
@@ -1927,8 +1927,8 @@ where S: ShareChain
 
         let mut black_list_clear_interval = tokio::time::interval(self.config.black_list_clear_interval);
         black_list_clear_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        let mut sync_interval = tokio::time::interval(self.config.sync_interval);
-        sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut chain_height_exchange_interval = tokio::time::interval(self.config.chain_height_exchange_interval);
+        chain_height_exchange_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut whitelist_save_interval = tokio::time::interval(Duration::from_secs(60));
         whitelist_save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1951,7 +1951,7 @@ where S: ShareChain
         tokio::pin!(shutdown_signal);
         tokio::pin!(grey_list_clear_interval);
         tokio::pin!(black_list_clear_interval);
-        tokio::pin!(sync_interval);
+        tokio::pin!(chain_height_exchange_interval);
         tokio::pin!(whitelist_save_interval);
         tokio::pin!(connection_stats_publish);
         tokio::pin!(seek_connections_interval);
