@@ -803,7 +803,7 @@ mod test {
 
     #[test]
     fn test_only_keeps_size() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
         let mut prev_block = None;
         for i in 0..41 {
@@ -836,7 +836,7 @@ mod test {
 
     #[test]
     fn get_tips() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -864,7 +864,7 @@ mod test {
     fn test_does_not_set_tip_unless_full_chain() {
         // we have a window of 5, meaing that we need 5 valid blocks
         // if we dont start at 0, we need a chain of at least 6 blocks
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -910,7 +910,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -953,7 +953,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(20, 10);
+        let mut chain = P2Chain::new_empty(20, 10, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -994,7 +994,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1061,7 +1061,7 @@ mod test {
 
     #[test]
     fn test_dont_set_tip_on_single_high_height() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1137,7 +1137,7 @@ mod test {
 
     #[test]
     fn get_parent() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1171,7 +1171,7 @@ mod test {
 
     #[test]
     fn add_blocks_to_chain_happy_path() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1202,7 +1202,7 @@ mod test {
 
     #[test]
     fn add_blocks_to_chain_small_reorg() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1297,7 +1297,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1326,7 +1326,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly_with_uncles() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1378,7 +1378,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly_with_wrapping_blocks() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1430,7 +1430,7 @@ mod test {
 
     #[test]
     fn reorg_with_uncles() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1536,7 +1536,7 @@ mod test {
 
     #[test]
     fn rerog_less_than_share_window() {
-        let mut chain = P2Chain::new_empty(20, 15);
+        let mut chain = P2Chain::new_empty(20, 15, 20);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1598,7 +1598,7 @@ mod test {
 
     #[test]
     fn rests_levels_after_reorg() {
-        let mut chain = P2Chain::new_empty(20, 15);
+        let mut chain = P2Chain::new_empty(20, 15, 20);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1653,7 +1653,7 @@ mod test {
 
     #[test]
     fn difficulty_go_up() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1692,7 +1692,7 @@ mod test {
     }
     #[test]
     fn difficulty_go_down() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1735,7 +1735,7 @@ mod test {
         // This test adds a block to the tip, and then adds second block,
         // but has an uncle that is not in the chain. This test checks that
         // the tip is not set to the new block, because the uncle is missing.
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
 
         let prev_block = None;
 
@@ -1768,7 +1768,7 @@ mod test {
 
     #[test]
     fn test_only_reorg_to_chain_if_it_is_verified() {
-        let mut chain = P2Chain::new_empty(10, 5);
+        let mut chain = P2Chain::new_empty(10, 5, 10);
         let prev_block = None;
 
         let block = P2BlockBuilder::new(prev_block.as_ref())

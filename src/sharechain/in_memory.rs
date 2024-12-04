@@ -800,6 +800,7 @@ pub mod test {
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         InMemoryShareChain::new(
+            Config::default(),
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
@@ -823,6 +824,7 @@ pub mod test {
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let share_chain = InMemoryShareChain::new(
+            Config::default(),
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
@@ -872,6 +874,7 @@ pub mod test {
         let static_coinbase_extra = Vec::new();
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let share_chain = InMemoryShareChain::new(
+            Config::default(),
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
@@ -925,6 +928,7 @@ pub mod test {
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let static_coinbase_extra = Vec::new();
         let share_chain = InMemoryShareChain::new(
+            Config::default(),
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
@@ -1083,6 +1087,7 @@ pub mod test {
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let share_chain = InMemoryShareChain::new(
+            Config::default(),
             PowAlgorithm::Sha3x,
             None,
             consensus_manager,
