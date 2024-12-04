@@ -8,17 +8,18 @@ anyhow = "1.0"
 async-trait = "0.1.80"
 axum = "0.7.7"
 blake2 = "0.10.6"
-clap = {version = "4.5.7", features = ["derive"]}
+chrono = "0.4.38"
+clap = { version = "4.5.7", features = ["derive"] }
 convert_case = "0.6.0"
 digest = "0.10.7"
 dirs = "4.0.0"
 hex = "0.4.3"
-hickory-resolver = {version = "*", features = ["dns-over-rustls"]}
+hickory-resolver = { version = "*", features = ["dns-over-rustls"] }
 human_format = "1.1.0"
 humantime = "2.1.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
-libp2p = {git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918ccbf5ae1cbec0815a2156079b0fba4ba558", features = [
+libp2p = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918ccbf5ae1cbec0815a2156079b0fba4ba558", features = [
   "dns",
   "identify",
   "macros",
@@ -40,25 +41,25 @@ libp2p = {git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918c
   "ecdsa",
   "ping",
   "quic",
-]}
-log = {version = "0.4.21", features = ["kv"]}
+] }
+log = { version = "0.4.21", features = ["kv"] }
 log4rs = "1.3.0"
-minotari_app_grpc = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-minotari_node_grpc_client = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-num = {version = "0.4.3", features = ["default", "num-bigint", "serde"]}
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+num = { version = "0.4.3", features = ["default", "num-bigint", "serde"] }
 rand = "0.8.0"
 serde = "1.0.203"
 serde_cbor = "0.11.2"
 serde_json = "1.0.122"
-tari_common = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-tari_common_types = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-tari_core = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+tari_core = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
 tari_crypto = "0.21.0"
-tari_script = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-tari_shutdown = {git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6"}
-tari_utilities = {version = "0.8", features = ["borsh"]}
+tari_script = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "d58c67030c3cff20eea6a17883c2a7908dc75ea6" }
+tari_utilities = { version = "0.8", features = ["borsh"] }
 thiserror = "1.0"
-tokio = {version = "1.41.0", features = ["full"]}
+tokio = { version = "1.41.0", features = ["full"] }
 tonic = "0.12.3"
 
 [package.metadata.cargo-machete]
