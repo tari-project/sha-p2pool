@@ -2052,7 +2052,7 @@ where S: ShareChain
                         warn!(target: LOG_TARGET, "Peer info publishing took too long: {:?}", timer.elapsed());
                     }
                 },
-                _ = sync_interval.tick() =>  {
+                _ = chain_height_exchange_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
                         for peer in self.swarm.connected_peers().copied().collect::<Vec::<_>>() {
@@ -2076,7 +2076,7 @@ where S: ShareChain
                         // self.try_sync_from_best_peer().await;
                     }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
-                        warn!(target: LOG_TARGET, "Syncing took too long: {:?}", timer.elapsed());
+                        warn!(target: LOG_TARGET, "Chain height exchange took too long: {:?}", timer.elapsed());
                     }
                 },
                 _ = whitelist_save_interval.tick() => {
@@ -2160,11 +2160,11 @@ where S: ShareChain
         for b in blocks {
             file.write_all(
                 format!(
-                    "B{} [label=\"{} - {} ({}) {}\"]\n",
+                    "B{} [label=\"{} - {} {}{}\"]\n",
                     &b.hash.to_hex()[0..8],
                     &b.height,
                     &b.hash.to_hex()[0..8],
-                    if b.verified { "v" } else { "x" },
+                    if b.verified { "" } else { "UNVERIFIED " },
                     formatter.format(b.target_difficulty().as_u64() as f64)
                 )
                 .as_bytes(),
