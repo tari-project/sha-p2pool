@@ -700,15 +700,15 @@ impl ShareChain for InMemoryShareChain {
         // Go back and find the split in the chain
         for their_block in their_blocks {
             if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
-                if let Some(block) = level.blocks.get(&their_block.1) {
-                    // Only split if the block is in the main chain
-                    if level.chain_block == block.hash {
-                        split_height2 = block.height.saturating_add(1);
-                        break;
-                    }
+                // Only split if the block is in the main chain
+                if level.chain_block == their_block.1 {
+                    split_height2 = their_block.0.saturating_add(1);
+                    break;
                 }
             }
         }
+
+        info!(target: LOG_TARGET, "[{:?}] Requesting sync, split_height1 {} splitheight2 {} last block {}", self.pow_algo, split_height, split_height2, last_block_received.as_ref().map(|(h, f)| h.to_string()).unwrap_or("None".to_string()));
 
         let blocks =
             self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?;
