@@ -39,7 +39,7 @@ impl Default for Config {
             network_silence_delay: 300,
             max_relay_circuits: None,
             max_relay_circuits_per_peer: None,
-            block_time: 10,
+            block_time: 20,
             share_window: 2160,
         }
     }
