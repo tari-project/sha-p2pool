@@ -1189,7 +1189,6 @@ mod test {
         let mut prev_block = None;
 
         for i in 0..32 {
-            dbg!(i);
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let block = P2BlockBuilder::new(prev_block.as_ref())
