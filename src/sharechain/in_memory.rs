@@ -21,16 +21,9 @@ use tari_core::{
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use super::{
-    MAIN_REWARD_SHARE,
-    MAX_BLOCKS_COUNT,
-    MIN_RANDOMX_DIFFICULTY,
-    MIN_SHA3X_DIFFICULTY,
-    SHARE_WINDOW,
-    UNCLE_REWARD_SHARE,
-};
+use super::{MAIN_REWARD_SHARE, MIN_RANDOMX_DIFFICULTY, MIN_SHA3X_DIFFICULTY, UNCLE_REWARD_SHARE};
 use crate::{
-    server::{http::stats_collector::StatsBroadcastClient, PROTOCOL_VERSION},
+    server::{http::stats_collector::StatsBroadcastClient, Config, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
         p2block::{P2Block, P2BlockBuilder},
@@ -58,11 +51,13 @@ pub(crate) struct InMemoryShareChain {
     consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     stat_client: StatsBroadcastClient,
+    config: Config,
 }
 
 #[allow(dead_code)]
 impl InMemoryShareChain {
     pub fn new(
+        config: Config,
         pow_algo: PowAlgorithm,
         block_validation_params: Option<Arc<BlockValidationParams>>,
         consensus_manager: ConsensusManager,
@@ -74,12 +69,17 @@ impl InMemoryShareChain {
         }
 
         Ok(Self {
-            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW))),
+            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(
+                config.share_window * 2,
+                config.share_window,
+                config.block_time,
+            ))),
             pow_algo,
             block_validation_params,
             consensus_manager,
             coinbase_extras,
             stat_client,
+            config,
         })
     }
 
@@ -198,7 +198,7 @@ impl InMemoryShareChain {
         let tip_height = p2_chain.get_tip().unwrap().height;
         // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
         // older than the share window is way too old for us to care about.
-        if block.height < tip_height.saturating_sub(SHARE_WINDOW as u64) && !syncing {
+        if block.height < tip_height.saturating_sub(self.config.share_window) && !syncing {
             return Err(ShareChainError::BlockValidation(
                 "Block is older than share window".to_string(),
             ));
@@ -257,7 +257,7 @@ impl InMemoryShareChain {
         };
 
         // we want to count 1 short,as the final share will be for this node
-        let stop_height = tip_level.height.saturating_sub(SHARE_WINDOW as u64 - 1);
+        let stop_height = tip_level.height.saturating_sub(self.config.share_window - 1);
         let mut cur_block = tip_level
             .blocks
             .get(&tip_level.chain_block)

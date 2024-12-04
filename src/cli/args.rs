@@ -125,6 +125,12 @@ pub(crate) struct StartArgs {
     pub randomx_disabled: bool,
     #[arg(long, default_value_t = false)]
     pub sha3x_disabled: bool,
+
+    #[arg(long, value_name = "bt")]
+    pub block_time: Option<u64>,
+
+    #[arg(long, value_name = "sw")]
+    pub share_window: Option<u64>,
 }
 
 #[derive(Clone, Parser, Debug)]

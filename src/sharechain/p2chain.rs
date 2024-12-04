@@ -38,15 +38,14 @@ use crate::sharechain::{
     in_memory::MAX_UNCLE_AGE,
     p2block::P2Block,
     p2chain_level::P2ChainLevel,
-    BLOCK_TARGET_TIME,
     DIFFICULTY_ADJUSTMENT_WINDOW,
 };
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::chain";
 // this is the max we are allowed to go over the size
-pub const SAFETY_MARGIN: usize = 20;
+pub const SAFETY_MARGIN: u64 = 20;
 // this is the max extra lenght the chain can grow in front of our tip
-pub const MAX_EXTRA_SYNC: usize = 2000;
+pub const MAX_EXTRA_SYNC: u64 = 2000;
 // this is the max bocks we store that are more than MAX_EXTRA_SYNC in front of our tip
 pub const MAX_SYNC_STORE: usize = 200;
 // this is the max missing parents we allow to process before we stop processing a chain and wait for more parents
@@ -126,10 +125,11 @@ impl Display for ChainAddResult {
 }
 
 pub struct P2Chain {
+    pub block_time: u64,
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
     pub(crate) levels: VecDeque<P2ChainLevel>,
-    total_size: usize,
-    share_window: usize,
+    total_size: u64,
+    share_window: u64,
     current_tip: u64,
     pub lwma: LinearWeightedMovingAverage,
     sync_store: HashMap<FixedHash, Arc<P2Block>>,
@@ -178,11 +178,12 @@ impl P2Chain {
             .get_mut(usize::try_from(index?).expect("32 bit systems not supported"))
     }
 
-    pub fn new_empty(total_size: usize, share_window: usize) -> Self {
-        let levels = VecDeque::with_capacity(total_size + 1);
-        let lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
-            .expect("Failed to create LWMA");
+    pub fn new_empty(total_size: u64, share_window: u64, block_time: u64) -> Self {
+        let levels = VecDeque::with_capacity(usize::try_from(total_size).expect("Only 64bit supported") + 1);
+        let lwma =
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, block_time).expect("Failed to create LWMA");
         Self {
+            block_time,
             cached_shares: None,
             levels,
             total_size,
@@ -198,12 +199,12 @@ impl P2Chain {
         let first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
         let current_chain_length = self.current_tip.saturating_sub(first_index);
         // let see if we are the limit for the current chain
-        if current_chain_length >= (self.total_size + SAFETY_MARGIN) as u64 {
+        if current_chain_length >= self.total_size + SAFETY_MARGIN {
             return true;
         }
         // lets check to see if we are over the max sync length
         // Ideally this limit should not be reached ever
-        self.levels.len() >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
+        self.levels.len() as u64 >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
     }
 
     fn set_new_tip(&mut self, new_height: u64, hash: FixedHash) -> Result<(), ShareChainError> {
@@ -407,7 +408,7 @@ impl P2Chain {
                 new_tip.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
-                self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, BLOCK_TARGET_TIME)
+                self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
                     .expect("Failed to create LWMA");
                 self.lwma.add_front(block.timestamp, block.target_difficulty());
                 let chain_height = self
@@ -641,7 +642,7 @@ impl P2Chain {
 
         // lets check where this is, do we need to store it in the sync store
         let first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
-        if new_block_height >= first_index + (self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC) as u64 {
+        if new_block_height >= first_index + self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC {
             if self.sync_store.len() > MAX_SYNC_STORE {
                 // lets remove the oldest block
                 if let Some(hash) = self.sync_store_fifo_list.pop_back() {

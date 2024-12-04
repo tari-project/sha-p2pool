@@ -36,19 +36,11 @@ use crate::sharechain::{error::ShareChainError, p2block::P2Block, p2chain::Chain
 /// Note: This must be updated when new logic applied to blocks handling.
 pub const CHAIN_ID: usize = 2;
 
-/// How many blocks to keep overall.
-pub const MAX_BLOCKS_COUNT: usize = 4320;
-
-/// How many blocks are used to calculate current shares to be paid out.
-pub const SHARE_WINDOW: usize = 2160;
-
 /// Using 5 and 4 m,eans uncles get 80% of the reward
 pub const MAIN_REWARD_SHARE: u64 = 5;
 pub const UNCLE_REWARD_SHARE: u64 = 4;
 
 pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
-
-pub const BLOCK_TARGET_TIME: u64 = 10;
 
 pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every ten seconds
 pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs every ten seconds

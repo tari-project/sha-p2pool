@@ -21,6 +21,8 @@ pub struct Config {
     pub network_silence_delay: u64,
     pub max_relay_circuits: Option<usize>,
     pub max_relay_circuits_per_peer: Option<usize>,
+    pub block_time: u64,
+    pub share_window: u64,
 }
 
 impl Default for Config {
@@ -37,6 +39,8 @@ impl Default for Config {
             network_silence_delay: 300,
             max_relay_circuits: None,
             max_relay_circuits_per_peer: None,
+            block_time: 10,
+            share_window: 2160,
         }
     }
 }
@@ -179,6 +183,16 @@ impl ConfigBuilder {
 
     pub fn with_debug_print_chain(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.debug_print_chain = config;
+        self
+    }
+
+    pub fn with_block_time(&mut self, config: u64) -> &mut Self {
+        self.config.block_time = config;
+        self
+    }
+
+    pub fn with_share_window(&mut self, config: u64) -> &mut Self {
+        self.config.share_window = config;
         self
     }
 

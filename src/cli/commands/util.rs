@@ -53,6 +53,14 @@ pub async fn server(
         config_builder.with_p2p_port(p2p_port);
     }
 
+    if let Some(block_time) = args.block_time {
+        config_builder.with_block_time(block_time);
+    }
+
+    if let Some(share_window) = args.share_window {
+        config_builder.with_share_window(share_window);
+    }
+
     config_builder.with_squad(Squad::from(args.squad.clone()));
 
     // set default tari network specific seed peer address
@@ -129,6 +137,7 @@ genesis_block_hash.to_hex());
     let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
 
     let share_chain_sha3x = InMemoryShareChain::new(
+        config.clone(),
         PowAlgorithm::Sha3x,
         None,
         consensus_manager.clone(),
@@ -137,6 +146,7 @@ genesis_block_hash.to_hex());
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
+        config.clone(),
         PowAlgorithm::RandomX,
         Some(block_validation_params.clone()),
         consensus_manager,
