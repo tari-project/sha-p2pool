@@ -186,7 +186,7 @@ impl Default for Config {
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(60 * 15),
             black_list_clear_interval: Duration::from_secs(60 * 60),
-            sync_interval: Duration::from_secs(30),
+            sync_interval: Duration::from_secs(5),
             is_seed_peer: false,
             debug_print_chain: false,
             sync_job_enabled: true,
