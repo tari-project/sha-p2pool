@@ -108,7 +108,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         coinbase_extra: Vec<u8>,
     ) -> Result<Arc<P2Block>, ShareChainError>;
 
-
     /// Returns the requested blocks from this chain
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>>;
 

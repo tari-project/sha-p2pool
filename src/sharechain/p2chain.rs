@@ -1167,13 +1167,13 @@ mod test {
         for i in 11..41 {
             let level = chain.level_at_height(i).unwrap();
             let block = level.get_block_in_main_chain().unwrap();
-            let parent = chain.get_parent_block(&*block).unwrap();
+            let parent = chain.get_parent_block(&block).unwrap();
             assert_eq!(parent.original_header.nonce, i - 1);
         }
 
         let level = chain.level_at_height(10).unwrap();
         let block = level.get_block_in_main_chain().unwrap();
-        assert!(chain.get_parent_block(&*block).is_none());
+        assert!(chain.get_parent_block(&block).is_none());
     }
 
     #[test]
@@ -1312,7 +1312,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1334,7 +1334,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1353,7 +1353,7 @@ mod test {
             chain
                 .get_tip()
                 .unwrap()
-                .block_in_main_chain()
+                .get_block_in_main_chain()
                 .unwrap()
                 .original_header
                 .nonce,
@@ -1373,7 +1373,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1396,7 +1396,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block)
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1418,7 +1418,7 @@ mod test {
             chain
                 .get_tip()
                 .unwrap()
-                .block_in_main_chain()
+                .get_block_in_main_chain()
                 .unwrap()
                 .original_header
                 .nonce,
