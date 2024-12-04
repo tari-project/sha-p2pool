@@ -23,9 +23,8 @@ fn format_system_time(time: SystemTime) -> String {
     let datetime = time.duration_since(UNIX_EPOCH).unwrap();
     let seconds = datetime.as_secs();
     let nanos = datetime.subsec_nanos();
-    let naive = chrono::NaiveDateTime::from_timestamp(seconds as i64, nanos);
-    let datetime: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_utc(naive, chrono::Utc);
-    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+    let naive = chrono::DateTime::from_timestamp(seconds.try_into().unwrap(), nanos).unwrap();
+    naive.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 #[tokio::main(flavor = "multi_thread")]
