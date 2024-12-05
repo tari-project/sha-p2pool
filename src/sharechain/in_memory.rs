@@ -787,7 +787,7 @@ impl ShareChain for InMemoryShareChain {
                         counter += 1;
                     }
                 }
-                count_back -= 250;
+                count_back = count_back / 2;
             }
         }
 
