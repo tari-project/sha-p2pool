@@ -1705,9 +1705,13 @@ where S: ShareChain
         // }
 
         // let tx = self.inner_request_tx.clone();
-        let i_have_blocks = share_chain
-            .create_catchup_sync_blocks(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE)
-            .await;
+        let i_have_blocks = if last_block_from_them.is_none() {
+            share_chain
+                .create_catchup_sync_blocks(CATCH_UP_SYNC_BLOCKS_IN_I_HAVE)
+                .await
+        } else {
+            vec![]
+        };
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] Sending catch up sync to {} for blocks {}, last block received {}. Their height:{}",
                 algo,

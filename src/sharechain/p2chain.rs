@@ -157,7 +157,7 @@ impl P2Chain {
             .get(usize::try_from(index?).expect("32 bit systems not supported"))
     }
 
-    fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<&Arc<P2Block>> {
+    pub fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<&Arc<P2Block>> {
         let level = self.level_at_height(height)?;
         level.blocks.get(hash)
     }
@@ -201,11 +201,11 @@ impl P2Chain {
         self.levels.len() as u64 >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
     }
 
-    fn cleanup_chain(&mut self) -> Result<(), ShareChainError>{
+    fn cleanup_chain(&mut self) -> Result<(), ShareChainError> {
         let mut first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
         let mut current_chain_length = self.current_tip.saturating_sub(first_index);
         // let see if we are the limit for the current chain
-        while current_chain_length > self.total_size + SAFETY_MARGIN{
+        while current_chain_length > self.total_size + SAFETY_MARGIN {
             self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
             first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
             current_chain_length = self.current_tip.saturating_sub(first_index);
@@ -1363,6 +1363,131 @@ mod test {
                 .original_header
                 .nonce,
             1099
+        );
+
+        chain.assert_share_window_verified();
+    }
+
+    #[test]
+    fn add_blocks_missing_block() {
+        // this test will verify that we reorg to a completely new chain
+        let mut chain = P2Chain::new_empty(50, 25, 20);
+
+        let mut prev_block = None;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut blocks = Vec::new();
+        for i in 0..50 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2BlockBuilder::new(prev_block.as_ref())
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+            prev_block = Some(block.clone());
+            blocks.push(block);
+        }
+
+        for (i, block) in blocks.iter().enumerate().take(50) {
+            if i != 25 {
+                chain.add_block_to_chain(block.clone()).unwrap();
+            }
+        }
+        assert_eq!(chain.current_tip, 24);
+        chain.add_block_to_chain(blocks[25].clone()).unwrap();
+
+        assert_eq!(chain.current_tip, 49);
+        assert_eq!(chain.get_tip().unwrap().chain_block, prev_block.unwrap().hash);
+
+        chain.assert_share_window_verified();
+    }
+
+    #[test]
+    fn reorg_with_missing_uncle() {
+        // this test will verify that we reorg to a completely new chain
+        let mut chain = P2Chain::new_empty(50, 25, 20);
+
+        let mut prev_block = None;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..50 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2BlockBuilder::new(prev_block.as_ref())
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(Difficulty::from_u64(10).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+            prev_block = Some(block.clone());
+            chain.add_block_to_chain(block).unwrap();
+        }
+
+        assert_eq!(chain.current_tip, 49);
+        assert_eq!(chain.get_tip().unwrap().chain_block, prev_block.unwrap().hash);
+
+        let mut prev_block = None;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        let mut uncle_parent = None;
+        let mut uncle_block = None;
+        for i in 0..50 {
+            tari_block.header.nonce = i + 100;
+            let address = new_random_address();
+            let uncles = if i == 25 {
+                let uncle = P2BlockBuilder::new(uncle_parent.as_ref())
+                    .with_timestamp(EpochTime::now())
+                    .with_height(24)
+                    .with_tari_block(tari_block.clone())
+                    .unwrap()
+                    .with_miner_wallet_address(address.clone())
+                    .build()
+                    .unwrap();
+                uncle_block = Some(uncle.clone());
+                vec![uncle]
+            } else {
+                vec![]
+            };
+            let block = P2BlockBuilder::new(prev_block.as_ref())
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .with_uncles(&uncles)
+                .unwrap()
+                .with_target_difficulty(Difficulty::from_u64(11).unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+            if i == 23 {
+                uncle_parent = Some(block.clone());
+            }
+            prev_block = Some(block.clone());
+            chain.add_block_to_chain(block).unwrap();
+        }
+
+        assert_eq!(chain.current_tip, 49);
+        let hash = prev_block.unwrap().hash;
+        assert_ne!(chain.get_tip().unwrap().chain_block, hash);
+        chain.add_block_to_chain(uncle_block.unwrap()).unwrap();
+        assert_eq!(chain.get_tip().unwrap().chain_block, hash);
+        assert_eq!(
+            chain
+                .get_tip()
+                .unwrap()
+                .block_in_main_chain()
+                .unwrap()
+                .original_header
+                .nonce,
+            149
         );
 
         chain.assert_share_window_verified();

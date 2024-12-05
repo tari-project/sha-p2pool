@@ -332,34 +332,29 @@ impl InMemoryShareChain {
         };
 
         loop {
-            for block in level.blocks.values() {
-                if main_chain_only {
-                    if block.hash == level.chain_block {
-                        for uncle in &block.uncles {
-                            // Always include all the uncles, if we have them
-                            if let Some(uncle_block) =
-                                p2_chain.level_at_height(uncle.0).and_then(|l| l.blocks.get(&uncle.1))
-                            {
-                                // Uncles should never exist in the main chain, so we don't need to worry about
-                                // duplicates
-                                res.push(uncle_block.clone());
-                            }
+            if main_chain_only {
+                if let Some(block) = level.block_in_main_chain() {
+                    for uncle in &block.uncles {
+                        // Always include all the uncles, if we have them
+                        if let Some(uncle_block) = p2_chain.get_block_at_height(uncle.0, &uncle.1) {
+                            // Uncles should never exist in the main chain, so we don't need to worry about
+                            // duplicates
+                            res.push(uncle_block.clone());
                         }
-
-                        num_actual_blocks += 1;
-                        res.push(block.clone());
                     }
-                } else {
                     num_actual_blocks += 1;
                     res.push(block.clone());
                 }
-                // Always include at least 2 main chain blocks so that if we called
-                // this function with the starting mainchain block we can continue asking for more
-                // blocks
-                if num_actual_blocks > page_size {
-                    return Ok(res);
+            } else {
+                for block in level.blocks.values() {
+                    num_actual_blocks += 1;
+                    res.push(block.clone());
                 }
             }
+            if num_actual_blocks > page_size {
+                return Ok(res);
+            }
+
             level = if let Some(new_level) = p2_chain.level_at_height(level.height + 1) {
                 new_level
             } else {
@@ -680,21 +675,17 @@ impl ShareChain for InMemoryShareChain {
     ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError> {
         let p2_chain_read = self.p2_chain.read().await;
 
-        // Assume their blocks are in order highest first.
         let mut split_height = 0;
 
         if let Some(last_block_received) = last_block_received {
-            if let Some(level) = p2_chain_read.level_at_height(last_block_received.0) {
-                if let Some(block) = level.blocks.get(&last_block_received.1) {
-                    split_height = block.height.saturating_add(1);
-                }
+            if let Some(block) = p2_chain_read.get_block_at_height(last_block_received.0, &last_block_received.1) {
+                split_height = block.height.saturating_add(1);
             }
         }
 
         let mut their_blocks = their_blocks.to_vec();
         // Highest to lowest
         their_blocks.sort_by(|a, b| b.0.cmp(&a.0));
-        // their_blocks.reverse();
 
         let mut split_height2 = 0;
         // Go back and find the split in the chain
@@ -711,7 +702,7 @@ impl ShareChain for InMemoryShareChain {
         info!(target: LOG_TARGET, "[{:?}] Requesting sync, split_height1 {} splitheight2 {} last block {}", self.pow_algo, split_height, split_height2, last_block_received.as_ref().map(|(h, _)| h.to_string()).unwrap_or("None".to_string()));
 
         let blocks =
-            self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?;
+            self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?; // potential issue here, maybe this should be min
         let tip_level = p2_chain_read
             .get_tip()
             .map(|tip_level| (tip_level.height, tip_level.chain_block));
@@ -755,33 +746,51 @@ impl ShareChain for InMemoryShareChain {
         let mut i_have_blocks = Vec::with_capacity(size);
         if let Some(tip) = p2_chain_read_lock.get_tip() {
             let tip_height = tip.height;
-            let tip_hash = tip.chain_block;
             let mut height = tip_height;
-            let mut hash = tip_hash;
             for _ in 0..size {
                 if let Some(level) = p2_chain_read_lock.level_at_height(height) {
-                    let block = if let Some(block) = level.blocks.get(&hash) {
+                    // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it
+                    // wont find this hash, so we return the current chain block
+                    let block = if let Some(block) = level.block_in_main_chain() {
                         block.clone()
                     } else {
-                        // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it
-                        // wont find this hash, so we return the curent chain block
-                        if let Some(block) = level.block_in_main_chain() {
-                            block.clone()
-                        } else {
-                            break;
-                        }
+                        break;
                     };
                     i_have_blocks.push((height, block.hash));
                     if height == 0 {
                         break;
                     }
-                    height = block.height - 1;
-                    hash = block.hash;
+                    height = block.height.saturating_sub(1);
                 } else {
                     break;
                 }
             }
+            if i_have_blocks.len() < size {
+                // we have less blocks to fill up the request, not worth filling in older blocks
+                return i_have_blocks;
+            }
+            // lets replace some blocks with older ones so that it does not neet to sync the entire chain
+            let mut counter = 0;
+            let mut count_back = 3000;
+            while count_back > 100 {
+                let height = match tip_height.checked_sub(count_back) {
+                    Some(h) => h,
+                    None => {
+                        count_back -= 250;
+                        continue;
+                    },
+                };
+                if let Some(level) = p2_chain_read_lock.level_at_height(height) {
+                    if let Some(block) = level.block_in_main_chain() {
+                        let index = i_have_blocks.len() - counter;
+                        i_have_blocks[index] = (height, block.hash);
+                        counter += 1;
+                    }
+                }
+                count_back -= 250;
+            }
         }
+
         i_have_blocks
     }
 }
