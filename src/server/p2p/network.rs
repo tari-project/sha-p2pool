@@ -1997,7 +1997,10 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        if self.swarm.connected_peers().count() > 20 {
+                        let info = self.swarm.network_info();
+                        let counters = info.connection_counters();
+
+                        if (counters.num_established_outgoing() + counters.num_pending_outgoing()) > 20 {
                             continue;
                         }
                         let mut num_dialed = 0;
