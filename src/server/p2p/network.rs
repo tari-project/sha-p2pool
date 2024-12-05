@@ -192,7 +192,7 @@ impl Default for Config {
             sync_job_enabled: true,
             sha3x_enabled: true,
             randomx_enabled: true,
-            num_concurrent_syncs: 2,
+            num_concurrent_syncs: 1,
         }
     }
 }
@@ -982,7 +982,7 @@ where S: ShareChain
         };
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
-        info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
+        info!(target: SYNC_REQUEST_LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
@@ -1039,7 +1039,7 @@ where S: ShareChain
 
         // If it's not from new_block_notify, ask only the peer that sent the blocks
         if !is_from_new_block_notify {
-            info!(target: LOG_TARGET, squad = &self.config.squad; "Sending sync request direct to peer {} for blocks {:?} because we did not receive it from new tip notify", peer, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
+            info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Sending sync request direct to peer {} for blocks {:?} because we did not receive it from new tip notify", peer, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
 
             let _outbound_id = self
                 .swarm
@@ -1063,7 +1063,7 @@ where S: ShareChain
                             highest_peer_height = p.peer_info.current_random_x_height;
                         }
                         if p.peer_info.current_random_x_height.saturating_add(20) < *min_height {
-                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for RandomX sync", connected_peer);
+                            info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for RandomX sync", connected_peer);
                             continue;
                         }
                     },
@@ -1072,7 +1072,7 @@ where S: ShareChain
                             highest_peer_height = p.peer_info.current_sha3x_height;
                         }
                         if p.peer_info.current_sha3x_height.saturating_add(20) < *min_height {
-                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for Sha3x sync", connected_peer);
+                            info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for Sha3x sync", connected_peer);
                             continue;
                         }
                     },
@@ -1087,7 +1087,7 @@ where S: ShareChain
         }
 
         if peers_asked == 0 {
-            warn!(target: LOG_TARGET, squad = &self.config.squad; "[{}] No connected peers had a high enough chain to ask for this missing block. Highest peer height:{}", algo, highest_peer_height);
+            warn!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "[{}] No connected peers had a high enough chain to ask for this missing block. Highest peer height:{}", algo, highest_peer_height);
         }
     }
 

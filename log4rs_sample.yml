@@ -24,7 +24,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/p2pool.{}.log"
     encoder:
-      pattern: "[{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
     # An appender named "other" that writes to a file with a custom pattern encoder
   other:
