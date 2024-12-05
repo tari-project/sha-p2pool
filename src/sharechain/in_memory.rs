@@ -771,12 +771,12 @@ impl ShareChain for InMemoryShareChain {
             }
             // lets replace some blocks with older ones so that it does not neet to sync the entire chain
             let mut counter = 0;
-            let mut count_back = 3000;
+            let mut count_back = 4196;
             while count_back > 100 {
                 let height = match tip_height.checked_sub(count_back) {
                     Some(h) => h,
                     None => {
-                        count_back -= 250;
+                        count_back /= 2;
                         continue;
                     },
                 };
@@ -787,7 +787,7 @@ impl ShareChain for InMemoryShareChain {
                         counter += 1;
                     }
                 }
-                count_back = count_back / 2;
+                count_back /= 2;
             }
         }
 
