@@ -782,7 +782,7 @@ impl ShareChain for InMemoryShareChain {
                 };
                 if let Some(level) = p2_chain_read_lock.level_at_height(height) {
                     if let Some(block) = level.block_in_main_chain() {
-                        let index = i_have_blocks.len() - counter;
+                        let index = i_have_blocks.len() - counter - 1;
                         i_have_blocks[index] = (height, block.hash);
                         counter += 1;
                     }
