@@ -702,7 +702,7 @@ impl ShareChain for InMemoryShareChain {
         info!(target: LOG_TARGET, "[{:?}] Requesting sync, split_height1 {} splitheight2 {} last block {}", self.pow_algo, split_height, split_height2, last_block_received.as_ref().map(|(h, _)| h.to_string()).unwrap_or("None".to_string()));
 
         let blocks =
-            self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?; // potential issue here, maybe this should be min
+            self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?;
         let tip_level = p2_chain_read
             .get_tip()
             .map(|tip_level| (tip_level.height, tip_level.chain_block));
