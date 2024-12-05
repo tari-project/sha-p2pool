@@ -115,7 +115,7 @@ pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
-const MAX_CATCH_UP_ATTEMPTS: u64 = 150;
+const MAX_CATCH_UP_ATTEMPTS: u64 = 500;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
@@ -209,6 +209,7 @@ struct PerformCatchUpSync {
     pub peer: PeerId,
     pub last_block_from_them: Option<(u64, FixedHash)>,
     pub their_height: u64,
+    pub permit: Option<OwnedSemaphorePermit>,
 }
 
 #[derive(NetworkBehaviour)]
@@ -886,12 +887,13 @@ where S: ShareChain
 
                 let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
 
-                if response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
+                if self.config.sha3x_enabled && response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
                     let perform_catch_up_sync = PerformCatchUpSync {
                         algo: PowAlgorithm::Sha3x,
                         peer: peer_id,
                         last_block_from_them: None,
                         their_height: response.info.current_sha3x_height,
+                        permit: None,
                     };
                     let _unused = self
                         .inner_request_tx
@@ -899,12 +901,13 @@ where S: ShareChain
                 }
                 let our_tip_rx = self.share_chain_random_x.chain_pow().await;
 
-                if response.info.current_random_x_pow > our_tip_rx.as_u128() {
+                if self.config.randomx_enabled && response.info.current_random_x_pow > our_tip_rx.as_u128() {
                     let perform_catch_up_sync = PerformCatchUpSync {
                         algo: PowAlgorithm::RandomX,
                         peer: peer_id,
                         last_block_from_them: None,
                         their_height: response.info.current_random_x_height,
+                        permit: None,
                     };
                     let _unused = self
                         .inner_request_tx
@@ -1309,15 +1312,15 @@ where S: ShareChain
                                 self.handle_catch_up_sync_request(channel, request).await;
                             },
                             request_response::Message::Response { request_id, response } => {
+                                let permit = self.release_catchup_sync_permit(request_id);
                                 match response {
                                     Ok(response) => {
-                                        self.handle_catch_up_sync_response(response).await;
+                                        self.handle_catch_up_sync_response(response, permit).await;
                                     },
                                     Err(error) => {
                                         error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES catch up sync response error: {error:?}");
                                     },
                                 }
-                                self.release_catchup_sync_permit(request_id);
                             },
                         },
                         request_response::Event::OutboundFailure {
@@ -1477,7 +1480,7 @@ where S: ShareChain
         }
     }
 
-    fn release_catchup_sync_permit(&mut self, request_id: OutboundRequestId) {
+    fn release_catchup_sync_permit(&mut self, request_id: OutboundRequestId) -> Option<OwnedSemaphorePermit> {
         let should_remove: Vec<PeerId> = self
             .randomx_in_progress_syncs
             .iter()
@@ -1485,8 +1488,7 @@ where S: ShareChain
             .collect();
         for peer in should_remove {
             if let Some((_r, permit)) = self.randomx_in_progress_syncs.remove(&peer) {
-                // Probably don't need to do this
-                drop(permit);
+                return Some(permit);
             }
         }
 
@@ -1497,13 +1499,17 @@ where S: ShareChain
             .collect();
         for peer in should_remove {
             if let Some((_r, permit)) = self.sha3x_in_progress_syncs.remove(&peer) {
-                // Probably don't need to do this
-                drop(permit);
+                return Some(permit);
             }
         }
+        None
     }
 
-    async fn handle_catch_up_sync_response(&mut self, response: CatchUpSyncResponse) {
+    async fn handle_catch_up_sync_response(
+        &mut self,
+        response: CatchUpSyncResponse,
+        permit: Option<OwnedSemaphorePermit>,
+    ) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Catch up sync response: {response:?}");
         if response.version != PROTOCOL_VERSION {
             trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", response.peer_id());
@@ -1584,6 +1590,7 @@ where S: ShareChain
                     peer,
                     last_block_from_them,
                     their_height,
+                    permit,
                 };
                 let _unused = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
             } else {
@@ -1658,6 +1665,7 @@ where S: ShareChain
             peer,
             last_block_from_them,
             their_height,
+            mut permit,
         } = perform_catch_up_sync;
 
         // First check if we have a sync in progress for this peer.
@@ -1685,13 +1693,17 @@ where S: ShareChain
         //     return Ok(());
         // }
 
-        let permit = match semaphore.try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => {
-                warn!(target: SYNC_REQUEST_LOG_TARGET, "Could not acquire semaphore for catch up sync");
-                return Ok(());
-            },
-        };
+        if permit.is_none() {
+            permit = match semaphore.try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    warn!(target: SYNC_REQUEST_LOG_TARGET, "Could not acquire semaphore for catch up sync for peer: {}", peer);
+                    return Ok(());
+                },
+            };
+        }
+
+        let permit = permit.unwrap();
 
         // Only allow follow on catch up syncs if we've tried to sync from them recently
         // if last_block_from_them.is_none() &&
