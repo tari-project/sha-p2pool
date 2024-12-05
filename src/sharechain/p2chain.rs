@@ -201,11 +201,11 @@ impl P2Chain {
         self.levels.len() as u64 >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
     }
 
-    fn cleanup_chain(&mut self) -> Result<(), ShareChainError>{
+    fn cleanup_chain(&mut self) -> Result<(), ShareChainError> {
         let mut first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
         let mut current_chain_length = self.current_tip.saturating_sub(first_index);
         // let see if we are the limit for the current chain
-        while current_chain_length > self.total_size + SAFETY_MARGIN{
+        while current_chain_length > self.total_size + SAFETY_MARGIN {
             self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
             first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
             current_chain_length = self.current_tip.saturating_sub(first_index);
