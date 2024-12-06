@@ -8,6 +8,7 @@ use std::{
     hash::Hash,
     io::Write,
     net::IpAddr,
+    num::NonZeroUsize,
     path::PathBuf,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -52,6 +53,7 @@ use log::{
     trace,
     warn,
 };
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
@@ -168,6 +170,7 @@ pub(crate) struct Config {
     pub sha3x_enabled: bool,
     pub randomx_enabled: bool,
     pub num_concurrent_syncs: usize,
+    pub num_sync_tips_to_keep: usize,
 }
 
 impl Default for Config {
@@ -193,6 +196,7 @@ impl Default for Config {
             sha3x_enabled: true,
             randomx_enabled: true,
             num_concurrent_syncs: 1,
+            num_sync_tips_to_keep: 10,
         }
     }
 }
@@ -285,6 +289,9 @@ enum InnerRequest {
 
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
+// Allow type complexity for now. It is caused by the hashmap of arc of rwlock of lru cache
+// it should be removed in future.
+#[allow(clippy::type_complexity)]
 pub struct Service<S>
 where S: ShareChain
 {
@@ -315,6 +322,7 @@ where S: ShareChain
     sha3x_last_sync_requested_block: Option<(u64, FixedHash)>,
     randomx_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
     sha3x_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
+    recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
 }
 
 impl<S> Service<S>
@@ -342,6 +350,19 @@ where S: ShareChain
         // This should not be unbounded but we need to find out what is using up all the permits
         let (inner_request_tx, inner_request_rx) = mpsc::unbounded_channel();
 
+        let mut recent_synced_tips = HashMap::new();
+        recent_synced_tips.insert(
+            PowAlgorithm::RandomX,
+            Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(config.p2p_service.num_sync_tips_to_keep).unwrap(),
+            ))),
+        );
+        recent_synced_tips.insert(
+            PowAlgorithm::Sha3x,
+            Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(config.p2p_service.num_sync_tips_to_keep).unwrap(),
+            ))),
+        );
         Ok(Self {
             swarm,
             port: config.p2p_port,
@@ -366,6 +387,7 @@ where S: ShareChain
             sha3x_last_sync_requested_block: None,
             randomx_in_progress_syncs: HashMap::new(),
             sha3x_in_progress_syncs: HashMap::new(),
+            recent_synced_tips,
         })
     }
 
@@ -1554,6 +1576,7 @@ where S: ShareChain
         let tx = self.inner_request_tx.clone();
         let squad = self.config.squad.clone();
         let network_peer_store = self.network_peer_store.clone();
+        let recent_synced_tips = self.recent_synced_tips.get(&algo).cloned().unwrap();
 
         tokio::spawn(async move {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
@@ -1576,6 +1599,13 @@ where S: ShareChain
                     },
                 }
             }
+            {
+                if let Some(ref last_block) = last_block_from_them {
+                    let mut lock = recent_synced_tips.write().await;
+                    lock.put(peer, *last_block);
+                }
+            }
+
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, new_tip);
             let missing_parents = new_tip.into_missing_parents_vec();
@@ -1719,7 +1749,7 @@ where S: ShareChain
 
         let permit = permit.unwrap();
 
-        let (i_have_blocks, last_block_from_them) = match (last_block_from_them, last_progress) {
+        let (mut i_have_blocks, last_block_from_them) = match (last_block_from_them, last_progress) {
             (None, Some(last_progress)) => {
                 // this is most likely a new catchup sync request, while the previous attempt failed so we ask with both
                 // I have blocks and last block
@@ -1745,6 +1775,13 @@ where S: ShareChain
                 (vec![], Some(last_block_from_them))
             },
         };
+
+        {
+            let lock = self.recent_synced_tips.get(&algo).unwrap().read().await;
+            for item in lock.iter() {
+                i_have_blocks.insert(0, *item.1);
+            }
+        }
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] Sending catch up sync to {} for blocks {}, last block received {}. Their height:{}",
                 algo,
