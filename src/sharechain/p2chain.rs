@@ -265,6 +265,7 @@ impl P2Chain {
         new_block_height: u64,
         hash: FixedHash,
     ) -> Result<(ChainAddResult, Vec<(u64, FixedHash)>), ShareChainError> {
+        info!(target: LOG_TARGET, "Trying to verify new block to add: {}:{}", new_block_height, &hash.to_hex()[0..8]);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut new_tip = ChainAddResult::default();
         let block = self
