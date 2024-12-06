@@ -1768,7 +1768,7 @@ where S: ShareChain
         };
         let our_tip = share_chain.get_tip().await?.unwrap_or_default();
         if our_tip.0 < their_height.saturating_sub(10) {
-            info!(target: SYNC_REQUEST_LOG_TARGET, "We({}) are out by more than 10 blocks from syncing peer({}), seeting sync status to false", our_tip.0, their_height);
+            info!(target: SYNC_REQUEST_LOG_TARGET, "We({}) are out by more than 10 blocks from syncing peer({}), setting sync status to false", our_tip.0, their_height);
             sync_status.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
