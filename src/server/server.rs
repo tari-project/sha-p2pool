@@ -39,7 +39,8 @@ where S: ShareChain
     http_server: Option<Arc<HttpServer>>,
     stats_collector: Option<StatsCollector>,
     shutdown_signal: ShutdownSignal,
-    are_we_synced_with_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
 }
 
 impl<S> Server<S>
@@ -56,7 +57,8 @@ where S: ShareChain
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
         let network_peer_store = PeerStore::new(stats_broadcast_client.clone());
-        let are_we_synced_with_p2pool = Arc::new(AtomicBool::new(false));
+        let are_we_synced_with_randomx_p2pool = Arc::new(AtomicBool::new(false));
+        let are_we_synced_with_sha3x_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();
 
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
@@ -65,7 +67,8 @@ where S: ShareChain
             share_chain_random_x.clone(),
             network_peer_store,
             shutdown_signal.clone(),
-            are_we_synced_with_p2pool.clone(),
+            are_we_synced_with_randomx_p2pool.clone(),
+            are_we_synced_with_sha3x_p2pool.clone(),
             stats_broadcast_client.clone(),
         )
         .await?;
@@ -93,7 +96,8 @@ where S: ShareChain
                 genesis_block_hash,
                 stats_broadcast_client.clone(),
                 config.p2p_service.squad.clone(),
-                are_we_synced_with_p2pool.clone(),
+                are_we_synced_with_randomx_p2pool.clone(),
+                are_we_synced_with_sha3x_p2pool.clone(),
             )
             .await?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
@@ -119,7 +123,8 @@ where S: ShareChain
             http_server,
             stats_collector: Some(stats_collector),
             shutdown_signal,
-            are_we_synced_with_p2pool,
+            are_we_synced_with_randomx_p2pool,
+            are_we_synced_with_sha3x_p2pool,
         })
     }
 
@@ -148,12 +153,14 @@ where S: ShareChain
     pub async fn start(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
 
-        let sync_start = self.are_we_synced_with_p2pool.clone();
+        let sync_start_sha3 = self.are_we_synced_with_sha3x_p2pool.clone();
+        let sync_start_rx = self.are_we_synced_with_randomx_p2pool.clone();
         let time = self.config.network_silence_delay;
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(time)).await;
             info!(target: LOG_TARGET, "Network silence, Setting as synced");
-            sync_start.store(true, std::sync::atomic::Ordering::Relaxed);
+            sync_start_sha3.store(true, std::sync::atomic::Ordering::Relaxed);
+            sync_start_rx.store(true, std::sync::atomic::Ordering::Relaxed);
         });
 
         if !self.config.p2p_service.is_seed_peer {

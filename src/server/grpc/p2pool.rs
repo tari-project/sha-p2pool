@@ -79,7 +79,8 @@ where S: ShareChain
     list_of_templates_sha3x: RwLock<VecDeque<FixedHash>>,
     template_store_rx: RwLock<HashMap<FixedHash, P2Block>>,
     list_of_templates_rx: RwLock<VecDeque<FixedHash>>,
-    are_we_synced_with_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -97,7 +98,8 @@ where S: ShareChain
         genesis_block_hash: FixedHash,
         stats_broadcast: StatsBroadcastClient,
         squad: Squad,
-        are_we_synced_with_p2pool: Arc<AtomicBool>,
+        are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
+        are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
     ) -> Result<Self, Error> {
         Ok(Self {
             local_peer_id,
@@ -121,17 +123,28 @@ where S: ShareChain
             list_of_templates_sha3x: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_SHA3X + 1)),
             template_store_rx: RwLock::new(HashMap::new()),
             list_of_templates_rx: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_RX + 1)),
-            are_we_synced_with_p2pool,
+            are_we_synced_with_randomx_p2pool,
+            are_we_synced_with_sha3x_p2pool,
         })
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
     pub async fn submit_share_chain_block(&self, block: Arc<P2Block>) -> Result<(), Status> {
-        if !self.are_we_synced_with_p2pool.load(Ordering::Relaxed) {
-            info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
-            return Ok(());
-        }
         let pow_algo = block.original_header.pow.pow_algo;
+        match pow_algo {
+            PowAlgorithm::RandomX => {
+                if !self.are_we_synced_with_randomx_p2pool.load(Ordering::Relaxed) {
+                    info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
+                    return Ok(());
+                }
+            },
+            PowAlgorithm::Sha3x => {
+                if !self.are_we_synced_with_sha3x_p2pool.load(Ordering::Relaxed) {
+                    info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
+                    return Ok(());
+                }
+            },
+        };
         let share_chain = match pow_algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -290,9 +303,11 @@ where S: ShareChain
                 }
 
                 // what happens p2pool difficulty > base chain diff
-                if target_difficulty.as_u64() < miner_data.target_difficulty &&
-                    self.are_we_synced_with_p2pool.load(Ordering::Relaxed)
-                {
+                let synced_status = match pow_algo {
+                    PowAlgorithm::RandomX => self.are_we_synced_with_randomx_p2pool.load(Ordering::Relaxed),
+                    PowAlgorithm::Sha3x => self.are_we_synced_with_sha3x_p2pool.load(Ordering::Relaxed),
+                };
+                if target_difficulty.as_u64() < miner_data.target_difficulty && synced_status {
                     miner_data.target_difficulty = target_difficulty.as_u64();
                 }
             }

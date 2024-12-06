@@ -306,7 +306,8 @@ where S: ShareChain
     inner_request_rx: mpsc::UnboundedReceiver<InnerRequest>,
 
     relay_store: Arc<RwLock<RelayStore>>,
-    are_we_synced_with_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
+    are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
     stats_broadcast_client: StatsBroadcastClient,
     randomx_sync_semaphore: Arc<Semaphore>,
     sha3x_sync_semaphore: Arc<Semaphore>,
@@ -327,7 +328,8 @@ where S: ShareChain
         share_chain_random_x: Arc<S>,
         network_peer_store: PeerStore,
         shutdown_signal: ShutdownSignal,
-        are_we_synced_with_p2pool: Arc<AtomicBool>,
+        are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
+        are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
         stats_broadcast_client: StatsBroadcastClient,
     ) -> Result<Self, Error> {
         let swarm = setup::new_swarm(config).await?;
@@ -355,7 +357,8 @@ where S: ShareChain
             query_tx,
             query_rx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
-            are_we_synced_with_p2pool,
+            are_we_synced_with_randomx_p2pool,
+            are_we_synced_with_sha3x_p2pool,
             stats_broadcast_client,
             randomx_sync_semaphore: Arc::new(Semaphore::new(config.p2p_service.num_concurrent_syncs)),
             sha3x_sync_semaphore: Arc::new(Semaphore::new(config.p2p_service.num_concurrent_syncs)),
@@ -1523,14 +1526,20 @@ where S: ShareChain
 
         let timer = Instant::now();
         let algo = response.algo();
-        let share_chain = match algo {
+        let (share_chain, synced_bool) = match algo {
             PowAlgorithm::RandomX => {
                 self.randomx_last_sync_requested_block = None;
-                self.share_chain_random_x.clone()
+                (
+                    self.share_chain_random_x.clone(),
+                    self.are_we_synced_with_randomx_p2pool.clone(),
+                )
             },
             PowAlgorithm::Sha3x => {
                 self.sha3x_last_sync_requested_block = None;
-                self.share_chain_sha3x.clone()
+                (
+                    self.share_chain_sha3x.clone(),
+                    self.are_we_synced_with_sha3x_p2pool.clone(),
+                )
             },
         };
         let their_tip_hash = *response.tip_hash();
@@ -1544,7 +1553,6 @@ where S: ShareChain
         let tx = self.inner_request_tx.clone();
         let squad = self.config.squad.clone();
         let network_peer_store = self.network_peer_store.clone();
-        let synced_bool = self.are_we_synced_with_p2pool.clone();
 
         tokio::spawn(async move {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
@@ -1751,6 +1759,17 @@ where S: ShareChain
             PowAlgorithm::Sha3x => {
                 self.sha3x_last_sync_requested_block = last_block_from_them;
             },
+        }
+
+        // get the sync bool
+        let sync_status = match algo {
+            PowAlgorithm::RandomX => self.are_we_synced_with_randomx_p2pool.clone(),
+            PowAlgorithm::Sha3x => self.are_we_synced_with_sha3x_p2pool.clone(),
+        };
+        let our_tip = share_chain.get_tip().await?.unwrap_or_default();
+        if our_tip.0 < their_height.saturating_sub(10) {
+            info!(target: SYNC_REQUEST_LOG_TARGET, "We({}) are out by more than 10 blocks from syncing peer({}), seeting sync status to false", our_tip.0, their_height);
+            sync_status.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
         let outbound_request_id = self.swarm.behaviour_mut().catch_up_sync.send_request(
