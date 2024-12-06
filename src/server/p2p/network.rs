@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     fmt::Display,
     fs,
     hash::Hash,
     io::Write,
     net::IpAddr,
-    num::{NonZero, NonZeroUsize},
+    num::NonZeroUsize,
     path::PathBuf,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -289,6 +289,9 @@ enum InnerRequest {
 
 /// Service is the implementation that holds every peer-to-peer related logic
 /// that makes sure that all the communications, syncing, broadcasting etc... are done.
+// Allow type complexity for now. It is caused by the hashmap of arc of rwlock of lru cache
+// it should be removed in future.
+#[allow(clippy::type_complexity)]
 pub struct Service<S>
 where S: ShareChain
 {
@@ -1528,6 +1531,7 @@ where S: ShareChain
         None
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_catch_up_sync_response(
         &mut self,
         response: CatchUpSyncResponse,
@@ -1590,7 +1594,7 @@ where S: ShareChain
             {
                 if let Some(ref last_block) = last_block_from_them {
                     let mut lock = recent_synced_tips.write().await;
-                    lock.put(peer, last_block.clone());
+                    lock.put(peer, *last_block);
                 }
             }
 
@@ -1769,7 +1773,7 @@ where S: ShareChain
         {
             let lock = self.recent_synced_tips.get(&algo).unwrap().read().await;
             for item in lock.iter() {
-                i_have_blocks.insert(0, item.1.clone());
+                i_have_blocks.insert(0, *item.1);
             }
         }
 
