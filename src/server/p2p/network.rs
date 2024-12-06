@@ -1524,8 +1524,14 @@ where S: ShareChain
         let timer = Instant::now();
         let algo = response.algo();
         let share_chain = match algo {
-            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+            PowAlgorithm::RandomX => {
+                self.randomx_last_sync_requested_block = None;
+                self.share_chain_random_x.clone()
+            },
+            PowAlgorithm::Sha3x => {
+                self.sha3x_last_sync_requested_block = None;
+                self.share_chain_sha3x.clone()
+            },
         };
         let their_tip_hash = *response.tip_hash();
         let their_height = response.tip_height();
