@@ -133,13 +133,13 @@ where S: ShareChain
         let pow_algo = block.original_header.pow.pow_algo;
         match pow_algo {
             PowAlgorithm::RandomX => {
-                if !self.are_we_synced_with_randomx_p2pool.load(Ordering::Seq) {
+                if !self.are_we_synced_with_randomx_p2pool.load(Ordering::SeqCst) {
                     info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
                     return Ok(());
                 }
             },
             PowAlgorithm::Sha3x => {
-                if !self.are_we_synced_with_sha3x_p2pool.load(Ordering::Relaxed) {
+                if !self.are_we_synced_with_sha3x_p2pool.load(Ordering::SeqCst) {
                     info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
                     return Ok(());
                 }
@@ -217,9 +217,15 @@ where S: ShareChain
                 .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
 
             // request new block template with shares as coinbases
-            let share_chain = match pow_algo {
-                PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-                PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
+            let (share_chain, synced_status) = match pow_algo {
+                PowAlgorithm::RandomX => (
+                    self.share_chain_random_x.clone(),
+                    self.are_we_synced_with_randomx_p2pool.load(Ordering::SeqCst),
+                ),
+                PowAlgorithm::Sha3x => (
+                    self.share_chain_sha3x.clone(),
+                    self.are_we_synced_with_sha3x_p2pool.load(Ordering::SeqCst),
+                ),
             };
             let coinbase_extra =
                 convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra).unwrap_or_default();
@@ -230,7 +236,7 @@ where S: ShareChain
             .clone();
             // dbg!(&new_tip_block.height, &new_tip_block.hash);
             let shares = share_chain
-                .generate_shares(&new_tip_block)
+                .generate_shares(&new_tip_block, !synced_status)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
@@ -303,10 +309,6 @@ where S: ShareChain
                 }
 
                 // what happens p2pool difficulty > base chain diff
-                let synced_status = match pow_algo {
-                    PowAlgorithm::RandomX => self.are_we_synced_with_randomx_p2pool.load(Ordering::Relaxed),
-                    PowAlgorithm::Sha3x => self.are_we_synced_with_sha3x_p2pool.load(Ordering::Relaxed),
-                };
                 if target_difficulty.as_u64() < miner_data.target_difficulty && synced_status {
                     miner_data.target_difficulty = target_difficulty.as_u64();
                 }

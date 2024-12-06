@@ -99,7 +99,11 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, ShareChainError>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, ShareChainError>;
+    async fn generate_shares(
+        &self,
+        new_tip_block: &P2Block,
+        solo_mine: bool,
+    ) -> Result<Vec<NewBlockCoinbase>, ShareChainError>;
 
     /// Generate a new block on tip of the chain.
     async fn generate_new_tip_block(

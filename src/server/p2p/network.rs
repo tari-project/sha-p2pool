@@ -1512,6 +1512,7 @@ where S: ShareChain
         None
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_catch_up_sync_response(
         &mut self,
         response: CatchUpSyncResponse,
@@ -1613,10 +1614,8 @@ where S: ShareChain
                 let _unused = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
             } else {
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
-
-                // this only gets called after sync completes. So lets make sure we can mine since we completed
-                // a sync
-                synced_bool.store(true, std::sync::atomic::Ordering::Relaxed);
+                // this only gets called after sync completes, lets set synced status = true
+                synced_bool.store(true, std::sync::atomic::Ordering::SeqCst);
                 peer_store_write_lock.reset_catch_up_attempts(&peer);
             }
             if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
@@ -1769,7 +1768,7 @@ where S: ShareChain
         let our_tip = share_chain.get_tip().await?.unwrap_or_default();
         if our_tip.0 < their_height.saturating_sub(10) {
             info!(target: SYNC_REQUEST_LOG_TARGET, "We({}) are out by more than 10 blocks from syncing peer({}), setting sync status to false", our_tip.0, their_height);
-            sync_status.store(false, std::sync::atomic::Ordering::Relaxed);
+            sync_status.store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
         let outbound_request_id = self.swarm.behaviour_mut().catch_up_sync.send_request(

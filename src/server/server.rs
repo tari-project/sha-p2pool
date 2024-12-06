@@ -159,8 +159,8 @@ where S: ShareChain
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(time)).await;
             info!(target: LOG_TARGET, "Network silence, Setting as synced");
-            sync_start_sha3.store(true, std::sync::atomic::Ordering::Relaxed);
-            sync_start_rx.store(true, std::sync::atomic::Ordering::Relaxed);
+            sync_start_sha3.store(true, std::sync::atomic::Ordering::SeqCst);
+            sync_start_rx.store(true, std::sync::atomic::Ordering::SeqCst);
         });
 
         if !self.config.p2p_service.is_seed_peer {

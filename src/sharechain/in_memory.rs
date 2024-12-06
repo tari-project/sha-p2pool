@@ -506,38 +506,49 @@ impl ShareChain for InMemoryShareChain {
     //     res
     // }
 
-    async fn generate_shares(&self, new_tip_block: &P2Block) -> Result<Vec<NewBlockCoinbase>, ShareChainError> {
+    async fn generate_shares(
+        &self,
+        new_tip_block: &P2Block,
+        solo_mine: bool,
+    ) -> Result<Vec<NewBlockCoinbase>, ShareChainError> {
         let mut chain_read_lock = self.p2_chain.read().await;
         // first check if there is a cached hashmap of shares
-        let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
-            cached_shares.clone()
-        } else {
+        let mut miners_to_shares = if solo_mine {
             HashMap::new()
+        } else {
+            let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
+                cached_shares.clone()
+            } else {
+                HashMap::new()
+            };
+            if miners_to_shares.is_empty() {
+                drop(chain_read_lock);
+                // if there is none, lets see if we need to calculate one
+                let mut wl = self.p2_chain.write().await;
+                miners_to_shares = self.get_calculate_and_cache_hashmap_of_shares(&mut wl).await?;
+                chain_read_lock = wl.downgrade();
+            }
+            miners_to_shares
         };
-        if miners_to_shares.is_empty() {
-            drop(chain_read_lock);
-            // if there is none, lets see if we need to calculate one
-            let mut wl = self.p2_chain.write().await;
-            miners_to_shares = self.get_calculate_and_cache_hashmap_of_shares(&mut wl).await?;
-            chain_read_lock = wl.downgrade();
-        }
 
         // lets add the new tip block to the hashmap
         miners_to_shares.insert(
             new_tip_block.miner_wallet_address.to_base58(),
             (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
         );
-        for uncle in &new_tip_block.uncles {
-            let uncle_block = chain_read_lock
-                .level_at_height(uncle.0)
-                .ok_or(ShareChainError::UncleBlockNotFound)?
-                .blocks
-                .get(&uncle.1)
-                .ok_or(ShareChainError::UncleBlockNotFound)?;
-            miners_to_shares.insert(
-                uncle_block.miner_wallet_address.to_base58(),
-                (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
-            );
+        if !solo_mine {
+            for uncle in &new_tip_block.uncles {
+                let uncle_block = chain_read_lock
+                    .level_at_height(uncle.0)
+                    .ok_or(ShareChainError::UncleBlockNotFound)?
+                    .blocks
+                    .get(&uncle.1)
+                    .ok_or(ShareChainError::UncleBlockNotFound)?;
+                miners_to_shares.insert(
+                    uncle_block.miner_wallet_address.to_base58(),
+                    (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+                );
+            }
         }
 
         let mut res = vec![];
