@@ -133,7 +133,7 @@ where S: ShareChain
         let pow_algo = block.original_header.pow.pow_algo;
         match pow_algo {
             PowAlgorithm::RandomX => {
-                if !self.are_we_synced_with_randomx_p2pool.load(Ordering::Relaxed) {
+                if !self.are_we_synced_with_randomx_p2pool.load(Ordering::Seq) {
                     info!(target: LOG_TARGET, "We are not synced yet, not submitting block atm");
                     return Ok(());
                 }
