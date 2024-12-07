@@ -309,7 +309,7 @@ where S: ShareChain
                 }
 
                 // what happens p2pool difficulty > base chain diff
-                if target_difficulty.as_u64() < miner_data.target_difficulty && synced_status {
+                if target_difficulty.as_u64() < miner_data.target_difficulty {
                     miner_data.target_difficulty = target_difficulty.as_u64();
                 }
             }
