@@ -19,7 +19,7 @@ human_format = "1.1.0"
 humantime = "2.1.0"
 itertools = "0.13.0"
 lazy_static = "1.5.0"
-libp2p = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918ccbf5ae1cbec0815a2156079b0fba4ba558", features = [
+libp2p = { version = "0.54.1", features = [
   "dns",
   "identify",
   "macros",

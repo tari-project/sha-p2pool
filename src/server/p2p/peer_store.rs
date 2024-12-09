@@ -128,6 +128,10 @@ impl PeerStore {
         let mut max_pow = 0;
         let mut peer_with_highest = None;
         for record in self.whitelist_peers.values() {
+            // Only consider peers that we have spoken to.
+            if record.last_ping.is_none() {
+                continue;
+            }
             match algo {
                 PowAlgorithm::RandomX => {
                     let achieved_pow = record.peer_info.current_random_x_pow;
@@ -215,7 +219,7 @@ impl PeerStore {
         //         .unwrap_or(peer.peer_info.timestamp) >
         //         timestamp
         // });
-        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
+        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some());
         peers.sort_by_key(|a| a.last_seen());
         peers.reverse();
 
