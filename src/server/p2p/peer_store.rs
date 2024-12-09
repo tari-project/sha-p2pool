@@ -13,7 +13,7 @@ use std::{
 use anyhow::Error;
 use libp2p::PeerId;
 use log::warn;
-use tari_core::proof_of_work::PowAlgorithm;
+use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
@@ -121,6 +121,34 @@ impl PeerStore {
             new_record.last_ping = Some(timestamp);
             *entry = new_record;
         }
+    }
+
+    pub fn max_known_network_height(&self, algo: PowAlgorithm) -> (u64, u128, Option<PeerId>) {
+        let mut max_height = 0;
+        let mut max_pow = 0;
+        let mut peer_with_highest = None;
+        for record in self.whitelist_peers.values() {
+            match algo {
+                PowAlgorithm::RandomX => {
+                    let achieved_pow = record.peer_info.current_random_x_pow;
+                    if achieved_pow > max_pow {
+                        max_pow = achieved_pow;
+                        max_height = record.peer_info.current_random_x_height;
+                        peer_with_highest = Some(record.peer_id.clone());
+                    }
+                },
+                PowAlgorithm::Sha3x => {
+                    let achieved_pow = record.peer_info.current_sha3x_pow;
+                    if achieved_pow > max_pow {
+                        max_pow = achieved_pow;
+                        max_height = record.peer_info.current_sha3x_height;
+                        peer_with_highest = Some(record.peer_id.clone());
+                    }
+                },
+            }
+        }
+
+        (max_height, max_pow, peer_with_highest)
     }
 
     pub fn add_seed_peers(&mut self, mut peer_ids: Vec<PeerId>) {

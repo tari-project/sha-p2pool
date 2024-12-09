@@ -171,6 +171,7 @@ pub(crate) struct Config {
     pub randomx_enabled: bool,
     pub num_concurrent_syncs: usize,
     pub num_sync_tips_to_keep: usize,
+    pub max_missing_blocks_sync_depth: usize,
 }
 
 impl Default for Config {
@@ -197,15 +198,17 @@ impl Default for Config {
             randomx_enabled: true,
             num_concurrent_syncs: 1,
             num_sync_tips_to_keep: 10,
+            max_missing_blocks_sync_depth: 8,
         }
     }
 }
 
-struct SyncShareChain {
+struct SyncMissingBlocks {
     pub algo: PowAlgorithm,
     pub peer: PeerId,
     pub missing_parents: Vec<(u64, FixedHash)>,
     pub is_from_new_block_notify: bool,
+    pub depth: usize,
 }
 
 struct PerformCatchUpSync {
@@ -283,7 +286,7 @@ pub(crate) struct ConnectionCounters {
 }
 
 enum InnerRequest {
-    DoSyncChain(SyncShareChain),
+    DoSyncMissingBlocks(SyncMissingBlocks),
     PerformCatchUpSync(PerformCatchUpSync),
 }
 
@@ -323,6 +326,7 @@ where S: ShareChain
     randomx_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
     sha3x_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
     recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
+    missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
 }
 
 impl<S> Service<S>
@@ -388,6 +392,7 @@ where S: ShareChain
             randomx_in_progress_syncs: HashMap::new(),
             sha3x_in_progress_syncs: HashMap::new(),
             recent_synced_tips,
+            missing_blocks_sync_request_depth: HashMap::new(),
         })
     }
 
@@ -682,15 +687,17 @@ where S: ShareChain
                                             return Ok(MessageAcceptance::Accept);
                                         }
                                         info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
-                                        let sync_share_chain = SyncShareChain {
+                                        let sync_share_chain = SyncMissingBlocks {
                                             algo,
                                             peer: propagation_source,
                                             missing_parents,
                                             is_from_new_block_notify: true,
+                                            depth: 0,
                                         };
 
-                                        let _unused =
-                                            self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                        let _unused = self
+                                            .inner_request_tx
+                                            .send(InnerRequest::DoSyncMissingBlocks(sync_share_chain));
                                         return Ok(MessageAcceptance::Accept);
                                     }
                                 },
@@ -990,7 +997,7 @@ where S: ShareChain
 
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
-    async fn handle_sync_missing_blocks_response(&mut self, response: SyncMissingBlocksResponse) {
+    async fn handle_sync_missing_blocks_response(&mut self, response: SyncMissingBlocksResponse, depth: usize) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
         let peer = *response.peer_id();
 
@@ -1017,20 +1024,26 @@ where S: ShareChain
         info!(target: SYNC_REQUEST_LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
+        let max_sync_depth = self.config.max_missing_blocks_sync_depth;
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
                     let missing_parents = new_tip.into_missing_parents_vec();
                     if !missing_parents.is_empty() {
-                        let sync_share_chain = SyncShareChain {
+                        if depth + 1 > max_sync_depth {
+                            info!(target: SYNC_REQUEST_LOG_TARGET, squad; "Sync depth reached max depth of {}", max_sync_depth);
+                            return;
+                        }
+                        let sync_share_chain = SyncMissingBlocks {
                             algo,
                             peer,
                             missing_parents,
                             is_from_new_block_notify: false,
+                            depth: depth + 1,
                         };
 
-                        let _unused = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                        let _unused = tx.send(InnerRequest::DoSyncMissingBlocks(sync_share_chain));
                     }
                 },
                 Err(error) => {
@@ -1049,19 +1062,25 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_missing_blocks(&mut self, sync_share_chain: SyncShareChain) {
+    async fn sync_missing_blocks(&mut self, sync_share_chain: SyncMissingBlocks) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
-        let SyncShareChain {
+        let SyncMissingBlocks {
             peer,
             algo,
             missing_parents,
             is_from_new_block_notify,
+            depth,
         } = sync_share_chain;
+
+        if depth + 1 > self.config.max_missing_blocks_sync_depth {
+            info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Sync depth reached max depth of {}", self.config.max_missing_blocks_sync_depth);
+            return;
+        }
 
         if is_from_new_block_notify {
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from notify", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         } else {
-            info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from sync", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
+            debug!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from sync", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         }
         if missing_parents.is_empty() {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Sync called but with no missing parents.");
@@ -1073,11 +1092,12 @@ where S: ShareChain
         if !is_from_new_block_notify {
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Sending sync request direct to peer {} for blocks {:?} because we did not receive it from sync", peer, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
 
-            let _outbound_id = self
+            let outbound_id = self
                 .swarm
                 .behaviour_mut()
                 .share_chain_sync
                 .send_request(&peer, SyncMissingBlocksRequest::new(algo, missing_parents.clone()));
+            self.missing_blocks_sync_request_depth.insert(outbound_id, depth + 1);
             return;
         }
         // ask our connected peers rather than everyone swarming the original peer
@@ -1111,10 +1131,11 @@ where S: ShareChain
                 }
             }
 
-            let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
+            let outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
                 &connected_peer,
                 SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
             );
+            self.missing_blocks_sync_request_depth.insert(outbound_id, depth + 1);
             peers_asked += 1;
         }
 
@@ -1285,20 +1306,30 @@ where S: ShareChain
                             } => {
                                 self.handle_sync_missing_blocks_request(channel, request, &peer).await;
                             },
-                            request_response::Message::Response {
-                                request_id: _,
-                                response,
-                            } => match response {
-                                Ok(response) => {
-                                    self.handle_sync_missing_blocks_response(response).await;
-                                },
-                                Err(error) => {
-                                    error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES share chain sync response error: {error:?}");
-                                },
+                            request_response::Message::Response { request_id, response } => {
+                                let current_depth = self.missing_blocks_sync_request_depth.remove(&request_id);
+                                if let Some(depth) = current_depth {
+                                    match response {
+                                        Ok(response) => {
+                                            self.handle_sync_missing_blocks_response(response, depth).await;
+                                        },
+                                        Err(error) => {
+                                            error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES share chain sync response error: {error:?}");
+                                        },
+                                    }
+                                } else {
+                                    warn!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Received a response for a request that we didn't send: {peer:?} -> {response:?}");
+                                    return;
+                                }
                             },
                         },
-                        request_response::Event::OutboundFailure { peer, error, .. } => {
+                        request_response::Event::OutboundFailure {
+                            peer,
+                            error,
+                            request_id,
+                        } => {
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                            self.missing_blocks_sync_request_depth.remove(&request_id);
                             let mut should_grey_list = true;
                             match error {
                                 OutboundFailure::DialFailure => {
@@ -1577,6 +1608,8 @@ where S: ShareChain
         let squad = self.config.squad.clone();
         let network_peer_store = self.network_peer_store.clone();
         let recent_synced_tips = self.recent_synced_tips.get(&algo).cloned().unwrap();
+        // TODO: Remove
+        self.print_debug_chain_graph().await;
 
         tokio::spawn(async move {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
@@ -1610,13 +1643,14 @@ where S: ShareChain
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, new_tip);
             let missing_parents = new_tip.into_missing_parents_vec();
             if !missing_parents.is_empty() {
-                let sync_share_chain = SyncShareChain {
+                let sync_share_chain = SyncMissingBlocks {
                     algo,
                     peer,
                     missing_parents,
                     is_from_new_block_notify: false,
+                    depth: 0,
                 };
-                let _unused = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                let _unused = tx.send(InnerRequest::DoSyncMissingBlocks(sync_share_chain));
             }
 
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
@@ -1645,7 +1679,15 @@ where S: ShareChain
             } else {
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
                 // this only gets called after sync completes, lets set synced status = true
-                synced_bool.store(true, std::sync::atomic::Ordering::SeqCst);
+                let (max_known_network_height, max_known_network_pow, peer_with_best) =
+                    peer_store_write_lock.max_known_network_height(algo);
+
+                if our_pow.as_u128() > max_known_network_pow {
+                    info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] our pow is greater than max known network pow, we are now synced", algo);
+                    synced_bool.store(true, std::sync::atomic::Ordering::SeqCst);
+                } else {
+                    info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] our pow is less than max known network pow, we are not synced, will continue to search for better POW. Best peer is {} at height {}", algo, peer_with_best.map(|p| p.to_base58()).unwrap_or_else(|| "None".to_string()), max_known_network_height);
+                }
                 peer_store_write_lock.reset_catch_up_attempts(&peer);
             }
             if timer.elapsed() > MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT {
@@ -1817,6 +1859,7 @@ where S: ShareChain
             .write()
             .await
             .update_last_sync_attempt(peer, algo);
+
         Ok(())
     }
 
@@ -2000,7 +2043,7 @@ where S: ShareChain
 
     async fn handle_inner_request(&mut self, req: InnerRequest) {
         match req {
-            InnerRequest::DoSyncChain(sync_chain) => {
+            InnerRequest::DoSyncMissingBlocks(sync_chain) => {
                 self.sync_missing_blocks(sync_chain).await;
             },
             InnerRequest::PerformCatchUpSync(perform_catch_up_sync) => {
