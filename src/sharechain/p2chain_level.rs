@@ -48,14 +48,6 @@ impl P2ChainLevel {
         }
     }
 
-    pub fn new_empty(height: u64) -> Self {
-        Self {
-            blocks: HashMap::new(),
-            height,
-            chain_block: BlockHash::zero(),
-        }
-    }
-
     pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
         if self.height != block.height {
             return Err(ShareChainError::InvalidBlock {

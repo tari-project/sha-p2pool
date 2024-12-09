@@ -28,6 +28,7 @@ use std::{
     sync::Arc,
 };
 
+use itertools::Itertools;
 use log::{debug, error, info};
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty};
@@ -125,7 +126,7 @@ impl Display for ChainAddResult {
 pub struct P2Chain {
     pub block_time: u64,
     pub cached_shares: Option<HashMap<String, (u64, Vec<u8>)>>,
-    pub(crate) levels: VecDeque<P2ChainLevel>,
+    pub(crate) levels: HashMap<u64, P2ChainLevel>,
     total_size: u64,
     share_window: u64,
     current_tip: u64,
@@ -143,18 +144,17 @@ impl P2Chain {
         }
     }
 
-    pub fn lowest_level_height(&self) -> Option<u64> {
-        self.levels.back().map(|level| level.height)
+    /// this method will only work corect for chain blocks
+    pub fn lowest_chain_level_height(&self) -> Option<u64> {
+        let min_size = self.current_tip.saturating_sub(self.total_size);
+        if self.levels.contains_key(&min_size) {
+            return Some(min_size);
+        }
+        None
     }
 
     pub fn level_at_height(&self, height: u64) -> Option<&P2ChainLevel> {
-        let tip = self.levels.front()?.height;
-        if height > tip {
-            return None;
-        }
-        let index = tip.checked_sub(height);
-        self.levels
-            .get(usize::try_from(index?).expect("32 bit systems not supported"))
+        self.levels.get(&height)
     }
 
     pub fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<&Arc<P2Block>> {
@@ -169,17 +169,11 @@ impl P2Chain {
     }
 
     pub fn level_at_height_mut(&mut self, height: u64) -> Option<&mut P2ChainLevel> {
-        let tip = self.levels.front()?.height;
-        if height > tip {
-            return None;
-        }
-        let index = tip.checked_sub(height);
-        self.levels
-            .get_mut(usize::try_from(index?).expect("32 bit systems not supported"))
+        self.levels.get_mut(&height)
     }
 
     pub fn new_empty(total_size: u64, share_window: u64, block_time: u64) -> Self {
-        let levels = VecDeque::with_capacity(usize::try_from(total_size).expect("Only 64bit supported") + 1);
+        let levels = HashMap::new();
         let lwma =
             LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, block_time).expect("Failed to create LWMA");
         Self {
@@ -193,20 +187,14 @@ impl P2Chain {
         }
     }
 
-    pub fn is_full(&self) -> bool {
-        // lets check to see if we are over the max sync length
-        // Ideally this limit should not be reached ever
-        self.levels.len() as u64 >= self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC
-    }
-
     fn cleanup_chain(&mut self) -> Result<(), ShareChainError> {
-        let mut first_index = self.lowest_level_height().unwrap_or(0);
-        let mut current_chain_length = self.current_tip.saturating_sub(first_index);
+        let mut current_chain_length = self.levels.len() as u64;
         // let see if we are the limit for the current chain
-        while current_chain_length > self.total_size + SAFETY_MARGIN {
-            self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
-            first_index = self.levels.back().map(|level| level.height).unwrap_or(0);
-            current_chain_length = self.current_tip.saturating_sub(first_index);
+        let mut keys: Vec<u64> = self.levels.keys().copied().sorted().collect();
+        while current_chain_length > self.total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC {
+            self.levels.remove(&keys[0]);
+            keys.remove(0);
+            current_chain_length = self.levels.len() as u64;
         }
         Ok(())
     }
@@ -578,73 +566,21 @@ impl P2Chain {
         // edge case no current chain, lets just add
         if self.levels.is_empty() {
             let new_level = P2ChainLevel::new(block);
-            self.levels.push_front(new_level);
+            self.levels.insert(new_block_height, new_level);
             return self.verify_chain(new_block_height, block_hash);
         }
-
-        // now lets add the block
-        // The process is:
-        // 1. If the height exists in level, then add the block to the level
-        // 2. Else, we need to create a new level.
-        //   a. If the height is higher than the current front, add empty levels so that there are no gaps
-        //   b. Then add the level
-        //   c. If the height is lower than the back and the chain is full, don't do anything
-        //   d. Otherwise, add empty levels at the back until we reach the block.
         match self.level_at_height_mut(new_block_height) {
             Some(level) => {
                 level.add_block(block)?;
-                return self.verify_chain(new_block_height, block_hash);
+                self.verify_chain(new_block_height, block_hash)
             },
             None => {
-                // So things got a bit more complicated, we dont have this level
-                while self.levels.front().map(|level| level.height).unwrap_or(0) < new_block_height.saturating_sub(1) {
-                    if self.is_full() {
-                        self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
-                    }
-                    let level = P2ChainLevel::new_empty(
-                        self.levels.front().expect("we already checked its not empty").height + 1,
-                    );
-                    self.levels.push_front(level);
-                }
-                if self.levels.front().map(|level| level.height).unwrap_or(0) < new_block_height {
-                    if self.is_full() {
-                        self.levels.pop_back().ok_or(ShareChainError::BlockLevelNotFound)?;
-                    }
-                    let level = P2ChainLevel::new(block);
-                    self.levels.push_front(level);
-                    return self.verify_chain(new_block_height, block_hash);
-                }
-                // if its not at the front, it might be at the back
-                // if its full we can exit as there is no chance of it being at the bottom end with a whole chain in
-                // front of it.
-                if !self.is_full() {
-                    while self.levels.back().expect("we already checked its not empty").height > block.height + 1 {
-                        if self.is_full() {
-                            return Ok(ChainAddResult::default());
-                        }
-                        let level = P2ChainLevel::new_empty(
-                            self.levels
-                                .back()
-                                .expect("we already checked its not empty")
-                                .height
-                                .saturating_sub(1),
-                        );
-                        self.levels.push_back(level);
-                    }
-                    if self.lowest_level_height().unwrap_or(0) > block.height {
-                        if self.is_full() {
-                            return Ok(ChainAddResult::default());
-                        }
-                        let level = P2ChainLevel::new(block);
-
-                        self.levels.push_back(level);
-                    }
-                    return self.verify_chain(new_block_height, block_hash);
-                }
+                let height = block.height;
+                let level = P2ChainLevel::new(block);
+                self.levels.insert(height, level);
+                self.verify_chain(new_block_height, block_hash)
             },
         }
-        // so the chain is full, we should not add below the height of the lowest block
-        Ok(ChainAddResult::default())
     }
 
     pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
@@ -680,7 +616,7 @@ impl P2Chain {
     }
 
     pub fn get_max_chain_length(&self) -> usize {
-        let first_index = self.lowest_level_height().unwrap_or(0);
+        let first_index = self.lowest_chain_level_height().unwrap_or(0);
         let current_chain_length = self.current_tip.saturating_sub(first_index);
         usize::try_from(current_chain_length).expect("32 bit systems not supported")
     }
@@ -734,7 +670,7 @@ mod test {
         let mut chain = P2Chain::new_empty(10, 5, 10);
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
         let mut prev_block = None;
-        for i in 0..41 {
+        for i in 0..2100 {
             tari_block.header.nonce = i;
             let address = new_random_address();
             let block = P2BlockBuilder::new(prev_block.as_ref())
@@ -751,15 +687,9 @@ mod test {
         }
         // 0..9 blocks should have been trimmed out
 
-        for i in 10..41 {
-            let level = chain.level_at_height(i).unwrap();
-            assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, i);
+        for i in 0..70 {
+            assert!(chain.level_at_height(i).is_none());
         }
-
-        let level = chain.level_at_height(10).unwrap();
-        assert_eq!(level.block_in_main_chain().unwrap().original_header.nonce, 10);
-
-        assert!(chain.level_at_height(0).is_none());
     }
 
     #[test]
@@ -861,7 +791,7 @@ mod test {
         assert!(chain.get_tip().is_none());
         assert_eq!(chain.current_tip, 0);
         assert_eq!(chain.levels.len(), 1);
-        assert_eq!(chain.levels[0].height, 6);
+        assert_eq!(chain.levels[&6].height, 6);
 
         for i in (2..6).rev() {
             chain.add_block_to_chain(blocks[i].clone()).unwrap();
@@ -970,7 +900,7 @@ mod test {
         assert!(chain.get_tip().is_none());
         assert_eq!(chain.current_tip, 0);
         assert_eq!(chain.levels.len(), 1);
-        assert_eq!(chain.levels[0].height, 6);
+        assert_eq!(chain.levels[&6].height, 6);
 
         for i in (2..6).rev() {
             chain.add_block_to_chain(blocks[i].clone()).unwrap();
@@ -993,7 +923,7 @@ mod test {
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
-        for i in 0..41 {
+        for i in 0..2100 {
             tari_block.header.nonce = i;
             let address = new_random_address();
             let block = P2BlockBuilder::new(prev_block.as_ref())
@@ -1007,18 +937,94 @@ mod test {
 
             prev_block = Some(block.clone());
             chain.add_block_to_chain(block.clone()).unwrap();
-        }
 
-        for i in 11..41 {
             let level = chain.level_at_height(i).unwrap();
             let block = level.block_in_main_chain().unwrap();
-            let parent = chain.get_parent_block(block).unwrap();
-            assert_eq!(parent.original_header.nonce, i - 1);
+            if i > 0 {
+                let parent = chain.get_parent_block(block).unwrap();
+                assert_eq!(parent.original_header.nonce, i - 1);
+            }
         }
 
-        let level = chain.level_at_height(10).unwrap();
-        let block = level.block_in_main_chain().unwrap();
-        assert!(chain.get_parent_block(block).is_none());
+        for i in 0..70 {
+            assert!(chain.level_at_height(i).is_none());
+        }
+    }
+
+    #[test]
+    fn test_dont_set_tip_on_single_high_height() {
+        let mut chain = P2Chain::new_empty(10, 5, 10);
+
+        let mut prev_block = None;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..5 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2BlockBuilder::new(prev_block.as_ref())
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .build()
+                .unwrap();
+            prev_block = Some(block.clone());
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height, i);
+        }
+        // we do this so we can add a missing parent or 2
+        let address = new_random_address();
+        let block = P2BlockBuilder::new(prev_block.as_ref())
+            .with_timestamp(EpochTime::now())
+            .with_height(100)
+            .with_tari_block(tari_block.clone())
+            .unwrap()
+            .with_miner_wallet_address(address.clone())
+            .build()
+            .unwrap();
+        prev_block = Some(block.clone());
+        let address = new_random_address();
+        let block = P2BlockBuilder::new(prev_block.as_ref())
+            .with_timestamp(EpochTime::now())
+            .with_height(2000)
+            .with_tari_block(tari_block.clone())
+            .unwrap()
+            .with_miner_wallet_address(address.clone())
+            .build()
+            .unwrap();
+        prev_block = Some(block.clone());
+
+        chain.add_block_to_chain(block.clone()).unwrap();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(level.height, 4);
+
+        let address = new_random_address();
+        let block = P2BlockBuilder::new(prev_block.as_ref())
+            .with_timestamp(EpochTime::now())
+            .with_height(1000)
+            .with_tari_block(tari_block.clone())
+            .unwrap()
+            .with_miner_wallet_address(address.clone())
+            .build()
+            .unwrap();
+        prev_block = Some(block.clone());
+        let address = new_random_address();
+        let block = P2BlockBuilder::new(prev_block.as_ref())
+            .with_timestamp(EpochTime::now())
+            .with_height(20000)
+            .with_tari_block(tari_block.clone())
+            .unwrap()
+            .with_miner_wallet_address(address.clone())
+            .build()
+            .unwrap();
+
+        chain.add_block_to_chain(block.clone()).unwrap();
+
+        let level = chain.get_tip().unwrap();
+        assert_eq!(level.height, 4);
     }
 
     #[test]

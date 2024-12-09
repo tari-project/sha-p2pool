@@ -323,12 +323,13 @@ impl InMemoryShareChain {
     ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
         let mut res = Vec::with_capacity(page_size);
         let mut num_actual_blocks = 0;
+        let lowest_height = p2_chain.lowest_chain_level_height().unwrap_or(0);
         let mut level = if let Some(level) = p2_chain.level_at_height(start_height.unwrap_or(0)) {
             level
         } else {
             // we dont have that block, see if we have a higher lowest block than they are asking for and start there
-            if start_height.unwrap_or(0) < p2_chain.levels.back().map(|l| l.height).unwrap_or(0) {
-                p2_chain.levels.back().unwrap()
+            if start_height.unwrap_or(0) < lowest_height {
+                p2_chain.level_at_height(lowest_height).unwrap()
             } else {
                 return Ok(res);
             }
