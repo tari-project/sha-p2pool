@@ -86,6 +86,7 @@ where S: ShareChain
 impl<S> ShaP2PoolGrpc<S>
 where S: ShareChain
 {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         local_peer_id: PeerId,
         base_node_address: String,

@@ -1319,7 +1319,6 @@ where S: ShareChain
                                     }
                                 } else {
                                     warn!(target: SYNC_REQUEST_LOG_TARGET, squad = &self.config.squad; "Received a response for a request that we didn't send: {peer:?} -> {response:?}");
-                                    return;
                                 }
                             },
                         },

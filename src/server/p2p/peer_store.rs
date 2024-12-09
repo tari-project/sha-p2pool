@@ -13,7 +13,7 @@ use std::{
 use anyhow::Error;
 use libp2p::PeerId;
 use log::warn;
-use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
+use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
@@ -138,7 +138,7 @@ impl PeerStore {
                     if achieved_pow > max_pow {
                         max_pow = achieved_pow;
                         max_height = record.peer_info.current_random_x_height;
-                        peer_with_highest = Some(record.peer_id.clone());
+                        peer_with_highest = Some(record.peer_id);
                     }
                 },
                 PowAlgorithm::Sha3x => {
@@ -146,7 +146,7 @@ impl PeerStore {
                     if achieved_pow > max_pow {
                         max_pow = achieved_pow;
                         max_height = record.peer_info.current_sha3x_height;
-                        peer_with_highest = Some(record.peer_id.clone());
+                        peer_with_highest = Some(record.peer_id);
                     }
                 },
             }
