@@ -127,9 +127,10 @@ impl PeerStore {
         let mut max_height = 0;
         let mut max_pow = 0;
         let mut peer_with_highest = None;
+        let now = EpochTime::now().as_u64();
         for record in self.whitelist_peers.values() {
             // Only consider peers that we have spoken to.
-            if record.last_ping.is_none() {
+            if record.last_ping.map(|t| t.as_u64() < now - 60).unwrap_or(true) {
                 continue;
             }
             match algo {
