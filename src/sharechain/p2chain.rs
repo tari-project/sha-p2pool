@@ -655,6 +655,8 @@ impl P2Chain {
 
 #[cfg(test)]
 mod test {
+    use std::cmp;
+
     use tari_core::{
         blocks::{Block, BlockHeader},
         proof_of_work::{Difficulty, DifficultyAdjustment},
@@ -684,8 +686,9 @@ mod test {
             prev_block = Some(block.clone());
 
             chain.add_block_to_chain(block.clone()).unwrap();
+            assert_eq!(chain.get_max_chain_length() as u64, cmp::min(i, 10));
+            assert_eq!(chain.lowest_chain_level_height().unwrap(), i.saturating_sub(10));
         }
-        // 0..9 blocks should have been trimmed out
 
         for i in 0..70 {
             assert!(chain.level_at_height(i).is_none());
@@ -957,7 +960,7 @@ mod test {
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
-        for i in 0..5 {
+        for i in 0..20 {
             tari_block.header.nonce = i;
             let address = new_random_address();
             let block = P2BlockBuilder::new(prev_block.as_ref())
@@ -999,7 +1002,7 @@ mod test {
         chain.add_block_to_chain(block.clone()).unwrap();
 
         let level = chain.get_tip().unwrap();
-        assert_eq!(level.height, 4);
+        assert_eq!(level.height, 19);
 
         let address = new_random_address();
         let block = P2BlockBuilder::new(prev_block.as_ref())
@@ -1023,8 +1026,13 @@ mod test {
 
         chain.add_block_to_chain(block.clone()).unwrap();
 
-        let level = chain.get_tip().unwrap();
-        assert_eq!(level.height, 4);
+        assert_eq!(chain.get_height(), 19);
+        assert_eq!(chain.get_max_chain_length() as u64, 10);
+        assert_eq!(chain.lowest_chain_level_height().unwrap(), 9);
+
+        // let see if those higher blocks are also there
+        assert!(chain.levels.contains_key(&2000));
+        assert!(chain.levels.contains_key(&20000));
     }
 
     #[test]
