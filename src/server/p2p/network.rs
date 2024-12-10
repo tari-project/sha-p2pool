@@ -1680,7 +1680,7 @@ where S: ShareChain
                 let (max_known_network_height, max_known_network_pow, peer_with_best) =
                     peer_store_write_lock.max_known_network_height(algo);
 
-                if our_pow.as_u128() > max_known_network_pow || Some(&peer) == peer_with_best.as_ref() {
+                if our_pow.as_u128() >= max_known_network_pow || Some(&peer) == peer_with_best.as_ref() {
                     info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] our pow is greater than max known network pow, we are now synced", algo);
                     synced_bool.store(true, std::sync::atomic::Ordering::SeqCst);
                 } else {
