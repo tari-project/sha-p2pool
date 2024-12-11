@@ -635,7 +635,7 @@ where S: ShareChain
 
                             let our_tip = share_chain.tip_height().await.unwrap_or(0);
                             let our_pow = share_chain.get_total_chain_pow().await;
-                            if payload.total_accumulated_difficulty < our_pow.as_u128() &&
+                            if payload.total_proof_of_work() < our_pow &&
                                 payload
                                     .new_blocks
                                     .iter()

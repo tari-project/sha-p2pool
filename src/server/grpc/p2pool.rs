@@ -162,8 +162,7 @@ where S: ShareChain
                     .collect();
                 new_blocks.append(&mut uncles);
                 if new_tip.new_tip.is_some() {
-                    let total_pow = share_chain.get_total_chain_pow().await;
-                    let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks, total_pow);
+                    let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks);
                     let res = self
                         .p2p_client
                         .broadcast_block(notify)
