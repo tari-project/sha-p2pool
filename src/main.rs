@@ -57,7 +57,6 @@ async fn main() -> anyhow::Result<()> {
         let mut file = File::create("panic.log").unwrap();
         file.write_all(format!("Panic at {}: {}", location, message).as_bytes())
             .unwrap();
-        process::exit(500);
     }));
 
     Cli::parse().handle_command(Shutdown::new().to_signal()).await?;
