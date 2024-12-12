@@ -2269,10 +2269,14 @@ where S: ShareChain
     }
 
     async fn print_debug_chain_graph(&self) {
-        self.print_debug_chain_graph_inner(&self.share_chain_random_x, "randomx")
-            .await;
-        self.print_debug_chain_graph_inner(&self.share_chain_sha3x, "sha3x")
-            .await;
+        if self.config.randomx_enabled {
+            self.print_debug_chain_graph_inner(&self.share_chain_random_x, "randomx")
+                .await;
+        }
+        if self.config.sha3x_enabled {
+            self.print_debug_chain_graph_inner(&self.share_chain_sha3x, "sha3x")
+                .await;
+        }
     }
 
     async fn print_debug_chain_graph_inner(&self, chain: &S, prefix: &str) {
@@ -2299,12 +2303,14 @@ where S: ShareChain
         for b in blocks {
             file.write_all(
                 format!(
-                    "B{} [label=\"{} - {} {}{}\"]\n",
+                    "B{} [label=\"{} - {} {}{} {}..{}\"]\n",
                     &b.hash.to_hex()[0..8],
                     &b.height,
                     &b.hash.to_hex()[0..8],
                     if b.verified { "" } else { "UNVERIFIED " },
-                    formatter.format(b.target_difficulty().as_u64() as f64)
+                    formatter.format(b.target_difficulty().as_u64() as f64),
+                    &b.miner_wallet_address.to_base58()[0..6],
+                    &b.miner_wallet_address.to_base58()[84..]
                 )
                 .as_bytes(),
             )
