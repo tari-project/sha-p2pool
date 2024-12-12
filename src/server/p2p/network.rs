@@ -118,6 +118,7 @@ const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: u64 = 500;
+const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 10;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
@@ -1487,6 +1488,7 @@ where S: ShareChain
         request: CatchUpSyncRequest,
     ) {
         let our_peer_id = *self.swarm.local_peer_id();
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync request from {} for chain {}", our_peer_id, request.algo());
         let algo = request.algo();
         let share_chare = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
@@ -1495,7 +1497,11 @@ where S: ShareChain
         let squad = self.config.squad.clone();
 
         let (blocks, our_tip, our_achieved_pow) = match share_chare
-            .request_sync(request.i_have(), 20, request.last_block_received())
+            .request_sync(
+                request.i_have(),
+                MAX_CATCH_UP_BLOCKS_TO_RETURN,
+                request.last_block_received(),
+            )
             .await
         {
             Ok((blocks, our_tip, our_achieved_pow)) => {
