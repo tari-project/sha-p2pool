@@ -21,7 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Display, Formatter},
     ops::Deref,
@@ -29,7 +29,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::*;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty};
 use tari_utilities::hex::Hex;
@@ -219,17 +219,19 @@ impl P2Chain {
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<ChainAddResult, ShareChainError> {
         let mut next_level = VecDeque::new();
+        let mut processed = HashSet::new();
         next_level.push_back((new_block_height, hash));
         let mut new_tip = ChainAddResult::default();
         while let Some((next_height, next_hash)) = next_level.pop_front() {
             match self.verify_chain_inner(next_height, next_hash) {
                 Ok((add_result, do_next_level)) => {
+                    processed.insert(next_hash);
                     new_tip.combine(add_result);
                     if new_tip.missing_blocks.len() >= MAX_MISSING_PARENTS {
                         return Ok(new_tip);
                     }
                     for item in do_next_level {
-                        if next_level.contains(&item) {
+                        if next_level.contains(&item) || processed.contains(&item.1) {
                             continue;
                         }
                         // Don't get into an infinite loop
@@ -251,7 +253,7 @@ impl P2Chain {
         new_block_height: u64,
         hash: FixedHash,
     ) -> Result<(ChainAddResult, Vec<(u64, FixedHash)>), ShareChainError> {
-        info!(target: LOG_TARGET, "Trying to verify new block to add: {}:{}", new_block_height, &hash.to_hex()[0..8]);
+        trace!(target: LOG_TARGET, "Trying to verify new block to add: {}:{}", new_block_height, &hash.to_hex()[0..8]);
         // we should validate what we can if a block is invalid, we should delete it.
         let mut new_tip = ChainAddResult::default();
         let block = self
