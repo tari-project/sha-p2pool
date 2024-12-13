@@ -327,29 +327,6 @@ impl PeerStore {
         Ok(())
     }
 
-    pub async fn load_whitelist(&mut self, path: &Path) -> Result<(), Error> {
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let whitelist: HashMap<String, PeerInfo> = serde_json::from_reader(reader)?;
-        self.whitelist_peers = whitelist
-            .iter()
-            .filter_map(|(peer_id, peer_info)| {
-                if let Ok(p) = PeerId::from_str(peer_id) {
-                    if peer_info.version < PROTOCOL_VERSION {
-                        return None;
-                    }
-                    Some((
-                        peer_id.clone(),
-                        PeerStoreRecord::new(p, peer_info.clone()).with_timestamp(EpochTime::now().as_u64()),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(())
-    }
-
     pub fn clear_grey_list(&mut self) {
         for (peer_id, record) in self.greylist_peers.drain() {
             if record.num_grey_listings >= MAX_GREY_LISTINGS {
