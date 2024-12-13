@@ -3,20 +3,16 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
-    io::{BufReader, Write},
-    path::Path,
     str::FromStr,
     time::Instant,
 };
 
-use anyhow::Error;
 use libp2p::PeerId;
 use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
+use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo};
 
 const LOG_TARGET: &str = "tari::p2pool::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
@@ -49,11 +45,6 @@ impl PeerStoreRecord {
             catch_up_attempts: 0,
             last_ping: None,
         }
-    }
-
-    pub fn with_timestamp(mut self, timestamp: u64) -> Self {
-        self.peer_info.timestamp = timestamp;
-        self
     }
 
     pub fn last_seen(&self) -> EpochTime {
@@ -313,41 +304,6 @@ impl PeerStore {
 
         // self.set_tip_of_block_heights().await;
         AddPeerStatus::NewPeer
-    }
-
-    pub async fn save_whitelist(&self, path: &Path) -> Result<(), Error> {
-        let mut file = File::create(path)?;
-        let whitelist = self
-            .whitelist_peers
-            .iter()
-            .map(|(peer_id, record)| (peer_id.clone(), record.peer_info.clone()))
-            .collect::<HashMap<String, PeerInfo>>();
-        let json = serde_json::to_string(&whitelist)?;
-        file.write_all(json.as_bytes())?;
-        Ok(())
-    }
-
-    pub async fn load_whitelist(&mut self, path: &Path) -> Result<(), Error> {
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let whitelist: HashMap<String, PeerInfo> = serde_json::from_reader(reader)?;
-        self.whitelist_peers = whitelist
-            .iter()
-            .filter_map(|(peer_id, peer_info)| {
-                if let Ok(p) = PeerId::from_str(peer_id) {
-                    if peer_info.version < PROTOCOL_VERSION {
-                        return None;
-                    }
-                    Some((
-                        peer_id.clone(),
-                        PeerStoreRecord::new(p, peer_info.clone()).with_timestamp(EpochTime::now().as_u64()),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        Ok(())
     }
 
     pub fn clear_grey_list(&mut self) {

@@ -167,7 +167,6 @@ pub(crate) struct Config {
     pub is_seed_peer: bool,
     pub debug_print_chain: bool,
     pub sync_job_enabled: bool,
-    pub peer_list_folder: PathBuf,
     pub sha3x_enabled: bool,
     pub randomx_enabled: bool,
     pub num_concurrent_syncs: usize,
@@ -182,7 +181,6 @@ impl Default for Config {
             seed_peers: vec![],
             peer_info_publish_interval: Duration::from_secs(60 * 15),
             stable_peer: true,
-            peer_list_folder: PathBuf::from("."),
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
@@ -2072,9 +2070,6 @@ where S: ShareChain
         let mut chain_height_exchange_interval = tokio::time::interval(self.config.chain_height_exchange_interval);
         chain_height_exchange_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut whitelist_save_interval = tokio::time::interval(Duration::from_secs(60));
-        whitelist_save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
         let mut connection_stats_publish = tokio::time::interval(Duration::from_secs(10));
         connection_stats_publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -2094,7 +2089,6 @@ where S: ShareChain
         tokio::pin!(grey_list_clear_interval);
         tokio::pin!(black_list_clear_interval);
         tokio::pin!(chain_height_exchange_interval);
-        tokio::pin!(whitelist_save_interval);
         tokio::pin!(connection_stats_publish);
         tokio::pin!(seek_connections_interval);
 
@@ -2126,7 +2120,8 @@ where S: ShareChain
                         let info = self.swarm.network_info();
                         let counters = info.connection_counters();
 
-                        if (counters.num_established_outgoing() + counters.num_pending_outgoing()) > 20 {
+                        let num_connections = counters.num_established_incoming() + counters.num_established_outgoing();
+                        if num_connections > 20 {
                             continue;
                         }
                         let mut num_dialed = 0;
@@ -2134,11 +2129,9 @@ where S: ShareChain
                         // Rather try and search good peers rather than randomly dialing
                         // 1000 peers will take a long time to get through
                         for record in store_read_lock.whitelist_peers().values() {
-                            // dbg!("Connecting");
-                            // dbg!("Dialing peer: {:?} on {:?}", record.peer_id, record.peer_info.public_addresses());
-                            // let peer_id = peers.0;
+                            // Only dial seed peers if we have 0 connections
                             if !self.swarm.is_connected(&record.peer_id)
-                             && !store_read_lock.is_seed_peer(&record.peer_id)  {
+                             && (num_connections == 0 || !store_read_lock.is_seed_peer(&record.peer_id))  {
                                 let _unused = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 30 connections
@@ -2224,21 +2217,7 @@ where S: ShareChain
                         warn!(target: LOG_TARGET, "Chain height exchange took too long: {:?}", timer.elapsed());
                     }
                 },
-                _ = whitelist_save_interval.tick() => {
-                    let timer = Instant::now();
-                    match self.network_peer_store.write().await.save_whitelist(&self.config.peer_list_folder.join("whitelist_peers.json")).await{
-                        Ok(_) => {
-                            info!(target: LOG_TARGET, "Whitelist saved");
-                        },
-                        Err(e) => {
-                            error!(target: LOG_TARGET, "Failed to save whitelist: {e:?}");
-                        }
-                    }
-                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
-                        warn!(target: LOG_TARGET, "Saving whitelist took too long: {:?}", timer.elapsed());
-                    }
-                },
-                _ = grey_list_clear_interval.tick() => {
+               _ = grey_list_clear_interval.tick() => {
                     let timer = Instant::now();
                     self.network_peer_store.write().await.clear_grey_list();
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -2500,23 +2479,6 @@ where S: ShareChain
 
         warn!(target: LOG_TARGET, "Starting main loop");
 
-        let _unused = self
-            .network_peer_store
-            .write()
-            .await
-            .load_whitelist(&self.config.peer_list_folder.join("whitelist_peers.json"))
-            .await
-            .inspect_err(|e| warn!(target: LOG_TARGET, "Failed to load whitelist: {e:?}"));
-
-        for record in self.network_peer_store.read().await.whitelist_peers().values() {
-            for address in record.peer_info.public_addresses() {
-                // self.swarm
-                // .behaviour_mut()
-                // .kademlia
-                // .add_address(&record.peer_id, address.clone());
-                self.swarm.add_peer_address(record.peer_id, address);
-            }
-        }
         self.main_loop().await?;
         info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())
