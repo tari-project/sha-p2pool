@@ -23,6 +23,7 @@ pub struct Config {
     pub max_relay_circuits_per_peer: Option<usize>,
     pub block_time: u64,
     pub share_window: u64,
+    pub block_cache_path: PathBuf,
 }
 
 impl Default for Config {
@@ -41,6 +42,7 @@ impl Default for Config {
             max_relay_circuits_per_peer: None,
             block_time: 20,
             share_window: 2160,
+            block_cache_path: PathBuf::from("block_cache"),
         }
     }
 }

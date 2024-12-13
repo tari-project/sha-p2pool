@@ -2124,6 +2124,16 @@ where S: ShareChain
                         if num_connections > 20 {
                             continue;
                         }
+                         if num_connections == 0 {
+                            match self.dial_seed_peers().await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
+                                },
+                            }
+                            continue;
+                         }
+
                         let mut num_dialed = 0;
                         let store_read_lock = self.network_peer_store.read().await;
                         // Rather try and search good peers rather than randomly dialing
@@ -2131,7 +2141,7 @@ where S: ShareChain
                         for record in store_read_lock.whitelist_peers().values() {
                             // Only dial seed peers if we have 0 connections
                             if !self.swarm.is_connected(&record.peer_id)
-                             && (num_connections == 0 || !store_read_lock.is_seed_peer(&record.peer_id))  {
+                             &&  !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _unused = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 30 connections
@@ -2430,6 +2440,13 @@ where S: ShareChain
         self.query_tx.clone()
     }
 
+    pub async fn dial_seed_peers(&mut self) -> Result<(), Error> {
+        info!(target: LOG_TARGET, squad = &self.config.squad; "Dialing seed peers...");
+        let seed_peers = self.parse_seed_peers().await?;
+        self.join_seed_peers(seed_peers).await?;
+        Ok(())
+    }
+
     /// Starts p2p service.
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -2457,8 +2474,9 @@ where S: ShareChain
         }
         self.subscribe_to_topics().await;
 
-        let seed_peers = self.parse_seed_peers().await?;
-        self.join_seed_peers(seed_peers).await?;
+        self.dial_seed_peers().await?;
+        // let seed_peers = self.parse_seed_peers().await?;
+        // self.join_seed_peers(seed_peers).await?;
 
         // start initial share chain sync
         // let in_progress = self.sync_in_progress.clone();

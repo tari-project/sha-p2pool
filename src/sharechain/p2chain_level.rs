@@ -25,30 +25,30 @@ use std::{collections::HashMap, sync::Arc};
 
 use tari_common_types::types::{BlockHash, FixedHash};
 
+use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{error::ShareChainError, lmdb_block_storage::LmdbBlockStorage, p2block::P2Block};
 
 /// A collection of blocks with the same height.
-pub struct P2ChainLevel {
+pub struct P2ChainLevel<T: BlockCache> {
     // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
-    blocks: LmdbBlockStorage,
+    block_cache: Arc<T>,
     height: u64,
     chain_block: BlockHash,
 }
 
-impl P2ChainLevel {
-    pub fn new(block: Arc<P2Block>) -> Self {
+impl<T: BlockCache> P2ChainLevel<T> {
+    pub fn new(block: Arc<P2Block>, block_cache: Arc<T>) -> Self {
         // let mut blocks = HashMap::new();
         // although this is the only block on this level, it might not be part of the main chain, so we need to set this
         // later
         let chain_block = FixedHash::zero();
         let height = block.height;
         // blocks.insert(block.hash, block);
-        todo!();
-        // Self {
-        // blocks,
-        // height,
-        // chain_block,
-        // }
+        Self {
+            block_cache,
+            height,
+            chain_block,
+        }
     }
 
     pub fn height(&self) -> u64 {
@@ -80,9 +80,8 @@ impl P2ChainLevel {
         // self.blocks.get(&self.chain_block)
     }
 
-    pub fn get(&self, hash: &BlockHash) -> Option<&Arc<P2Block>> {
-        todo!()
-        // self.blocks.get(hash)
+    pub fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
+        self.block_cache.get(hash)
     }
 
     pub fn contains(&self, hash: &BlockHash) -> bool {
@@ -98,10 +97,13 @@ impl P2ChainLevel {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use tari_utilities::epoch_time::EpochTime;
 
     use crate::sharechain::{
         in_memory::test::new_random_address,
+        lmdb_block_storage::test::InMemoryBlockCache,
         p2block::P2BlockBuilder,
         p2chain_level::P2ChainLevel,
     };
@@ -115,7 +117,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        let mut chain_level = P2ChainLevel::new(block.clone());
+        let mut chain_level = P2ChainLevel::new(block.clone(), Arc::new(InMemoryBlockCache::new()));
         chain_level.chain_block = block.generate_hash();
 
         assert_eq!(

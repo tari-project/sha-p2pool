@@ -5,6 +5,7 @@ use std::{
     fs::File,
     io::Write,
     panic,
+    process,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -56,6 +57,11 @@ async fn main() -> anyhow::Result<()> {
         let mut file = File::create("panic.log").unwrap();
         file.write_all(format!("Panic at {}: {}", location, message).as_bytes())
             .unwrap();
+        if cfg!(debug_assertions) {
+            // In debug mode, we want to see the panic message
+            eprintln!("Panic occurred at {}: {}", location, message);
+            process::exit(500);
+        }
     }));
 
     Cli::parse().handle_command(Shutdown::new().to_signal()).await?;

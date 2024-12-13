@@ -21,7 +21,13 @@ use tari_core::{
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use super::{MAIN_REWARD_SHARE, MIN_RANDOMX_DIFFICULTY, MIN_SHA3X_DIFFICULTY, UNCLE_REWARD_SHARE};
+use super::{
+    lmdb_block_storage::LmdbBlockStorage,
+    MAIN_REWARD_SHARE,
+    MIN_RANDOMX_DIFFICULTY,
+    MIN_SHA3X_DIFFICULTY,
+    UNCLE_REWARD_SHARE,
+};
 use crate::{
     server::{http::stats_collector::StatsBroadcastClient, Config, PROTOCOL_VERSION},
     sharechain::{
@@ -45,7 +51,7 @@ pub const UNCLE_START_HEIGHT: u64 = 10;
 pub const MAX_MISSING_PARENTS: usize = 10;
 
 pub(crate) struct InMemoryShareChain {
-    p2_chain: Arc<RwLock<P2Chain>>,
+    p2_chain: Arc<RwLock<P2Chain<LmdbBlockStorage>>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
@@ -73,6 +79,7 @@ impl InMemoryShareChain {
                 config.share_window * 2,
                 config.share_window,
                 config.block_time,
+                LmdbBlockStorage::new_from_temp_dir(),
             ))),
             pow_algo,
             block_validation_params,
@@ -171,7 +178,7 @@ impl InMemoryShareChain {
     /// Submits a new block to share chain.
     async fn submit_block_with_lock(
         &self,
-        p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
+        p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
         block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
@@ -234,7 +241,7 @@ impl InMemoryShareChain {
 
     async fn get_calculate_and_cache_hashmap_of_shares(
         &self,
-        p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
+        p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
     ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
@@ -285,7 +292,7 @@ impl InMemoryShareChain {
         }
         while cur_block.height > stop_height {
             cur_block = p2_chain
-                .get_parent_block(cur_block)
+                .get_parent_block(&cur_block)
                 .ok_or(ShareChainError::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
@@ -313,7 +320,7 @@ impl InMemoryShareChain {
 
     fn all_blocks_with_lock(
         &self,
-        p2_chain: &RwLockReadGuard<'_, P2Chain>,
+        p2_chain: &RwLockReadGuard<'_, P2Chain<LmdbBlockStorage>>,
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
