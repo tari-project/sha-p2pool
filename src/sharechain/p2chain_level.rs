@@ -1,9 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
-
-use tari_common_types::types::{BlockHash, FixedHash};
-
-use crate::sharechain::{error::ShareChainError, p2block::P2Block};
-
 // Copyright 2024. The Tari Project
 //
 // Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
@@ -18,48 +12,87 @@ use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 // 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
 // products derived from this software without specific prior written permission.
 //
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-// INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-// USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+// DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+// DAMAGE.
+
+use std::{collections::HashMap, sync::Arc};
+
+use tari_common_types::types::{BlockHash, FixedHash};
+
+use crate::sharechain::{error::ShareChainError, lmdb_block_storage::LmdbBlockStorage, p2block::P2Block};
+
 /// A collection of blocks with the same height.
-#[derive(Debug, Clone)]
 pub struct P2ChainLevel {
-    pub blocks: HashMap<BlockHash, Arc<P2Block>>,
-    pub height: u64,
-    pub chain_block: BlockHash,
+    // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
+    blocks: LmdbBlockStorage,
+    height: u64,
+    chain_block: BlockHash,
 }
 
 impl P2ChainLevel {
     pub fn new(block: Arc<P2Block>) -> Self {
-        let mut blocks = HashMap::new();
+        // let mut blocks = HashMap::new();
         // although this is the only block on this level, it might not be part of the main chain, so we need to set this
         // later
         let chain_block = FixedHash::zero();
         let height = block.height;
-        blocks.insert(block.hash, block);
-        Self {
-            blocks,
-            height,
-            chain_block,
-        }
+        // blocks.insert(block.hash, block);
+        todo!();
+        // Self {
+        // blocks,
+        // height,
+        // chain_block,
+        // }
     }
 
-    pub fn add_block(&mut self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
+    pub fn height(&self) -> u64 {
+        self.height
+    }
+
+    pub fn chain_block(&self) -> BlockHash {
+        self.chain_block
+    }
+
+    pub fn set_chain_block(&self, hash: BlockHash) {
+        todo!()
+        // self.chain_block = hash;
+    }
+
+    pub fn add_block(&self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
         if self.height != block.height {
             return Err(ShareChainError::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
             });
         }
-        self.blocks.insert(block.hash, block);
+        todo!();
+        // self.blocks.insert(block.hash, block);
         Ok(())
     }
 
     pub fn block_in_main_chain(&self) -> Option<&Arc<P2Block>> {
-        self.blocks.get(&self.chain_block)
+        todo!()
+        // self.blocks.get(&self.chain_block)
+    }
+
+    pub fn get(&self, hash: &BlockHash) -> Option<&Arc<P2Block>> {
+        todo!()
+        // self.blocks.get(hash)
+    }
+
+    pub fn contains(&self, hash: &BlockHash) -> bool {
+        todo!()
+        // self.blocks.contains_key(hash)
+    }
+
+    pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {
+        todo!()
+        // self.blocks.values().cloned().collect()
     }
 }
 

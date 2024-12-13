@@ -47,6 +47,7 @@ pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs every ten seconds
 
 pub mod error;
 pub mod in_memory;
+pub(crate) mod lmdb_block_storage;
 pub mod p2block;
 pub mod p2chain;
 mod p2chain_level;
