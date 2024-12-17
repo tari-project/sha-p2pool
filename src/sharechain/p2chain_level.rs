@@ -21,7 +21,10 @@
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use tari_common_types::types::{BlockHash, FixedHash};
 
@@ -33,21 +36,23 @@ pub struct P2ChainLevel<T: BlockCache> {
     // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
     block_cache: Arc<T>,
     height: u64,
-    chain_block: BlockHash,
+    chain_block: RwLock<BlockHash>,
+    block_hashes: RwLock<Vec<BlockHash>>,
 }
 
 impl<T: BlockCache> P2ChainLevel<T> {
     pub fn new(block: Arc<P2Block>, block_cache: Arc<T>) -> Self {
-        // let mut blocks = HashMap::new();
         // although this is the only block on this level, it might not be part of the main chain, so we need to set this
         // later
-        let chain_block = FixedHash::zero();
+        let chain_block = RwLock::new(FixedHash::zero());
         let height = block.height;
-        // blocks.insert(block.hash, block);
+        let hash = block.hash.clone();
+        block_cache.insert(block.hash, block);
         Self {
             block_cache,
             height,
             chain_block,
+            block_hashes: RwLock::new(vec![hash]),
         }
     }
 
@@ -56,12 +61,12 @@ impl<T: BlockCache> P2ChainLevel<T> {
     }
 
     pub fn chain_block(&self) -> BlockHash {
-        self.chain_block
+        self.chain_block.read().expect("read lock").clone()
     }
 
     pub fn set_chain_block(&self, hash: BlockHash) {
-        todo!()
-        // self.chain_block = hash;
+        let mut lock = self.chain_block.write().expect("could not lock");
+        *lock = hash;
     }
 
     pub fn add_block(&self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
@@ -70,14 +75,13 @@ impl<T: BlockCache> P2ChainLevel<T> {
                 reason: "Block height does not match the chain level height".to_string(),
             });
         }
-        todo!();
-        // self.blocks.insert(block.hash, block);
+        self.block_hashes.write().expect("could not lock").push(block.hash);
+        self.block_cache.insert(block.hash, block);
         Ok(())
     }
 
-    pub fn block_in_main_chain(&self) -> Option<&Arc<P2Block>> {
-        todo!()
-        // self.blocks.get(&self.chain_block)
+    pub fn block_in_main_chain(&self) -> Option<Arc<P2Block>> {
+        self.block_cache.get(&self.chain_block())
     }
 
     pub fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
@@ -85,13 +89,16 @@ impl<T: BlockCache> P2ChainLevel<T> {
     }
 
     pub fn contains(&self, hash: &BlockHash) -> bool {
-        todo!()
-        // self.blocks.contains_key(hash)
+        self.block_cache.contains(hash)
     }
 
     pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {
-        todo!()
-        // self.blocks.values().cloned().collect()
+        self.block_hashes
+            .read()
+            .expect("could not lock")
+            .iter()
+            .filter_map(|hash| self.block_cache.get(hash))
+            .collect()
     }
 }
 
@@ -118,7 +125,7 @@ mod test {
             .build()
             .unwrap();
         let mut chain_level = P2ChainLevel::new(block.clone(), Arc::new(InMemoryBlockCache::new()));
-        chain_level.chain_block = block.generate_hash();
+        chain_level.set_chain_block(block.generate_hash());
 
         assert_eq!(
             chain_level.block_in_main_chain().unwrap().generate_hash(),
@@ -147,7 +154,7 @@ mod test {
             .unwrap();
 
         chain_level.add_block(block_3.clone()).unwrap();
-        chain_level.chain_block = block_3.generate_hash();
+        chain_level.set_chain_block(block_3.generate_hash());
 
         assert_eq!(
             chain_level.block_in_main_chain().unwrap().generate_hash(),

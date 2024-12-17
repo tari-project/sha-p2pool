@@ -672,7 +672,7 @@ mod test {
         for i in 0..2100 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -701,7 +701,7 @@ mod test {
         for i in 0..30 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -729,7 +729,7 @@ mod test {
         for i in 1..6 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -743,7 +743,7 @@ mod test {
         }
         tari_block.header.nonce = 6;
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(6)
             .with_tari_block(tari_block.clone())
@@ -776,7 +776,7 @@ mod test {
         for i in 0..7 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -819,7 +819,7 @@ mod test {
         for i in 0..20 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -860,7 +860,7 @@ mod test {
         for i in 0..6 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -884,7 +884,7 @@ mod test {
 
         tari_block.header.nonce = 6;
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(6)
             .with_tari_block(tari_block.clone())
@@ -926,7 +926,7 @@ mod test {
         for i in 0..2100 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -941,7 +941,7 @@ mod test {
             let level = chain.level_at_height(i).unwrap();
             let block = level.block_in_main_chain().unwrap();
             if i > 0 {
-                let parent = chain.get_parent_block(block).unwrap();
+                let parent = chain.get_parent_block(&block).unwrap();
                 assert_eq!(parent.original_header.nonce, i - 1);
             }
         }
@@ -960,7 +960,7 @@ mod test {
         for i in 0..20 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -976,7 +976,7 @@ mod test {
         }
         // we do this so we can add a missing parent or 2
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(100)
             .with_tari_block(tari_block.clone())
@@ -986,7 +986,7 @@ mod test {
             .unwrap();
         prev_block = Some(block.clone());
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(2000)
             .with_tari_block(tari_block.clone())
@@ -1002,7 +1002,7 @@ mod test {
         assert_eq!(level.height(), 19);
 
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(1000)
             .with_tari_block(tari_block.clone())
@@ -1012,7 +1012,7 @@ mod test {
             .unwrap();
         prev_block = Some(block.clone());
         let address = new_random_address();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(20000)
             .with_tari_block(tari_block.clone())
@@ -1042,7 +1042,7 @@ mod test {
         for i in 0..32 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1075,7 +1075,7 @@ mod test {
             tari_block.header.nonce = i;
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1103,13 +1103,13 @@ mod test {
         );
 
         let block_29 = chain.level_at_height(29).unwrap().block_in_main_chain().unwrap();
-        prev_block = Some((*block_29).clone());
+        prev_block = Some(Arc::new((*block_29).clone()));
         timestamp = block_29.timestamp;
 
         let address = new_random_address();
         timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
         tari_block.header.nonce = 30 * 2;
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(timestamp)
             .with_height(30)
             .with_miner_wallet_address(address.clone())
@@ -1131,7 +1131,7 @@ mod test {
 
         tari_block.header.nonce = 31 * 2;
         timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(timestamp)
             .with_height(31)
             .with_miner_wallet_address(address.clone())
@@ -1168,7 +1168,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1190,7 +1190,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1230,7 +1230,7 @@ mod test {
         for i in 0..50 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1268,7 +1268,7 @@ mod test {
         for i in 0..50 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1293,7 +1293,7 @@ mod test {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
             let uncles = if i == 25 {
-                let uncle = P2BlockBuilder::new(uncle_parent.as_ref())
+                let uncle = P2BlockBuilder::new(uncle_parent.as_deref())
                     .with_timestamp(EpochTime::now())
                     .with_height(24)
                     .with_tari_block(tari_block.clone())
@@ -1306,7 +1306,7 @@ mod test {
             } else {
                 vec![]
             };
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1354,7 +1354,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1377,7 +1377,7 @@ mod test {
         for i in 0..1000 {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1419,7 +1419,7 @@ mod test {
         for i in 1..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1452,7 +1452,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(prev_uncle))
+                let block = P2BlockBuilder::new(Some(&prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1463,7 +1463,7 @@ mod test {
                 uncles.push(block.clone());
                 chain.add_block_to_chain(block).unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1504,7 +1504,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(prev_uncle))
+                let block = P2BlockBuilder::new(Some(&prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1515,7 +1515,7 @@ mod test {
                 uncles.push(block.clone());
                 chain.add_block_to_chain(block).unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1556,7 +1556,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(prev_uncle))
+                let block = P2BlockBuilder::new(Some(&prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1567,7 +1567,7 @@ mod test {
                 uncles.push(block.clone());
                 chain.add_block_to_chain(block).unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -1588,7 +1588,7 @@ mod test {
         let mut uncles = Vec::new();
         let prev_uncle = chain.level_at_height(6).unwrap().block_in_main_chain().unwrap();
         // lets create an uncle block
-        let block = P2BlockBuilder::new(Some(prev_uncle))
+        let block = P2BlockBuilder::new(Some(&prev_uncle))
             .with_timestamp(timestamp)
             .with_height(7)
             .with_miner_wallet_address(address.clone())
@@ -1598,8 +1598,10 @@ mod test {
             .unwrap();
         uncles.push(block.clone());
         chain.add_block_to_chain(block).unwrap();
-        prev_block = Some((*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        prev_block = Some(Arc::new(
+            (*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone(),
+        ));
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(timestamp)
             .with_height(8)
             .with_miner_wallet_address(address.clone())
@@ -1614,7 +1616,7 @@ mod test {
         chain.add_block_to_chain(block).unwrap();
         // lets create an uncle block
         let mut uncles = Vec::new();
-        let block = P2BlockBuilder::new(prev_block.as_ref())
+        let block = P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(timestamp)
             .with_height(8)
             .with_miner_wallet_address(address.clone())
@@ -1657,7 +1659,7 @@ mod test {
         for i in 0..10 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1683,7 +1685,7 @@ mod test {
         for i in 0..10 {
             tari_block.header.nonce = i + 100;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1719,7 +1721,7 @@ mod test {
         for i in 0..10 {
             tari_block.header.nonce = i;
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(EpochTime::now())
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1789,7 +1791,7 @@ mod test {
                 assert!(target_difficulty > prev_target_difficulty);
             }
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_tari_block(tari_block.clone())
@@ -1828,7 +1830,7 @@ mod test {
                 assert!(target_difficulty < prev_target_difficulty);
             }
             let address = new_random_address();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_tari_block(tari_block.clone())

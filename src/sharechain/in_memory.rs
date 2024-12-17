@@ -592,7 +592,7 @@ impl ShareChain for InMemoryShareChain {
         // edge case for chain start
         let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
         let new_height = match prev_block {
-            Some(prev_block) => prev_block.height.saturating_add(1),
+            Some(ref prev_block) => prev_block.height.saturating_add(1),
             None => 0,
         };
 
@@ -656,7 +656,7 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2BlockBuilder::new(prev_block)
+        Ok(P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(new_height)
             .with_uncles(&uncles)?
@@ -867,7 +867,7 @@ pub mod test {
         for i in 0..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -921,7 +921,7 @@ pub mod test {
         for i in 0..15 {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -999,7 +999,7 @@ pub mod test {
                 uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -1044,7 +1044,7 @@ pub mod test {
         let mut blocks = Vec::new();
         let mut prev_block = None;
         for i in 0..10 {
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_height(i)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
@@ -1088,7 +1088,7 @@ pub mod test {
         assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
-        let missing_block = P2BlockBuilder::new(prev_block.as_ref())
+        let missing_block = P2BlockBuilder::new(prev_block.as_deref())
             .with_height(11)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .unwrap()

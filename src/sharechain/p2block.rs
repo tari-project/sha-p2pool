@@ -155,7 +155,7 @@ pub struct P2BlockBuilder {
 }
 
 impl P2BlockBuilder {
-    pub fn new(prev_block: Option<&Arc<P2Block>>) -> Self {
+    pub fn new(prev_block: Option<&P2Block>) -> Self {
         let mut block = P2Block::default();
         match prev_block {
             Some(prev_block) => {
