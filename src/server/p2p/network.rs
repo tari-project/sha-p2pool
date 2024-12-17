@@ -90,14 +90,13 @@ use crate::{
         p2p::{
             client::ServiceClient,
             messages::{self, PeerInfo, SyncMissingBlocksRequest, SyncMissingBlocksResponse},
-            peer_store::{self, AddPeerStatus, PeerStore},
+            peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
         },
         PROTOCOL_VERSION,
     },
     sharechain::{
         p2block::{P2Block, CURRENT_CHAIN_ID},
-        p2chain::ChainAddResult,
         ShareChain,
     },
 };
@@ -215,7 +214,7 @@ struct PerformCatchUpSync {
     pub peer: PeerId,
     pub last_block_from_them: Option<(u64, FixedHash)>,
     pub their_height: u64,
-    pub their_pow: u128,
+    // pub their_pow: u128,
     pub permit: Option<OwnedSemaphorePermit>,
 }
 
@@ -934,7 +933,7 @@ where S: ShareChain
                         peer: peer_id,
                         last_block_from_them: None,
                         their_height: response.info.current_sha3x_height,
-                        their_pow: response.info.current_sha3x_pow,
+                        // their_pow: response.info.current_sha3x_pow,
                         permit: None,
                     };
                     let _unused = self
@@ -949,7 +948,7 @@ where S: ShareChain
                         peer: peer_id,
                         last_block_from_them: None,
                         their_height: response.info.current_random_x_height,
-                        their_pow: response.info.current_random_x_pow,
+                        // their_pow: response.info.current_random_x_pow,
                         permit: None,
                     };
                     let _unused = self
@@ -1607,20 +1606,14 @@ where S: ShareChain
 
         let timer = Instant::now();
         let algo = response.algo();
-        let (share_chain, synced_bool) = match algo {
+        let share_chain = match algo {
             PowAlgorithm::RandomX => {
                 self.randomx_last_sync_requested_block = None;
-                (
-                    self.share_chain_random_x.clone(),
-                    self.are_we_synced_with_randomx_p2pool.clone(),
-                )
+                self.share_chain_random_x.clone()
             },
             PowAlgorithm::Sha3x => {
                 self.sha3x_last_sync_requested_block = None;
-                (
-                    self.share_chain_sha3x.clone(),
-                    self.are_we_synced_with_sha3x_p2pool.clone(),
-                )
+                self.share_chain_sha3x.clone()
             },
         };
         let their_tip_hash = *response.tip_hash();
@@ -1706,7 +1699,7 @@ where S: ShareChain
                     peer,
                     last_block_from_them,
                     their_height,
-                    their_pow,
+                    // their_pow,
                     permit,
                 };
                 let _unused = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
@@ -1779,7 +1772,7 @@ where S: ShareChain
             peer,
             last_block_from_them,
             their_height,
-            their_pow,
+            // their_pow: _,
             mut permit,
         } = perform_catch_up_sync;
 
@@ -2144,7 +2137,6 @@ where S: ShareChain
                         //     .write()
                         //     .await
                         //     .move_to_grey_list(peer, format!("Block failed validation: {error}"));
-                        return;
                     },
                 }
                 // info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);
