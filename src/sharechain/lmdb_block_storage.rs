@@ -1,8 +1,5 @@
 use std::{
-    collections::HashMap,
-    env,
     fs,
-    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
@@ -15,14 +12,12 @@ use rkv::{
 };
 use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
-use tempfile::{Builder, TempDir};
+use tempfile::Builder;
 
 use super::P2Block;
 use crate::server::p2p::messages::{deserialize_message, serialize_message};
 
 pub(crate) struct LmdbBlockStorage {
-    // path: PathBuf,
-    temp_dir: TempDir,
     file_handle: Arc<RwLock<Rkv<LmdbEnvironment>>>,
 }
 
@@ -34,10 +29,7 @@ impl LmdbBlockStorage {
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
-        Self {
-            temp_dir: root,
-            file_handle,
-        }
+        Self { file_handle }
     }
 }
 

@@ -21,15 +21,12 @@
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use tari_common_types::types::{BlockHash, FixedHash};
 
 use super::lmdb_block_storage::BlockCache;
-use crate::sharechain::{error::ShareChainError, lmdb_block_storage::LmdbBlockStorage, p2block::P2Block};
+use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
@@ -46,7 +43,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         // later
         let chain_block = RwLock::new(FixedHash::zero());
         let height = block.height;
-        let hash = block.hash.clone();
+        let hash = block.hash;
         block_cache.insert(block.hash, block);
         Self {
             block_cache,
@@ -61,7 +58,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
     }
 
     pub fn chain_block(&self) -> BlockHash {
-        self.chain_block.read().expect("read lock").clone()
+        *self.chain_block.read().expect("read lock")
     }
 
     pub fn set_chain_block(&self, hash: BlockHash) {

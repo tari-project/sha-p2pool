@@ -34,7 +34,7 @@ use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty};
 use tari_utilities::hex::Hex;
 
-use super::lmdb_block_storage::{BlockCache, LmdbBlockStorage};
+use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{
     error::ShareChainError,
     in_memory::MAX_UNCLE_AGE,
@@ -420,7 +420,7 @@ impl<T: BlockCache> P2Chain<T> {
                 let mut counter = 0;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                     counter += 1;
-                    let parent_level = (self.level_at_height(current_block.height.saturating_sub(1)).unwrap()).clone();
+                    let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
                     if current_block.prev_hash != parent_level.chain_block() {
                         // safety check
                         let nextblock = parent_level.get(&current_block.prev_hash);
