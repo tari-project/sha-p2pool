@@ -66,7 +66,7 @@ impl BlockCache for LmdbBlockStorage {
                 // next_resize = false;
             }
             let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
-            dbg!(_retry);
+            // dbg!(_retry);
             let mut writer = env.write().expect("writer");
             let block_blob = serialize_message(&block).unwrap();
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
@@ -98,7 +98,7 @@ impl BlockCache for LmdbBlockStorage {
 
 fn resize_db(env: &Rkv<LmdbEnvironment>) {
     let size = env.info().map(|i| i.map_size()).unwrap_or(0);
-    dbg!(size);
+    // dbg!(size);
     // let new_size = (size as f64 * 1.2f64).ceil() as usize;
     let new_size = size * 2;
     env.set_map_size(new_size).unwrap();
