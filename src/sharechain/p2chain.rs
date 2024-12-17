@@ -662,7 +662,11 @@ mod test {
     use tari_utilities::epoch_time::EpochTime;
 
     use super::*;
-    use crate::sharechain::{in_memory::test::new_random_address, p2block::P2BlockBuilder};
+    use crate::sharechain::{
+        in_memory::test::new_random_address,
+        lmdb_block_storage::LmdbBlockStorage,
+        p2block::P2BlockBuilder,
+    };
 
     #[test]
     fn test_only_keeps_size() {

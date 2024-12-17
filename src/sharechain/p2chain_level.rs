@@ -121,7 +121,7 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        let mut chain_level = P2ChainLevel::new(block.clone(), Arc::new(InMemoryBlockCache::new()));
+        let chain_level = P2ChainLevel::new(block.clone(), Arc::new(InMemoryBlockCache::new()));
         chain_level.set_chain_block(block.generate_hash());
 
         assert_eq!(

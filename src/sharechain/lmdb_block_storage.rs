@@ -113,6 +113,8 @@ pub trait BlockCache {
 
 #[cfg(test)]
 pub mod test {
+    use std::collections::HashMap;
+
     use super::*;
 
     pub(crate) struct InMemoryBlockCache {
