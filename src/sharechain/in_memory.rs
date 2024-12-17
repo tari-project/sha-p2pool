@@ -321,22 +321,20 @@ impl InMemoryShareChain {
     fn all_blocks_with_lock(
         &self,
         p2_chain: &RwLockReadGuard<'_, P2Chain<LmdbBlockStorage>>,
-        start_height: Option<u64>,
+        mut start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
         let mut res = Vec::with_capacity(page_size);
         let mut num_actual_blocks = 0;
         let lowest_height = p2_chain.lowest_chain_level_height().unwrap_or(0);
+        if start_height.unwrap_or(0) < lowest_height {
+            start_height = Some(lowest_height);
+        }
         let mut level = if let Some(level) = p2_chain.level_at_height(start_height.unwrap_or(0)) {
             level
         } else {
-            // we dont have that block, see if we have a higher lowest block than they are asking for and start there
-            if start_height.unwrap_or(0) < lowest_height {
-                p2_chain.level_at_height(lowest_height).unwrap()
-            } else {
-                return Ok(res);
-            }
+            return Ok(res);
         };
 
         loop {

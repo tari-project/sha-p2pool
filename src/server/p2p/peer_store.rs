@@ -124,6 +124,9 @@ impl PeerStore {
             if record.last_ping.map(|t| t.as_u64() < now - 60).unwrap_or(true) {
                 continue;
             }
+            if record.peer_info.timestamp < now - 60 {
+                continue;
+            }
             match algo {
                 PowAlgorithm::RandomX => {
                     let achieved_pow = record.peer_info.current_random_x_pow;
