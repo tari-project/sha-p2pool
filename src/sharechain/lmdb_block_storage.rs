@@ -28,7 +28,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use log::{info, error};
+use log::{error, info};
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
     Manager,
@@ -50,8 +50,8 @@ pub(crate) struct LmdbBlockStorage {
 impl LmdbBlockStorage {
     #[cfg(test)]
     pub fn new_from_temp_dir() -> Self {
-        use tempfile::Builder;
         use rand::{distributions::Alphanumeric, Rng};
+        use tempfile::Builder;
         let instance: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(7)
@@ -104,7 +104,7 @@ impl BlockCache for LmdbBlockStorage {
         let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
         let mut writer = env.write().expect("writer");
         store.delete(&mut writer, hash.as_bytes()).unwrap();
-        if let Err(e) = writer.commit(){
+        if let Err(e) = writer.commit() {
             error!(target: LOG_TARGET, "Error deleting block from lmdb: {:?}", e);
         }
     }
@@ -208,7 +208,7 @@ pub mod test {
             self.blocks.read().unwrap().get(hash).cloned()
         }
 
-        fn delete(&self, hash: &BlockHash){
+        fn delete(&self, hash: &BlockHash) {
             self.blocks.write().unwrap().remove(hash);
         }
 
@@ -241,6 +241,5 @@ pub mod test {
         assert_eq!(block, retrieved_block);
         cache.delete(&hash);
         assert!(cache.get(&hash).is_none());
-
     }
 }

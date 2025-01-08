@@ -172,7 +172,7 @@ impl<T: BlockCache> P2Chain<T> {
                 continue;
             }
             info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
-            let _ = new_chain.add_block_to_chain(block).inspect_err(|e| {
+            let _unused = new_chain.add_block_to_chain(block).inspect_err(|e| {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
             });
         }
@@ -734,7 +734,7 @@ mod test {
 
     #[test]
     fn test_only_keeps_size() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
         let mut prev_block = None;
         for i in 0..2100 {
@@ -879,7 +879,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,20, 10, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 10, 10, LmdbBlockStorage::new_from_temp_dir());
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1290,7 +1290,7 @@ mod test {
     #[test]
     fn add_blocks_missing_block() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1329,7 +1329,7 @@ mod test {
     #[test]
     fn reorg_with_missing_uncle() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1720,7 +1720,7 @@ mod test {
 
     #[test]
     fn rerog_less_than_share_window() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1782,7 +1782,7 @@ mod test {
 
     #[test]
     fn rests_levels_after_reorg() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x,20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());

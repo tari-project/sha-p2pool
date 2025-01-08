@@ -181,7 +181,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             .read()
             .expect("could not lock")
             .values()
-            .map(|h| h.clone())
+            .cloned()
             .collect()
     }
 }

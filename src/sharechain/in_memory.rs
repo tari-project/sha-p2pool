@@ -89,7 +89,7 @@ impl InMemoryShareChain {
             info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
 
             // First remove the old backup file
-            let _ = fs::remove_dir_all(bkp_file.as_path())
+            let _unused = fs::remove_dir_all(bkp_file.as_path())
                 .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
             fs::create_dir_all(bkp_file.parent().unwrap())
                 .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
@@ -871,8 +871,6 @@ pub mod test {
 
     use super::*;
 
-
-
     pub fn new_chain() -> InMemoryShareChain {
         let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
@@ -890,7 +888,7 @@ pub mod test {
             block_cache,
         );
 
-        let chain = InMemoryShareChain {
+        InMemoryShareChain {
             p2_chain: Arc::new(RwLock::new(p2chain)),
             pow_algo,
             block_validation_params: None,
@@ -898,11 +896,8 @@ pub mod test {
             coinbase_extras,
             stat_client,
             config,
-        };
-        chain
+        }
     }
-
-
 
     pub fn new_random_address() -> TariAddress {
         let mut rng = rand::thread_rng();
@@ -910,7 +905,6 @@ pub mod test {
         let (_, spend) = RistrettoPublicKey::random_keypair(&mut rng);
         TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
     }
-
 
     #[tokio::test]
     async fn equal_shares() {
@@ -993,7 +987,7 @@ pub mod test {
     #[tokio::test]
     async fn equal_share_same_participants_with_uncles() {
         let static_coinbase_extra = Vec::new();
-        let share_chain  = new_chain();
+        let share_chain = new_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1140,7 +1134,7 @@ pub mod test {
 
     #[tokio::test]
     async fn chain_start() {
-        let share_chain =  new_chain();
+        let share_chain = new_chain();
         let static_coinbase_extra = Vec::new();
         let mut new_tip = share_chain
             .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())

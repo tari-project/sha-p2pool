@@ -240,7 +240,6 @@ where S: ShareChain
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
-
             let mut response = self
                 .client
                 .write()
