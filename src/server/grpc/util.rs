@@ -10,10 +10,7 @@ use tari_shutdown::ShutdownSignal;
 use tokio::select;
 use tonic::transport::Channel;
 
-use crate::server::{
-    grpc::error::{Error, TonicError},
-    p2p::Squad,
-};
+use crate::server::grpc::error::{Error, TonicError};
 
 /// Utility function to connect to a Base node and try infinitely when it fails until gets connected.
 pub async fn connect_base_node(
@@ -53,7 +50,7 @@ pub async fn connect_base_node(
     Ok(client)
 }
 
-pub fn convert_coinbase_extra(squad: Squad, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
+pub fn convert_coinbase_extra(squad: String, custom_coinbase_extra: String) -> Result<Vec<u8>, TryFromIntError> {
     let type_length_value_marker = 0xFFu8;
     let squad_type_marker = 0x02u8;
     let custom_message_type_marker = 0x01u8;

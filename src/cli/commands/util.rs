@@ -19,7 +19,6 @@ use crate::{
     server::{
         self as main_server,
         http::stats_collector::{StatsBroadcastClient, StatsCollector},
-        p2p::Squad,
         server::Server,
     },
     sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
@@ -61,7 +60,8 @@ pub async fn server(
         config_builder.with_share_window(share_window);
     }
 
-    config_builder.with_squad(Squad::from(args.squad.clone()));
+    config_builder.with_squad_prefix(args.squad_prefix.clone());
+    config_builder.with_num_squads(args.num_squads);
 
     // set default tari network specific seed peer address
     let mut seed_peers = vec![];

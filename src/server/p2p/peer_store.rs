@@ -60,6 +60,7 @@ pub enum AddPeerStatus {
     Existing,
     Blacklisted,
     Greylisted,
+    NonSquad,
 }
 
 /// A peer store, which stores all the known peers (from broadcasted [`PeerInfo`] messages) in-memory.
@@ -68,19 +69,23 @@ pub struct PeerStore {
     whitelist_peers: HashMap<String, PeerStoreRecord>,
     greylist_peers: HashMap<String, PeerStoreRecord>,
     blacklist_peers: HashMap<String, PeerStoreRecord>,
+    non_squad_peers: HashMap<String, PeerStoreRecord>,
     stats_broadcast_client: StatsBroadcastClient,
     seed_peers: Vec<PeerId>,
+    my_squad: String,
 }
 
 impl PeerStore {
     /// Constructs a new peer store with config.
-    pub fn new(stats_broadcast_client: StatsBroadcastClient) -> Self {
+    pub fn new(stats_broadcast_client: StatsBroadcastClient, my_squad: String) -> Self {
         Self {
             stats_broadcast_client,
             whitelist_peers: HashMap::new(),
             greylist_peers: HashMap::new(),
             blacklist_peers: HashMap::new(),
+            non_squad_peers: HashMap::new(),
             seed_peers: Vec::new(),
+            my_squad,
         }
     }
 
@@ -201,22 +206,20 @@ impl PeerStore {
             .keys()
             .chain(self.greylist_peers.keys())
             .chain(self.blacklist_peers.keys())
+            .chain(self.non_squad_peers.keys())
             .filter_map(|peer_id| PeerId::from_str(peer_id).ok())
             .collect()
     }
 
-    pub fn best_peers_to_share(&self, count: usize, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
-        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
-        // ignore all peers records that are older than 10 minutes
-        // let timestamp = EpochTime::now().as_u64() - 600;
-        // peers.retain(|peer| {
-        //     peer.last_new_tip_notify
-        //         .as_ref()
-        //         .map(|n| n.timestamp)
-        //         .unwrap_or(peer.peer_info.timestamp) >
-        //         timestamp
-        // });
-        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some());
+    pub fn best_peers_to_share(&self, count: usize, squad: &str, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
+        let mut peers = if squad == &self.my_squad {
+            self.whitelist_peers.values().collect::<Vec<_>>()
+        } else {
+            self.non_squad_peers.values().collect::<Vec<_>>()
+        };
+        peers.retain(|peer| {
+            !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some() && peer.peer_info.squad == squad
+        });
         peers.sort_by_key(|a| a.last_seen());
         peers.reverse();
 
@@ -302,6 +305,16 @@ impl PeerStore {
 
         if let Some(_grey) = self.greylist_peers.get(&peer_id.to_base58()) {
             return AddPeerStatus::Greylisted;
+        }
+
+        if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
+            return AddPeerStatus::Existing;
+        }
+
+        if peer_info.squad != self.my_squad {
+            self.non_squad_peers
+                .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
+            return AddPeerStatus::NonSquad;
         }
 
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {

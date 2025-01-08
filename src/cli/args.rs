@@ -66,9 +66,12 @@ pub(crate) struct StartArgs {
     /// Squad to enter (a team of miners).
     /// A squad can have any name.
     #[arg(
-        long, alias = "tribe", value_name = "squad", default_value = "default", value_parser = validate_squad
+        long, alias = "squad", value_name = "squad", default_value = "default", value_parser = validate_squad
     )]
-    pub squad: String,
+    pub squad_prefix: String,
+
+    #[arg(long, value_name = "num-squads", default_value = "1")]
+    pub num_squads: usize,
 
     /// Private key folder.
     ///

@@ -21,6 +21,7 @@ pub(crate) struct StatsCollector {
     request_tx: tokio::sync::mpsc::Sender<StatsRequest>,
     request_rx: tokio::sync::mpsc::Receiver<StatsRequest>,
     first_stat_received: Option<EpochTime>,
+    last_squad: Option<String>,
     miner_rx_accepted: u64,
     miner_sha_accepted: u64,
     // miner_rejected: u64,
@@ -53,6 +54,7 @@ impl StatsCollector {
             stats_broadcast_receiver,
             request_rx: rx,
             request_tx: tx,
+            last_squad: None,
             first_stat_received: None,
             miner_rx_accepted: 0,
             miner_sha_accepted: 0,
@@ -87,6 +89,9 @@ impl StatsCollector {
 
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
+            StatData::SquadChanged { squad, .. } => {
+                self.last_squad = Some(squad);
+            },
             StatData::MinerBlockAccepted { pow_algo, .. } => match pow_algo {
                 PowAlgorithm::Sha3x => {
                     self.miner_sha_accepted += 1;
@@ -183,12 +188,13 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. v{} Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
+                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
                                 .unwrap_or_default())),
                                 env!("CARGO_PKG_VERSION"),
+                                self.last_squad.as_deref().unwrap_or("Not set"),
                                     self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
                                     self.randomx_chain_height,
                                     self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
@@ -283,6 +289,10 @@ pub(crate) struct GetStatsResponse {
 
 #[derive(Clone)]
 pub(crate) enum StatData {
+    SquadChanged {
+        squad: String,
+        timestamp: EpochTime,
+    },
     TargetDifficultyChanged {
         target_difficulty: Difficulty,
         pow_algo: PowAlgorithm,
@@ -328,6 +338,7 @@ pub(crate) enum StatData {
 impl StatData {
     pub fn timestamp(&self) -> EpochTime {
         match self {
+            StatData::SquadChanged { timestamp, .. } => *timestamp,
             StatData::MinerBlockAccepted { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
@@ -404,6 +415,14 @@ impl StatsBroadcastClient {
     pub fn send_pool_block_rejected(&self, pow_algo: PowAlgorithm) -> Result<(), anyhow::Error> {
         let data = StatData::PoolBlockAccepted {
             pow_algo,
+            timestamp: EpochTime::now(),
+        };
+        self.broadcast(data)
+    }
+
+    pub fn send_squad_changed(&self, squad: String) -> Result<(), anyhow::Error> {
+        let data = StatData::SquadChanged {
+            squad,
             timestamp: EpochTime::now(),
         };
         self.broadcast(data)

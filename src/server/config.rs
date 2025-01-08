@@ -5,7 +5,7 @@ use std::{path::PathBuf, time::Duration};
 
 use libp2p::identity::Keypair;
 
-use crate::server::{http, p2p, p2p::Squad};
+use crate::server::{http, p2p};
 
 /// Config is the server configuration struct.
 #[derive(Clone)]
@@ -76,8 +76,13 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_squad(&mut self, squad: Squad) -> &mut Self {
-        self.config.p2p_service.squad = squad;
+    pub fn with_squad_prefix(&mut self, squad: String) -> &mut Self {
+        self.config.p2p_service.squad_prefix = squad;
+        self
+    }
+
+    pub fn with_num_squads(&mut self, num_squads: usize) -> &mut Self {
+        self.config.p2p_service.num_squads = num_squads;
         self
     }
 

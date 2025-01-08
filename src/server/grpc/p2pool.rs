@@ -45,7 +45,7 @@ use crate::{
     server::{
         grpc::{error::Error, util, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
-        p2p::{client::ServiceClient, messages::NotifyNewTipBlock, Squad},
+        p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
 };
@@ -74,13 +74,13 @@ where S: ShareChain
     sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
-    squad: Squad,
     template_store_sha3x: RwLock<HashMap<FixedHash, P2Block>>,
     list_of_templates_sha3x: RwLock<VecDeque<FixedHash>>,
     template_store_rx: RwLock<HashMap<FixedHash, P2Block>>,
     list_of_templates_rx: RwLock<VecDeque<FixedHash>>,
     are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
+    squad: String,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -98,9 +98,9 @@ where S: ShareChain
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
         stats_broadcast: StatsBroadcastClient,
-        squad: Squad,
         are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
         are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
+        squad: String,
     ) -> Result<Self, Error> {
         Ok(Self {
             local_peer_id,
@@ -119,13 +119,13 @@ where S: ShareChain
             sha3_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             randomx_block_height_difficulty_cache: Arc::new(RwLock::new(HashMap::new())),
             stats_max_difficulty_since_last_success: Arc::new(RwLock::new(Difficulty::min())),
-            squad,
             template_store_sha3x: RwLock::new(HashMap::new()),
             list_of_templates_sha3x: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_SHA3X + 1)),
             template_store_rx: RwLock::new(HashMap::new()),
             list_of_templates_rx: RwLock::new(VecDeque::with_capacity(MAX_STORED_TEMPLATES_RX + 1)),
             are_we_synced_with_randomx_p2pool,
             are_we_synced_with_sha3x_p2pool,
+            squad,
         })
     }
 
@@ -228,8 +228,8 @@ where S: ShareChain
                     self.are_we_synced_with_sha3x_p2pool.load(Ordering::SeqCst),
                 ),
             };
-            let coinbase_extra =
-                convert_coinbase_extra(self.squad.clone(), grpc_req.coinbase_extra).unwrap_or_default();
+            let squad = self.squad.clone();
+            let coinbase_extra = convert_coinbase_extra(squad, grpc_req.coinbase_extra).unwrap_or_default();
             let mut new_tip_block = (*share_chain
                 .generate_new_tip_block(&wallet_payment_address, coinbase_extra.clone())
                 .await
