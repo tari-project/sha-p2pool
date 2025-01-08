@@ -93,6 +93,13 @@ impl BlockCache for LmdbBlockStorage {
         None
     }
 
+    fn delete(&self, hash: &BlockHash) {
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let mut writer = env.write().expect("writer");
+        store.delete(&mut writer, hash.as_bytes()).unwrap();
+    }
+
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
         // Retry if the map is full
         // This weird pattern of setting a bool is so that the env is closed before resizing, otherwise
@@ -166,6 +173,7 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
 }
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
+    fn delete(&self, hash: &BlockHash);
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
     fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }
@@ -193,12 +201,16 @@ pub mod test {
             self.blocks.read().unwrap().get(hash).cloned()
         }
 
+        fn delete(&self, hash: &BlockHash){
+            self.blocks.write().unwrap().remove(hash);
+        }
+
         fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
             self.blocks.write().unwrap().insert(hash, block);
         }
 
-        fn all_blocks(&self) -> Vec<Arc<P2Block>> {
-            self.blocks.read().unwrap().values().cloned().collect()
+        fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+            Ok(self.blocks.read().unwrap().values().cloned().collect())
         }
     }
 
@@ -210,5 +222,18 @@ pub mod test {
         cache.insert(hash, block.clone());
         let retrieved_block = cache.get(&hash).unwrap();
         assert_eq!(block, retrieved_block);
+    }
+
+    #[test]
+    fn test_deleting_blocks() {
+        let cache = LmdbBlockStorage::new_from_temp_dir();
+        let block = Arc::new(P2Block::default());
+        let hash = block.hash;
+        cache.insert(hash, block.clone());
+        let retrieved_block = cache.get(&hash).unwrap();
+        assert_eq!(block, retrieved_block);
+        cache.delete(&hash);
+        assert!(cache.get(&hash).is_none());
+
     }
 }

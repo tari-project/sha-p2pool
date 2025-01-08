@@ -24,7 +24,6 @@ use hickory_resolver::{
 use itertools::Itertools;
 use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
-    connection_limits::{self},
     dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
