@@ -51,7 +51,13 @@ impl LmdbBlockStorage {
     #[cfg(test)]
     pub fn new_from_temp_dir() -> Self {
         use tempfile::Builder;
-        let root = Builder::new().prefix("p2pool").tempdir().unwrap();
+        use rand::{distributions::Alphanumeric, Rng};
+        let instance: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect();
+        let root = Builder::new().prefix("p2pool").suffix(&instance).tempdir().unwrap();
         fs::create_dir_all(root.path()).unwrap();
         let path = root.path();
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
@@ -116,7 +122,6 @@ impl BlockCache for LmdbBlockStorage {
                 // next_resize = false;
             }
             let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
-            // dbg!(_retry);
             let mut writer = env.write().expect("writer");
             let block_blob = serialize_message(&block).unwrap();
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
@@ -169,7 +174,6 @@ impl BlockCache for LmdbBlockStorage {
 
 fn resize_db(env: &Rkv<LmdbEnvironment>) {
     let size = env.info().map(|i| i.map_size()).unwrap_or(0);
-    // dbg!(size);
     // let new_size = (size as f64 * 1.2f64).ceil() as usize;
     let new_size = size * 2;
     env.set_map_size(new_size).unwrap();

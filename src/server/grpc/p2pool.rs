@@ -235,13 +235,11 @@ where S: ShareChain
                 .await
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
-            // dbg!(&new_tip_block.height, &new_tip_block.hash);
             let shares = share_chain
                 .generate_shares(&new_tip_block, !synced_status)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
-            // dbg!(&shares);
 
             let mut response = self
                 .client
