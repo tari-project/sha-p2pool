@@ -28,7 +28,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use log::info;
+use log::{info, error};
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
     Manager,
@@ -98,6 +98,9 @@ impl BlockCache for LmdbBlockStorage {
         let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
         let mut writer = env.write().expect("writer");
         store.delete(&mut writer, hash.as_bytes()).unwrap();
+        if let Err(e) = writer.commit(){
+            error!(target: LOG_TARGET, "Error deleting block from lmdb: {:?}", e);
+        }
     }
 
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
