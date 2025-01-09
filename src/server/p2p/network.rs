@@ -3,9 +3,7 @@
 
 use std::{
     collections::HashMap,
-    fmt::Display,
     fs,
-    hash::Hash,
     io::Write,
     net::IpAddr,
     num::NonZeroUsize,
@@ -16,7 +14,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use convert_case::{Case, Casing};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver,
@@ -39,14 +36,7 @@ use libp2p::{
     PeerId,
     Swarm,
 };
-use log::{
-    debug,
-    error,
-    info,
-    kv::{ToValue, Value},
-    trace,
-    warn,
-};
+use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
@@ -85,7 +75,6 @@ use crate::{
         p2p::{
             client::ServiceClient,
             messages::{self, PeerInfo, SyncMissingBlocksRequest, SyncMissingBlocksResponse},
-            network,
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
         },
@@ -1289,12 +1278,8 @@ where S: ShareChain
                                 },
                             }
                         },
-                        gossipsub::Event::Subscribed { peer_id, topic } => {
-                            // if topic.as_str() == self.topic(PEER_INFO_TOPIC) &&
-                            //     !self.network_peer_store.read().await.exists(&peer_id)
-                            // {
-                            //     self.initiate_direct_peer_exchange(&peer_id).await;
-                            // }
+                        gossipsub::Event::Subscribed { peer_id, .. } => {
+                            self.initiate_direct_peer_exchange(&peer_id).await;
                         },
                         gossipsub::Event::Unsubscribed { .. } => {},
                         gossipsub::Event::GossipsubNotSupported { .. } => {},

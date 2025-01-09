@@ -187,12 +187,6 @@ impl PeerStore {
         }
     }
 
-    pub fn exists(&self, peer_id: &PeerId) -> bool {
-        self.whitelist_peers.contains_key(&peer_id.to_base58()) ||
-            self.greylist_peers.contains_key(&peer_id.to_base58()) ||
-            self.blacklist_peers.contains_key(&peer_id.to_base58())
-    }
-
     pub fn whitelist_peers(&self) -> &HashMap<String, PeerStoreRecord> {
         &self.whitelist_peers
     }
@@ -212,7 +206,7 @@ impl PeerStore {
     }
 
     pub fn best_peers_to_share(&self, count: usize, squad: &str, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
-        let mut peers = if squad == &self.my_squad {
+        let mut peers = if squad == self.my_squad {
             self.whitelist_peers.values().collect::<Vec<_>>()
         } else {
             self.non_squad_peers.values().collect::<Vec<_>>()

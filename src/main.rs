@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         if cfg!(debug_assertions) {
             // In debug mode, we want to see the panic message
             eprintln!("Panic occurred at {}: {}", location, message);
-            process::exit(500);
+            std::process::exit(500);
         }
     }));
 

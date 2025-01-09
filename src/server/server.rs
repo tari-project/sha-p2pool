@@ -21,7 +21,6 @@ use crate::{
         grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
         p2p,
-        p2p::peer_store::PeerStore,
     },
     sharechain::ShareChain,
 };
