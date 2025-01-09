@@ -381,7 +381,7 @@ impl StatsBroadcastClient {
     }
 
     pub fn broadcast(&self, data: StatData) -> Result<(), anyhow::Error> {
-        let _ = self
+        let _unused = self
             .tx
             .send(data)
             .inspect_err(|_e| error!(target: LOG_TARGET, "ShareChainError broadcasting stats"));
