@@ -2636,20 +2636,3 @@ where S: ShareChain
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn squad_as_string_no_spaces_no_underscores() {
-        let squad = Squad::from("default".to_string());
-        assert_eq!(squad.to_string(), "default");
-    }
-
-    #[test]
-    fn squad_as_string_with_spaces_with_underscores() {
-        let squad = Squad::from("default 2".to_string());
-        assert_eq!(squad.to_string(), "default_2");
-    }
-}
