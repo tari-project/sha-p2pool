@@ -175,6 +175,15 @@ impl<T: BlockCache> P2ChainLevel<T> {
             .filter_map(|hash| self.block_cache.get(hash))
             .collect()
     }
+
+    pub fn all_headers(&self) -> Vec<P2BlockHeader> {
+        self.block_headers
+            .read()
+            .expect("could not lock")
+            .values()
+            .cloned()
+            .collect()
+    }
 }
 
 #[cfg(test)]

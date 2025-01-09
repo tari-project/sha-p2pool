@@ -5,7 +5,6 @@ use std::{
     fs::File,
     io::Write,
     panic,
-    process,
     time::{SystemTime, UNIX_EPOCH},
 };
 

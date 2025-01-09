@@ -229,7 +229,6 @@ pub struct NotifyNewTipBlock {
     pub version: u64,
     peer_id: PeerId,
     pub new_blocks: Vec<P2Block>,
-    pub total_accumulated_difficulty: u128,
     pub timestamp: u64,
 }
 
@@ -238,7 +237,6 @@ impl Display for NotifyNewTipBlock {
         writeln!(f, "--------- new tip notify Block -----------------")?;
         writeln!(f, "version: {}", self.version)?;
         writeln!(f, "from: {}", self.peer_id.to_base58())?;
-        writeln!(f, "total_accumulated_difficulty: {}", self.total_accumulated_difficulty)?;
         writeln!(f, "timestamp: {}", self.timestamp)?;
         writeln!(f, "--------- p2pblocks -----------------")?;
         for block in &self.new_blocks {
@@ -251,14 +249,20 @@ impl Display for NotifyNewTipBlock {
 impl_conversions!(NotifyNewTipBlock);
 
 impl NotifyNewTipBlock {
-    pub fn new(peer_id: PeerId, new_blocks: Vec<P2Block>, total_acculumted_difficulty: AccumulatedDifficulty) -> Self {
-        let total_acculumted_difficulty = total_acculumted_difficulty.as_u128();
+    pub fn total_proof_of_work(&self) -> AccumulatedDifficulty {
+        let max_block = self.new_blocks.iter().max_by_key(|x| x.height);
+        match max_block {
+            Some(block) => block.total_pow(),
+            None => AccumulatedDifficulty::min(),
+        }
+    }
+
+    pub fn new(peer_id: PeerId, new_blocks: Vec<P2Block>) -> Self {
         let timestamp = EpochTime::now().as_u64();
         Self {
             version: PROTOCOL_VERSION,
             peer_id,
             new_blocks,
-            total_accumulated_difficulty: total_acculumted_difficulty,
             timestamp,
         }
     }

@@ -8,7 +8,6 @@ use blake2::Blake2b;
 use digest::{consts::U32, generic_array::GenericArray, Digest};
 use libp2p::{
     autonat::{self},
-    connection_limits::{self, ConnectionLimits},
     dcutr,
     gossipsub::{self, Message, MessageId},
     identify,

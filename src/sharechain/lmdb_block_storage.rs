@@ -28,7 +28,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use log::info;
+use log::{error, info};
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
     Manager,
@@ -50,8 +50,14 @@ pub(crate) struct LmdbBlockStorage {
 impl LmdbBlockStorage {
     #[cfg(test)]
     pub fn new_from_temp_dir() -> Self {
+        use rand::{distributions::Alphanumeric, Rng};
         use tempfile::Builder;
-        let root = Builder::new().prefix("p2pool").tempdir().unwrap();
+        let instance: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect();
+        let root = Builder::new().prefix("p2pool").suffix(&instance).tempdir().unwrap();
         fs::create_dir_all(root.path()).unwrap();
         let path = root.path();
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
@@ -93,6 +99,16 @@ impl BlockCache for LmdbBlockStorage {
         None
     }
 
+    fn delete(&self, hash: &BlockHash) {
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let mut writer = env.write().expect("writer");
+        store.delete(&mut writer, hash.as_bytes()).unwrap();
+        if let Err(e) = writer.commit() {
+            error!(target: LOG_TARGET, "Error deleting block from lmdb: {:?}", e);
+        }
+    }
+
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
         // Retry if the map is full
         // This weird pattern of setting a bool is so that the env is closed before resizing, otherwise
@@ -106,7 +122,6 @@ impl BlockCache for LmdbBlockStorage {
                 // next_resize = false;
             }
             let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
-            // dbg!(_retry);
             let mut writer = env.write().expect("writer");
             let block_blob = serialize_message(&block).unwrap();
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
@@ -159,13 +174,13 @@ impl BlockCache for LmdbBlockStorage {
 
 fn resize_db(env: &Rkv<LmdbEnvironment>) {
     let size = env.info().map(|i| i.map_size()).unwrap_or(0);
-    // dbg!(size);
     // let new_size = (size as f64 * 1.2f64).ceil() as usize;
     let new_size = size * 2;
     env.set_map_size(new_size).unwrap();
 }
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
+    fn delete(&self, hash: &BlockHash);
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
     fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }
@@ -193,12 +208,16 @@ pub mod test {
             self.blocks.read().unwrap().get(hash).cloned()
         }
 
+        fn delete(&self, hash: &BlockHash) {
+            self.blocks.write().unwrap().remove(hash);
+        }
+
         fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
             self.blocks.write().unwrap().insert(hash, block);
         }
 
-        fn all_blocks(&self) -> Vec<Arc<P2Block>> {
-            self.blocks.read().unwrap().values().cloned().collect()
+        fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+            Ok(self.blocks.read().unwrap().values().cloned().collect())
         }
     }
 
@@ -210,5 +229,17 @@ pub mod test {
         cache.insert(hash, block.clone());
         let retrieved_block = cache.get(&hash).unwrap();
         assert_eq!(block, retrieved_block);
+    }
+
+    #[test]
+    fn test_deleting_blocks() {
+        let cache = LmdbBlockStorage::new_from_temp_dir();
+        let block = Arc::new(P2Block::default());
+        let hash = block.hash;
+        cache.insert(hash, block.clone());
+        let retrieved_block = cache.get(&hash).unwrap();
+        assert_eq!(block, retrieved_block);
+        cache.delete(&hash);
+        assert!(cache.get(&hash).is_none());
     }
 }

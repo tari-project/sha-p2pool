@@ -24,7 +24,6 @@ use hickory_resolver::{
 use itertools::Itertools;
 use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
-    connection_limits::{self},
     dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, Message, MessageAcceptance, PublishError},
@@ -629,7 +628,7 @@ where S: ShareChain
 
                             let our_tip = share_chain.tip_height().await.unwrap_or(0);
                             let our_pow = share_chain.get_total_chain_pow().await;
-                            if payload.total_accumulated_difficulty < our_pow.as_u128() &&
+                            if payload.total_proof_of_work() < our_pow &&
                                 payload
                                     .new_blocks
                                     .iter()
@@ -1980,10 +1979,8 @@ where S: ShareChain
         let mut lock = self.relay_store.write().await;
         // TODO: Do relays expire?
         // if lock.has_active_relay() {
-        //     // dbg!("Already have an active relay");
         //     return;
         // }
-        // dbg!("No, select a relay");
         lock.select_random_relay();
         if let Some(relay) = lock.selected_relay_mut() {
             let mut addresses = relay.addresses.clone();
@@ -2273,7 +2270,6 @@ where S: ShareChain
 
                         let mut peers_to_dial = vec![];
                         for record in store_write_lock.best_peers_to_dial(100) {
-                            // dbg!(&record.peer_id);
                             // Only dial seed peers if we have 0 connections
                             if !self.swarm.is_connected(&record.peer_id)
                              &&  !store_write_lock.is_seed_peer(&record.peer_id)  {
@@ -2304,7 +2300,6 @@ where S: ShareChain
                         }
                         drop(store_write_lock);
                         // for peer in peers_to_dial {
-                        //     dbg!("trying");
                         //     self.initiate_direct_peer_exchange(&peer).await;
                         // }
                      }

@@ -89,7 +89,7 @@ impl InMemoryShareChain {
             info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
 
             // First remove the old backup file
-            let _ = fs::remove_dir_all(bkp_file.as_path())
+            let _unused = fs::remove_dir_all(bkp_file.as_path())
                 .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
             fs::create_dir_all(bkp_file.parent().unwrap())
                 .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
@@ -313,7 +313,6 @@ impl InMemoryShareChain {
             }
         }
         let mut miners_to_shares = HashMap::new();
-
         let tip_level = match p2_chain.get_tip() {
             Some(tip_level) => tip_level,
             None => return Ok(miners_to_shares),
@@ -876,16 +875,28 @@ pub mod test {
         let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        InMemoryShareChain::new(
-            Config::default(),
-            PowAlgorithm::Sha3x,
-            None,
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+        );
+
+        InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
             consensus_manager,
             coinbase_extras,
-            stats_broadcast_client,
-        )
-        .unwrap()
+            stat_client,
+            config,
+        }
     }
 
     pub fn new_random_address() -> TariAddress {
@@ -897,19 +908,7 @@ pub mod test {
 
     #[tokio::test]
     async fn equal_shares() {
-        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        let share_chain = InMemoryShareChain::new(
-            Config::default(),
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-            stats_broadcast_client,
-        )
-        .unwrap();
+        let share_chain = new_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -929,7 +928,6 @@ pub mod test {
                 .unwrap();
 
             prev_block = Some(block.clone());
-
             share_chain.submit_block(block).await.unwrap();
         }
 
@@ -946,20 +944,8 @@ pub mod test {
 
     #[tokio::test]
     async fn equal_share_same_participants() {
-        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let static_coinbase_extra = Vec::new();
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        let share_chain = InMemoryShareChain::new(
-            Config::default(),
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-            stats_broadcast_client,
-        )
-        .unwrap();
+        let share_chain = new_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1000,20 +986,8 @@ pub mod test {
 
     #[tokio::test]
     async fn equal_share_same_participants_with_uncles() {
-        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
         let static_coinbase_extra = Vec::new();
-        let share_chain = InMemoryShareChain::new(
-            Config::default(),
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-            stats_broadcast_client,
-        )
-        .unwrap();
+        let share_chain = new_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1160,20 +1134,7 @@ pub mod test {
 
     #[tokio::test]
     async fn chain_start() {
-        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
-        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
-        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
-        let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-        let share_chain = InMemoryShareChain::new(
-            Config::default(),
-            PowAlgorithm::Sha3x,
-            None,
-            consensus_manager,
-            coinbase_extras,
-            stats_broadcast_client,
-        )
-        .unwrap();
-
+        let share_chain = new_chain();
         let static_coinbase_extra = Vec::new();
         let mut new_tip = share_chain
             .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())
