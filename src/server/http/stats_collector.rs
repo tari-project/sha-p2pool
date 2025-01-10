@@ -248,7 +248,7 @@ impl StatsCollector {
                                 },
                                 Some(StatsRequest::GetLatestStats(tx)) => {
                                     let res = (self.last_gossip_message, self.local_peer_id, self.last_squad.clone().unwrap_or_default());
-                                    let _ = tx.send(res).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending latest stats message: {:?}", e));
+                                    let _res = tx.send(res).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending latest stats message: {:?}", e));
                                 },
                                 None => {
                                     break;
