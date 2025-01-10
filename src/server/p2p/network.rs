@@ -316,7 +316,7 @@ where S: ShareChain
             (*swarm.local_peer_id().to_bytes().last().unwrap_or(&0) as usize) % config.p2p_service.num_squads;
         let squad = format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id);
         info!(target: LOG_TARGET, "Swarm created. Our id: {}, our squad:{}", swarm.local_peer_id(), squad);
-        let _res = stats_broadcast_client.send_squad_changed(squad.clone());
+        let _res = stats_broadcast_client.send_info_changed(squad.clone(), swarm.local_peer_id().clone());
 
         let network_peer_store = PeerStore::new(stats_broadcast_client.clone(), squad.clone());
         // client related channels

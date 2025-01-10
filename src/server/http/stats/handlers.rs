@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{Query, State},
+    extract::{connect_info, Query, State},
     http::StatusCode,
     Json,
 };
@@ -223,16 +223,12 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     let timer = std::time::Instant::now();
     info!(target: LOG_TARGET, "handle_get_stats");
 
-    let last_gossip_message = state.stats_client.get_last_gossip_message().await.map_err(|error| {
+    let (last_gossip_message, peer_id, squad) = state.stats_client.get_stats_info().await.map_err(|error| {
         error!(target: LOG_TARGET, "Failed to get last gossip message: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     let (rx_stats, sha3x_stats) = get_chain_stats(state.clone()).await?;
-    // let peer_count = state.peer_store.peer_count().await;
-    // let peer_count = 0;
-    // let connected = peer_count > 0;
-    // let connected_since = state.peer_store.last_connected();
     let connected_since = None;
     let (tx, rx) = oneshot::channel();
     state
@@ -248,26 +244,14 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
         error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    // let connection_info = ConnectionInfo {
-    //     listener_addresses: vec![],
-    //     connected_peers: 0,
-    //     network_info: NetworkInfo {
-    //         num_peers: 0,
-    //         connection_counters: ConnectionCounters {
-    //             pending_incoming: 0,
-    //             pending_outgoing: 0,
-    //             established_incoming: 0,
-    //             established_outgoing: 0,
-    //         },
-    //     },
-    // };
-
     let stats = Stats {
         connection_info,
         connected_since,
         randomx_stats: rx_stats,
         sha3x_stats,
         last_gossip_message,
+        peer_id: peer_id.map(|p| p.to_base58()).unwrap_or_default(),
+        squad,
     };
     if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
         error!(target: LOG_TARGET, "handle_get_stats took too long: {}ms", timer.elapsed().as_millis());

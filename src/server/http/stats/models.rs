@@ -44,6 +44,8 @@ pub struct Stats {
     pub randomx_stats: GetStatsResponse,
     pub sha3x_stats: GetStatsResponse,
     pub last_gossip_message: EpochTime,
+    pub peer_id: String,
+    pub squad: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
