@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{connect_info, Query, State},
+    extract::{Query, State},
     http::StatusCode,
     Json,
 };
