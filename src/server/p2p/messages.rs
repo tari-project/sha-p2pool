@@ -210,6 +210,18 @@ impl CatchUpSyncResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MetaDataRequest {
+    pub peer_id: String,
+    pub my_info: PeerInfo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MetaDataResponse {
+    pub peer_id: String,
+    pub info: PeerInfo,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoRequest {
     pub peer_id: String,
     pub my_info: PeerInfo,

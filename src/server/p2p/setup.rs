@@ -28,19 +28,12 @@ use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
 };
 
-use super::{
-    messages::{CatchUpSyncRequest, CatchUpSyncResponse, DirectPeerInfoRequest, DirectPeerInfoResponse},
-    Config,
-    ServerNetworkBehaviour,
-    CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL,
-    DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL,
-    SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL,
-    STABLE_PRIVATE_KEY_FILE,
-};
+use super::{messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse}, Config, ServerNetworkBehaviour, CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL, DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL, META_DATA_EXCHANGE_REQ_RESP_PROTOCOL, SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL, STABLE_PRIVATE_KEY_FILE};
 use crate::server::{
     config,
     p2p::messages::{SyncMissingBlocksRequest, SyncMissingBlocksResponse},
 };
+use crate::server::p2p::messages::{DirectPeerInfoRequest, DirectPeerInfoResponse};
 
 /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
 /// Using this method we can be sure that our Peer ID remains the same across restarts in case of
@@ -154,6 +147,13 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                 direct_peer_exchange: cbor::Behaviour::<DirectPeerInfoRequest, Result<DirectPeerInfoResponse, String>>::new(
                     [(
                         StreamProtocol::new(DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL),
+                        request_response::ProtocolSupport::Full,
+                    )],
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(60)), // 10 is the default
+                ),
+                meta_data_exchange: cbor::Behaviour::<MetaDataRequest, Result<MetaDataResponse, String>>::new(
+                    [(
+                        StreamProtocol::new(META_DATA_EXCHANGE_REQ_RESP_PROTOCOL),
                         request_response::ProtocolSupport::Full,
                     )],
                     request_response::Config::default().with_request_timeout(Duration::from_secs(60)), // 10 is the default

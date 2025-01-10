@@ -58,7 +58,6 @@ where S: ShareChain
         let are_we_synced_with_randomx_p2pool = Arc::new(AtomicBool::new(false));
         let are_we_synced_with_sha3x_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();
-
         let mut p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
             share_chain_sha3x.clone(),
