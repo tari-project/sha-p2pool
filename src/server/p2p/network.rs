@@ -108,7 +108,8 @@ const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 10;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
-const NUM_PEERS_TO_HEIGHT_EXCHANGE: usize = 8;
+const NUM_PEERS_TO_META_DATA_EXCHANGE: usize = 8;
+const NUM_PEERS_TO_PEER_INFO_EXCHANGE: usize = 8;
 
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -2529,7 +2530,7 @@ where S: ShareChain
                         let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
-                        for peer in connected_peers.iter().take(NUM_PEERS_TO_HEIGHT_EXCHANGE) {
+                        for peer in connected_peers.iter().take(NUM_PEERS_TO_META_DATA_EXCHANGE) {
                             // Update their latest tip.
                             self.initiate_meta_data_exchange(peer).await;
 
@@ -2547,7 +2548,7 @@ where S: ShareChain
                         let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
-                        for peer in connected_peers.iter().take(NUM_PEERS_TO_HEIGHT_EXCHANGE) {
+                        for peer in connected_peers.iter().take(NUM_PEERS_TO_PEER_INFO_EXCHANGE) {
                             // Update their latest tip.
                             self.initiate_direct_peer_exchange(peer).await;
 
