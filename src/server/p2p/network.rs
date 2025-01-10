@@ -59,13 +59,7 @@ use tokio::{
 };
 
 use super::{
-    messages::{
-        CatchUpSyncRequest,
-        CatchUpSyncResponse,
-        MetaDataRequest,
-        MetaDataResponse,
-        NotifyNewTipBlock,
-    },
+    messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse, NotifyNewTipBlock},
     setup,
 };
 use crate::{
@@ -74,7 +68,14 @@ use crate::{
         http::stats_collector::StatsBroadcastClient,
         p2p::{
             client::ServiceClient,
-            messages::{self, PeerInfo, SyncMissingBlocksRequest, SyncMissingBlocksResponse},
+            messages::{
+                self,
+                DirectPeerInfoRequest,
+                DirectPeerInfoResponse,
+                PeerInfo,
+                SyncMissingBlocksRequest,
+                SyncMissingBlocksResponse,
+            },
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
         },
@@ -85,7 +86,6 @@ use crate::{
         ShareChain,
     },
 };
-use crate::server::p2p::messages::{DirectPeerInfoRequest, DirectPeerInfoResponse};
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
@@ -933,7 +933,6 @@ where S: ShareChain
                 error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
             })
         {
-
             if let Err(e) = self.swarm.behaviour_mut().meta_data_exchange.send_response(
                 channel,
                 Ok(MetaDataResponse {
@@ -1473,26 +1472,26 @@ where S: ShareChain
                     request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::DirectPeerExchange(event) => match event {
-                        request_response::Event::Message { peer: _, message } => match message {
-                            request_response::Message::Request {
-                                request_id: _request_id,
-                                request,
-                                channel,
-                            } => {
-                                self.handle_direct_peer_exchange_request(channel, request).await;
+                    request_response::Event::Message { peer: _, message } => match message {
+                        request_response::Message::Request {
+                            request_id: _request_id,
+                            request,
+                            channel,
+                        } => {
+                            self.handle_direct_peer_exchange_request(channel, request).await;
+                        },
+                        request_response::Message::Response {
+                            request_id: _request_id,
+                            response,
+                        } => match response {
+                            Ok(response) => {
+                                self.handle_direct_peer_exchange_response(response).await;
                             },
-                            request_response::Message::Response {
-                                request_id: _request_id,
-                                response,
-                            } => match response {
-                                Ok(response) => {
-                                    self.handle_direct_peer_exchange_response(response).await;
-                                },
-                                Err(error) => {
-                                    error!(target: LOG_TARGET, "REQ-RES peer info response error: {error:?}");
-                                },
+                            Err(error) => {
+                                error!(target: LOG_TARGET, "REQ-RES peer info response error: {error:?}");
                             },
                         },
+                    },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
                         // Peers can be offline
                         debug!(target: LOG_TARGET, "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");

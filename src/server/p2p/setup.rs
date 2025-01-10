@@ -28,12 +28,25 @@ use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
 };
 
-use super::{messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse}, Config, ServerNetworkBehaviour, CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL, DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL, META_DATA_EXCHANGE_REQ_RESP_PROTOCOL, SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL, STABLE_PRIVATE_KEY_FILE};
+use super::{
+    messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse},
+    Config,
+    ServerNetworkBehaviour,
+    CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL,
+    DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL,
+    META_DATA_EXCHANGE_REQ_RESP_PROTOCOL,
+    SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL,
+    STABLE_PRIVATE_KEY_FILE,
+};
 use crate::server::{
     config,
-    p2p::messages::{SyncMissingBlocksRequest, SyncMissingBlocksResponse},
+    p2p::messages::{
+        DirectPeerInfoRequest,
+        DirectPeerInfoResponse,
+        SyncMissingBlocksRequest,
+        SyncMissingBlocksResponse,
+    },
 };
-use crate::server::p2p::messages::{DirectPeerInfoRequest, DirectPeerInfoResponse};
 
 /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
 /// Using this method we can be sure that our Peer ID remains the same across restarts in case of
