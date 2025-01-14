@@ -1234,7 +1234,7 @@ where S: ShareChain
             None => 0,
         };
         missing_parents
-            .retain(|(height, _)| *height >= peer_height.saturating_sub(10).saturating_sub(self.share_window));
+            .retain(|(height, _)| *height >= peer_height.saturating_sub(10).saturating_sub(self.share_window * 2));
 
         if depth + 1 > self.config.max_missing_blocks_sync_depth {
             info!(target: SYNC_REQUEST_LOG_TARGET, "Sync depth reached max depth of {}", self.config.max_missing_blocks_sync_depth);
