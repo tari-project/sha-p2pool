@@ -301,6 +301,7 @@ where S: ShareChain
     sha3x_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
     recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
+    share_window: u64,
 }
 
 impl<S> Service<S>
@@ -316,6 +317,7 @@ where S: ShareChain
         are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
         are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
         stats_broadcast_client: StatsBroadcastClient,
+        share_window: u64,
     ) -> Result<Self, Error> {
         let swarm = setup::new_swarm(config).await?;
         let squad_id =
@@ -373,6 +375,7 @@ where S: ShareChain
             sha3x_in_progress_syncs: HashMap::new(),
             recent_synced_tips,
             missing_blocks_sync_request_depth: HashMap::new(),
+            share_window,
         })
     }
 
@@ -1186,6 +1189,7 @@ where S: ShareChain
                             info!(target: SYNC_REQUEST_LOG_TARGET, "Sync depth reached max depth of {}", max_sync_depth);
                             return;
                         }
+
                         let sync_share_chain = SyncMissingBlocks {
                             algo,
                             peer,
@@ -1222,6 +1226,15 @@ where S: ShareChain
             is_from_new_block_notify,
             depth,
         } = sync_share_chain;
+        let peer_height = match self.network_peer_store.read().await.get(&peer) {
+            Some(p) => match algo {
+                PowAlgorithm::RandomX => p.peer_info.current_random_x_height,
+                PowAlgorithm::Sha3x => p.peer_info.current_sha3x_height,
+            },
+            None => 0,
+        };
+        missing_parents
+            .retain(|(height, _)| *height >= peer_height.saturating_sub(10).saturating_sub(self.share_window));
 
         if depth + 1 > self.config.max_missing_blocks_sync_depth {
             info!(target: SYNC_REQUEST_LOG_TARGET, "Sync depth reached max depth of {}", self.config.max_missing_blocks_sync_depth);
@@ -1235,7 +1248,6 @@ where S: ShareChain
         }
         if missing_parents.is_empty() {
             warn!(target: LOG_TARGET, "Sync called but with no missing parents.");
-            // panic!("Sync called but with no missing parents.");
             return;
         }
 
@@ -1823,6 +1835,11 @@ where S: ShareChain
         let network_peer_store = self.network_peer_store.clone();
         let recent_synced_tips = self.recent_synced_tips.get(&algo).cloned().unwrap();
         // self.print_debug_chain_graph().await;
+        let synced_bool = match algo {
+            PowAlgorithm::RandomX => self.are_we_synced_with_randomx_p2pool.clone(),
+
+            PowAlgorithm::Sha3x => self.are_we_synced_with_sha3x_p2pool.clone(),
+        };
 
         tokio::spawn(async move {
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
@@ -1887,6 +1904,7 @@ where S: ShareChain
             if must_continue_sync && num_catchups.map(|n| n < MAX_CATCH_UP_ATTEMPTS).unwrap_or(true) {
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Continue catch up for {}", peer);
                 peer_store_write_lock.add_catch_up_attempt(&peer);
+                synced_bool.store(false, std::sync::atomic::Ordering::SeqCst);
                 let perform_catch_up_sync = PerformCatchUpSync {
                     algo,
                     peer,

@@ -66,6 +66,7 @@ where S: ShareChain
             are_we_synced_with_randomx_p2pool.clone(),
             are_we_synced_with_sha3x_p2pool.clone(),
             stats_broadcast_client.clone(),
+            config.share_window,
         )
         .await?;
         let local_peer_id = p2p_service.local_peer_id();
