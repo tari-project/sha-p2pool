@@ -1,7 +1,10 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 
 use human_format::Formatter;
 use libp2p::PeerId;
@@ -16,6 +19,14 @@ use tokio::{
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats_collector";
+
+#[derive(Debug, Default)]
+struct TimingData {
+    samples: VecDeque<Duration>,
+    min: Duration,
+    max: Duration,
+}
+
 pub(crate) struct StatsCollector {
     shutdown_signal: ShutdownSignal,
     stats_broadcast_receiver: tokio::sync::broadcast::Receiver<StatData>,
@@ -46,6 +57,9 @@ pub(crate) struct StatsCollector {
     established_incoming: u32,
     established_outgoing: u32,
     last_gossip_message: EpochTime,
+    grpc_timing: HashMap<String, TimingData>,
+    main_loop_timing: TimingData,
+    add_block_timing: TimingData,
 }
 
 impl StatsCollector {
@@ -81,6 +95,9 @@ impl StatsCollector {
             established_incoming: 0,
             established_outgoing: 0,
             last_gossip_message: EpochTime::now(),
+            grpc_timing: HashMap::new(),
+            main_loop_timing: TimingData::default(),
+            add_block_timing: TimingData::default(),
         }
     }
 
