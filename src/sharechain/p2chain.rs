@@ -127,11 +127,16 @@ impl Display for ChainAddResult {
     }
 }
 
+pub struct CachedShares {
+    pub at_hash: FixedHash,
+    pub shares: HashMap<String, (u64, Vec<u8>)>,
+}
+
 pub struct P2Chain<T: BlockCache> {
     pub algo: PowAlgorithm,
     pub block_time: u64,
     block_cache: Arc<T>,
-    pub cached_shares: Option<(FixedHash, HashMap<String, (u64, Vec<u8>)>)>,
+    pub cached_shares: Option<CachedShares>,
     pub(crate) levels: HashMap<u64, P2ChainLevel<T>>,
     total_size: u64,
     share_window: u64,

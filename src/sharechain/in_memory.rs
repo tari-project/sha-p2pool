@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashMap, fs, str::FromStr, sync::Arc, time::Instant};
+use std::{cmp, collections::HashMap, fs, sync::Arc};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -34,7 +34,7 @@ use crate::{
     sharechain::{
         error::{ShareChainError, ValidationError},
         p2block::{P2Block, P2BlockBuilder},
-        p2chain::{ChainAddResult, P2Chain},
+        p2chain::{CachedShares, ChainAddResult, P2Chain},
         BlockValidationParams,
         ShareChain,
     },
@@ -369,7 +369,10 @@ impl InMemoryShareChain {
                 );
             }
         }
-        p2_chain.cached_shares = Some((tip_hash, miners_to_shares.clone()));
+        p2_chain.cached_shares = Some(CachedShares {
+            at_hash: tip_hash,
+            shares: miners_to_shares.clone(),
+        });
         Ok(miners_to_shares)
     }
 
@@ -578,14 +581,14 @@ impl ShareChain for InMemoryShareChain {
             HashMap::new()
         } else {
             let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
-                if (new_tip_block.prev_hash != cached_shares.0) {
+                if new_tip_block.prev_hash != cached_shares.at_hash {
                     drop(chain_read_lock);
                     let mut wl = self.p2_chain.write().await;
                     wl.cached_shares = None;
                     chain_read_lock = wl.downgrade();
                     HashMap::new()
                 } else {
-                    cached_shares.1.clone()
+                    cached_shares.shares.clone()
                 }
             } else {
                 HashMap::new()
@@ -711,7 +714,7 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2BlockBuilder::new(prev_block.map(|b| (b.hash.clone(), b.total_pow)))
+        Ok(P2BlockBuilder::new(prev_block.map(|b| (b.hash, b.total_pow)))
             .with_timestamp(EpochTime::now())
             .with_height(new_height)
             .with_uncles(&uncles)?

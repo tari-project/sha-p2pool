@@ -1074,7 +1074,6 @@ where S: ShareChain
                     if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
                         warn!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
                         let _ = self.swarm.disconnect_peer_id(peer_id);
-                        return;
                     }
                 }
             },
