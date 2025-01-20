@@ -925,7 +925,7 @@ pub mod test {
         for i in 0..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_deref())
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -966,7 +966,7 @@ pub mod test {
         for i in 0..15 {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_deref())
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -1016,11 +1016,11 @@ pub mod test {
                     .await
                     .level_at_height(i as u64 - 2)
                     .unwrap()
-                    .block_header_in_main_chain()
+                    .get_block_in_main_chain()
                     .unwrap()
                     .clone();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(&prev_uncle))
+                let block = P2BlockBuilder::new_from_block(Some(&prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i as u64 - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1032,7 +1032,7 @@ pub mod test {
                 uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_deref())
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -1077,7 +1077,7 @@ pub mod test {
         let mut blocks = Vec::new();
         let mut prev_block = None;
         for i in 0..10 {
-            let block = P2BlockBuilder::new(prev_block.as_deref())
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_height(i)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
@@ -1121,7 +1121,7 @@ pub mod test {
         assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
-        let missing_block = P2BlockBuilder::new(prev_block.as_deref())
+        let missing_block = P2BlockBuilder::new_from_block(prev_block.as_deref())
             .with_height(11)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .unwrap()

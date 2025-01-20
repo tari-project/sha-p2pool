@@ -223,11 +223,11 @@ mod test {
         chain_level.set_chain_block(block.generate_hash());
 
         assert_eq!(
-            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
         // this is not correct, but we want the hashes to be different from the blocks
-        let block_2 = P2BlockBuilder::new(Some(&block))
+        let block_2 = P2BlockBuilder::new(Some((block.hash, block.total_pow())))
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address.clone())
@@ -236,12 +236,12 @@ mod test {
 
         chain_level.add_block(block_2.clone()).unwrap();
         assert_eq!(
-            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
 
         // this is not correct, but we want the hashes to be different from the blocks
-        let block_3 = P2BlockBuilder::new(Some(&block_2))
+        let block_3 = P2BlockBuilder::new(Some((block_2.hash, block_2.total_pow())))
             .with_timestamp(EpochTime::now())
             .with_height(0)
             .with_miner_wallet_address(address)
@@ -252,7 +252,7 @@ mod test {
         chain_level.set_chain_block(block_3.generate_hash());
 
         assert_eq!(
-            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
+            chain_level.get_block_in_main_chain().unwrap().generate_hash(),
             block_3.generate_hash()
         );
     }

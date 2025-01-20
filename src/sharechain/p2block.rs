@@ -174,6 +174,20 @@ impl P2BlockBuilder {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_from_block(block_arg: Option<&P2Block>) -> Self {
+        let mut block = P2Block::default();
+        if let Some(b) = block_arg {
+            block.prev_hash = b.hash;
+            block.total_pow = b.total_pow;
+        }
+        Self {
+            use_specific_hash: false,
+            added_target_difficulty: false,
+            block,
+        }
+    }
+
     pub fn with_timestamp(mut self, timestamp: EpochTime) -> Self {
         self.block.timestamp = timestamp;
         self
