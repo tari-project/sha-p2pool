@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashMap, fs, str::FromStr, sync::Arc};
+use std::{cmp, collections::HashMap, fs, str::FromStr, sync::Arc, time::Instant};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -320,53 +320,56 @@ impl InMemoryShareChain {
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = tip_level.height().saturating_sub(self.config.share_window - 1);
+        let tip_hash = tip_level.chain_block();
         let mut cur_block = tip_level
-            .get(&tip_level.chain_block())
+            .get_header(&tip_level.chain_block())
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
-            cur_block.miner_wallet_address.to_base58(),
+            cur_block.wallet_address_base58,
             MAIN_REWARD_SHARE,
-            cur_block.miner_coinbase_extra.clone(),
+            cur_block.coinbase_extra.clone(),
         );
         for uncle in &cur_block.uncles {
             let uncle_block = p2_chain
                 .level_at_height(uncle.0)
                 .ok_or(ShareChainError::UncleBlockNotFound)?
-                .get(&uncle.1)
+                .get_header(&uncle.1)
                 .ok_or(ShareChainError::UncleBlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
-                uncle_block.miner_wallet_address.to_base58(),
+                uncle_block.wallet_address_base58,
                 UNCLE_REWARD_SHARE,
-                uncle_block.miner_coinbase_extra.clone(),
+                uncle_block.coinbase_extra.clone(),
             );
         }
         while cur_block.height > stop_height {
             cur_block = p2_chain
-                .get_parent_block(&cur_block)
+                .level_at_height(cur_block.height.saturating_sub(1))
+                .ok_or(ShareChainError::BlockNotFound)?
+                .get_header(&cur_block.prev_hash)
                 .ok_or(ShareChainError::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
-                cur_block.miner_wallet_address.to_base58(),
+                cur_block.wallet_address_base58,
                 MAIN_REWARD_SHARE,
-                cur_block.miner_coinbase_extra.clone(),
+                cur_block.coinbase_extra.clone(),
             );
             for uncle in &cur_block.uncles {
                 let uncle_block = p2_chain
                     .level_at_height(uncle.0)
                     .ok_or(ShareChainError::UncleBlockNotFound)?
-                    .get(&uncle.1)
+                    .get_header(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
                 update_insert(
                     &mut miners_to_shares,
-                    uncle_block.miner_wallet_address.to_base58(),
+                    uncle_block.wallet_address_base58,
                     UNCLE_REWARD_SHARE,
-                    uncle_block.miner_coinbase_extra.clone(),
+                    uncle_block.coinbase_extra.clone(),
                 );
             }
         }
-        p2_chain.cached_shares = Some(miners_to_shares.clone());
+        p2_chain.cached_shares = Some((tip_hash, miners_to_shares.clone()));
         Ok(miners_to_shares)
     }
 
@@ -391,7 +394,7 @@ impl InMemoryShareChain {
 
         loop {
             if main_chain_only {
-                if let Some(block) = level.block_in_main_chain() {
+                if let Some(block) = level.get_block_in_main_chain() {
                     for uncle in &block.uncles {
                         // Always include all the uncles, if we have them
                         if let Some(uncle_block) = p2_chain.get_block_at_height(uncle.0, &uncle.1) {
@@ -575,7 +578,15 @@ impl ShareChain for InMemoryShareChain {
             HashMap::new()
         } else {
             let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
-                cached_shares.clone()
+                if (new_tip_block.prev_hash != cached_shares.0) {
+                    drop(chain_read_lock);
+                    let mut wl = self.p2_chain.write().await;
+                    wl.cached_shares = None;
+                    chain_read_lock = wl.downgrade();
+                    HashMap::new()
+                } else {
+                    cached_shares.1.clone()
+                }
             } else {
                 HashMap::new()
             };
@@ -612,16 +623,8 @@ impl ShareChain for InMemoryShareChain {
 
         for (key, (shares, extra)) in miners_to_shares {
             // find coinbase extra for wallet address
-            let address = match TariAddress::from_str(&key) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(target: LOG_TARGET, "Could not parse address: {}", e);
-                    continue;
-                },
-            };
-
             res.push(NewBlockCoinbase {
-                address: address.to_base58(),
+                address: key,
                 value: shares,
                 stealth_payment: false,
                 revealed_value_proof: true,
@@ -640,7 +643,9 @@ impl ShareChain for InMemoryShareChain {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
-        let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
+        let prev_block = chain_read_lock
+            .get_tip()
+            .and_then(|tip| tip.block_header_in_main_chain());
         let new_height = match prev_block {
             Some(ref prev_block) => prev_block.height.saturating_add(1),
             None => 0,
@@ -659,7 +664,7 @@ impl ShareChain for InMemoryShareChain {
             for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
                 if let Some(older_level) = chain_read_lock.level_at_height(height) {
                     let chain_block = older_level
-                        .block_in_main_chain()
+                        .block_header_in_main_chain()
                         .ok_or(ShareChainError::BlockNotFound)?;
                     // Blocks in the main chain can't be uncles
                     excluded_uncles.push(chain_block.hash);
@@ -706,7 +711,7 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2BlockBuilder::new(prev_block.as_deref())
+        Ok(P2BlockBuilder::new(prev_block.map(|b| (b.hash.clone(), b.total_pow)))
             .with_timestamp(EpochTime::now())
             .with_height(new_height)
             .with_uncles(&uncles)?
@@ -726,7 +731,7 @@ impl ShareChain for InMemoryShareChain {
                 } else {
                     // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it wont
                     // find this hash, so we return the curent chain block
-                    if let Some(block) = level.block_in_main_chain() {
+                    if let Some(block) = level.get_block_in_main_chain() {
                         blocks.push(block.clone());
                     }
                 }
@@ -819,7 +824,7 @@ impl ShareChain for InMemoryShareChain {
                 if let Some(level) = p2_chain_read_lock.level_at_height(height) {
                     // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it
                     // wont find this hash, so we return the current chain block
-                    let block = if let Some(block) = level.block_in_main_chain() {
+                    let block = if let Some(block) = level.block_header_in_main_chain() {
                         block.clone()
                     } else {
                         break;
@@ -849,7 +854,7 @@ impl ShareChain for InMemoryShareChain {
                     },
                 };
                 if let Some(level) = p2_chain_read_lock.level_at_height(height) {
-                    if let Some(block) = level.block_in_main_chain() {
+                    if let Some(block) = level.block_header_in_main_chain() {
                         let index = i_have_blocks.len().saturating_sub(counter).saturating_sub(1);
                         i_have_blocks[index] = (height, block.hash);
                         counter += 1;
@@ -1008,7 +1013,7 @@ pub mod test {
                     .await
                     .level_at_height(i as u64 - 2)
                     .unwrap()
-                    .block_in_main_chain()
+                    .block_header_in_main_chain()
                     .unwrap()
                     .clone();
                 // lets create an uncle block

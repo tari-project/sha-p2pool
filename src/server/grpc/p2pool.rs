@@ -348,8 +348,8 @@ where S: ShareChain
 
         match result {
             Ok(response) => response.inspect_err(|e| error!(target: LOG_TARGET, "get_new_block failed: {e:?}")),
-            Err(e) => {
-                error!(target: LOG_TARGET, "get_new_block timed out after {}ms: {e:?}", timer.elapsed().as_millis());
+            Err(_) => {
+                error!(target: LOG_TARGET, "get_new_block timed out after {}ms.", timer.elapsed().as_millis());
                 Err(Status::deadline_exceeded("get_new_block timed out"))
             },
         }

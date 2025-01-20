@@ -155,12 +155,12 @@ pub struct P2BlockBuilder {
 }
 
 impl P2BlockBuilder {
-    pub fn new(prev_block: Option<&P2Block>) -> Self {
+    pub fn new(prev_block_hash_and_pow: Option<(FixedHash, AccumulatedDifficulty)>) -> Self {
         let mut block = P2Block::default();
-        match prev_block {
-            Some(prev_block) => {
-                block.prev_hash = prev_block.hash;
-                block.total_pow = prev_block.total_pow;
+        match prev_block_hash_and_pow {
+            Some((prev_block_hash, total_pow)) => {
+                block.prev_hash = prev_block_hash;
+                block.total_pow = total_pow;
             },
             None => {
                 block.prev_hash = BlockHash::zero();

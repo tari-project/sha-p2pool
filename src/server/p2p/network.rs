@@ -1040,29 +1040,20 @@ where S: ShareChain
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if response.info.squad != self.squad {
-                    warn!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    return;
-                }
-                if self.add_peer(response.info.clone(), peer_id).await {
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
+                // if self.add_peer(response.info.clone(), peer_id).await {
+                //     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                // }
+                let mut num_peers_added = 0;
                 for mut peer in response.best_peers {
                     debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}  [rx {}, sha {}]received from {}", peer.peer_id, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
                     if let Some(peer_id) = peer.peer_id {
                         // Reset the timestamp so that we can try to ping them
                         peer.timestamp = EpochTime::now().as_u64();
-                        self.add_peer(peer, peer_id).await;
+                        if self.add_peer(peer, peer_id).await {
+                            num_peers_added += 1;
+                        }
                     }
                 }
-                // Once we have peer info from the seed peers, disconnect from them.
-                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
-                    warn!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    return;
-                }
-
                 // If they are talking an older version, disconnect
                 if response.info.version != PROTOCOL_VERSION {
                     warn!(target: LOG_TARGET, "Peer {} has an outdated version, disconnecting", peer_id);
@@ -1075,35 +1066,16 @@ where S: ShareChain
                     return;
                 }
 
-                let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
-
-                if self.config.sha3x_enabled && response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
-                    let perform_catch_up_sync = PerformCatchUpSync {
-                        algo: PowAlgorithm::Sha3x,
-                        peer: peer_id,
-                        last_block_from_them: None,
-                        their_height: response.info.current_sha3x_height,
-                        // their_pow: response.info.current_sha3x_pow,
-                        permit: None,
-                    };
-                    let _unused = self
-                        .inner_request_tx
-                        .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
-                }
-                let our_tip_rx = self.share_chain_random_x.chain_pow().await;
-
-                if self.config.randomx_enabled && response.info.current_random_x_pow > our_tip_rx.as_u128() {
-                    let perform_catch_up_sync = PerformCatchUpSync {
-                        algo: PowAlgorithm::RandomX,
-                        peer: peer_id,
-                        last_block_from_them: None,
-                        their_height: response.info.current_random_x_height,
-                        // their_pow: response.info.current_random_x_pow,
-                        permit: None,
-                    };
-                    let _unused = self
-                        .inner_request_tx
-                        .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
+                // Keep going until we have all the peers
+                if num_peers_added > 0 {
+                    self.initiate_direct_peer_exchange(&peer_id).await;
+                } else {
+                    // Once we have peer info from the seed peers, disconnect from them.
+                    if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                        warn!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
+                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                        return;
+                    }
                 }
             },
             Err(error) => {

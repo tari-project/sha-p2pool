@@ -43,6 +43,8 @@ pub(crate) struct P2BlockHeader {
     pub total_pow: AccumulatedDifficulty,
     pub verified: bool,
     pub uncles: Vec<(u64, FixedHash)>,
+    pub wallet_address_base58: String,
+    pub coinbase_extra: Vec<u8>,
 }
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
@@ -68,6 +70,8 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
+            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         let mut block_headers = HashMap::new();
         block_headers.insert(block.hash, header);
@@ -142,6 +146,8 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
+            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         self.block_headers
             .write()
@@ -151,7 +157,12 @@ impl<T: BlockCache> P2ChainLevel<T> {
         Ok(())
     }
 
-    pub fn block_in_main_chain(&self) -> Option<Arc<P2Block>> {
+    pub fn block_header_in_main_chain(&self) -> Option<P2BlockHeader> {
+        self.get_header(&self.chain_block())
+        // self.block_cache.get(&self.chain_block())
+    }
+
+    pub fn get_block_in_main_chain(&self) -> Option<Arc<P2Block>> {
         self.block_cache.get(&self.chain_block())
     }
 
@@ -212,7 +223,7 @@ mod test {
         chain_level.set_chain_block(block.generate_hash());
 
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
         // this is not correct, but we want the hashes to be different from the blocks
@@ -225,7 +236,7 @@ mod test {
 
         chain_level.add_block(block_2.clone()).unwrap();
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
             block.generate_hash()
         );
 
@@ -241,7 +252,7 @@ mod test {
         chain_level.set_chain_block(block_3.generate_hash());
 
         assert_eq!(
-            chain_level.block_in_main_chain().unwrap().generate_hash(),
+            chain_level.block_header_in_main_chain().unwrap().generate_hash(),
             block_3.generate_hash()
         );
     }
