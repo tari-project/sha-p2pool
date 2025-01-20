@@ -581,14 +581,14 @@ impl ShareChain for InMemoryShareChain {
             HashMap::new()
         } else {
             let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
-                if new_tip_block.prev_hash != cached_shares.at_hash {
+                if new_tip_block.prev_hash == cached_shares.at_hash {
+                    cached_shares.shares.clone()
+                } else {
                     drop(chain_read_lock);
                     let mut wl = self.p2_chain.write().await;
                     wl.cached_shares = None;
                     chain_read_lock = wl.downgrade();
                     HashMap::new()
-                } else {
-                    cached_shares.shares.clone()
                 }
             } else {
                 HashMap::new()
