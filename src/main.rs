@@ -18,6 +18,8 @@ mod cli;
 mod server;
 mod sharechain;
 
+pub const PROFILING_LOG_TARGET: &str = "tari::profiling";
+
 fn format_system_time(time: SystemTime) -> String {
     let datetime = time.duration_since(UNIX_EPOCH).unwrap();
     let seconds = datetime.as_secs();

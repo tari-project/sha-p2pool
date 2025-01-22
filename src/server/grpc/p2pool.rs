@@ -43,11 +43,16 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     server::{
-        grpc::{error::Error, util, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
+        grpc::{
+            error::Error,
+            util::{self, convert_coinbase_extra},
+            MAX_ACCEPTABLE_GRPC_TIMEOUT,
+        },
         http::stats_collector::StatsBroadcastClient,
         p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
+    PROFILING_LOG_TARGET,
 };
 
 pub const MAX_STORED_TEMPLATES_RX: usize = 100;
@@ -211,11 +216,13 @@ where S: ShareChain
                 PowAlgos::Sha3x => PowAlgorithm::Sha3x,
             };
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             // update coinbase extras cache
             // investigate lock usage
             let wallet_payment_address = TariAddress::from_str(grpc_req.wallet_payment_address.as_str())
                 .map_err(|error| Status::failed_precondition(format!("Invalid wallet payment address:  {}", error)))?;
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             // request new block template with shares as coinbases
             let (share_chain, synced_status) = match pow_algo {
                 PowAlgorithm::RandomX => (
@@ -229,16 +236,19 @@ where S: ShareChain
             };
             let squad = self.squad.clone();
             let coinbase_extra = convert_coinbase_extra(squad, grpc_req.coinbase_extra).unwrap_or_default();
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let mut new_tip_block = (*share_chain
                 .generate_new_tip_block(&wallet_payment_address, coinbase_extra.clone())
                 .await
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let shares = share_chain
                 .generate_shares(&new_tip_block, !synced_status)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let mut response = self
                 .client
                 .write()
@@ -251,6 +261,7 @@ where S: ShareChain
                 .await?
                 .into_inner();
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             // set target difficulty
             let miner_data = response
                 .miner_data
@@ -278,6 +289,7 @@ where S: ShareChain
                 .ok_or_else(|| Status::internal("missing missing header"))?;
             let actual_diff = Difficulty::from_u64(miner_data.target_difficulty)
                 .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             match pow_algo {
                 PowAlgorithm::RandomX => self
                     .randomx_block_height_difficulty_cache
@@ -290,6 +302,7 @@ where S: ShareChain
                     .await
                     .insert(height, actual_diff),
             };
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let target_difficulty = share_chain.get_target_difficulty(height).await;
             new_tip_block
                 .change_target_difficulty(target_difficulty)
@@ -313,6 +326,7 @@ where S: ShareChain
 
             let _unused = self.stats_broadcast.send_target_difficulty(pow_algo, target_difficulty);
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             // save template
             match pow_algo {
                 PowAlgorithm::Sha3x => {
@@ -331,11 +345,13 @@ where S: ShareChain
                 },
             };
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             match pow_algo {
                 PowAlgorithm::Sha3x => self.template_store_sha3x.write().await.insert(tari_hash, new_tip_block),
                 PowAlgorithm::RandomX => self.template_store_rx.write().await.insert(tari_hash, new_tip_block),
             };
 
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             if timer.elapsed() > MAX_ACCEPTABLE_GRPC_TIMEOUT {
                 warn!(target: LOG_TARGET, "get_new_block took {}ms", timer.elapsed().as_millis());
             }
