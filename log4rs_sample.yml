@@ -199,8 +199,10 @@ loggers:
   #   appenders:
   #     - message_logging
   #   additive: false
-  tari::profiling:
-    level: debug
-    appenders:
-      - message_logging
-    additive: false
+
+  # For Profiling
+  # tari::profiling:
+  #   level: debug
+  #   appenders:
+  #     - message_logging
+  #   additive: false

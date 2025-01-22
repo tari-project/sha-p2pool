@@ -882,7 +882,6 @@ pub mod test {
     use super::*;
 
     pub fn new_chain() -> InMemoryShareChain {
-        let consensus_manager = ConsensusManager::builder(Network::LocalNet).build().unwrap();
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
         let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
         let stat_client = StatsBroadcastClient::new(stats_tx);
@@ -902,7 +901,6 @@ pub mod test {
             p2_chain: Arc::new(RwLock::new(p2chain)),
             pow_algo,
             block_validation_params: None,
-            consensus_manager,
             coinbase_extras,
             stat_client,
             config,
