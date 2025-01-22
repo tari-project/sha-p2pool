@@ -14,7 +14,6 @@ use std::{
 use libp2p::PeerId;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
-    base_node_client::BaseNodeClient,
     pow_algo::PowAlgos,
     sha_p2_pool_server::ShaP2Pool,
     GetNewBlockRequest,
@@ -23,6 +22,7 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
+use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     blocks::Block,
@@ -36,18 +36,13 @@ use tari_core::{
         PowData,
     },
 };
-use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::{sync::RwLock, time::timeout};
 use tonic::{Request, Response, Status};
 
 use crate::{
     server::{
-        grpc::{
-            error::Error,
-            util::{self, convert_coinbase_extra},
-            MAX_ACCEPTABLE_GRPC_TIMEOUT,
-        },
+        grpc::{error::Error, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
         p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
     },
@@ -65,7 +60,8 @@ where S: ShareChain
 {
     local_peer_id: PeerId,
     /// Base node client
-    client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
+    // client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
+    client_address: String,
     /// P2P service client
     p2p_client: ServiceClient,
     /// SHA-3 share chain
@@ -98,7 +94,6 @@ where S: ShareChain
         p2p_client: ServiceClient,
         share_chain_sha3x: Arc<S>,
         share_chain_random_x: Arc<S>,
-        shutdown_signal: ShutdownSignal,
         random_x_factory: RandomXFactory,
         consensus_manager: ConsensusManager,
         genesis_block_hash: FixedHash,
@@ -109,9 +104,10 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         Ok(Self {
             local_peer_id,
-            client: Arc::new(RwLock::new(
-                util::connect_base_node(base_node_address, shutdown_signal).await?,
-            )),
+            // client: Arc::new(RwLock::new(
+            // util::connect_base_node(base_node_address, shutdown_signal).await?,
+            // )),
+            client_address: base_node_address,
             p2p_client,
             share_chain_sha3x,
             share_chain_random_x,
@@ -243,16 +239,18 @@ where S: ShareChain
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
             info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
-            let shares = share_chain
-                .generate_shares(&new_tip_block, !synced_status)
+            let (shares, target_difficulty) = share_chain
+                .generate_shares_and_get_target_difficulty(&new_tip_block, !synced_status)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
 
             info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
-            let mut response = self
-                .client
-                .write()
+            let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
                 .await
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+
+            info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
+            let mut response = client
                 .get_new_block_template_with_coinbases(GetNewBlockTemplateWithCoinbasesRequest {
                     algo: Some(grpc_block_header_pow),
                     max_weight: 0,
@@ -303,7 +301,6 @@ where S: ShareChain
                     .insert(height, actual_diff),
             };
             info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
-            let target_difficulty = share_chain.get_target_difficulty(height).await;
             new_tip_block
                 .change_target_difficulty(target_difficulty)
                 .map_err(|e| Status::internal(format!("Invalid target difficulty: {}", e)))?;
@@ -493,7 +490,11 @@ where S: ShareChain
                 info!(target: LOG_TARGET, "🔗 Submitting block  {} to base node...", mined_tari_hash);
 
                 let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
-                match self.client.write().await.submit_block(grpc_request).await {
+                let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+
+                match client.submit_block(grpc_request).await {
                     Ok(_resp) => {
                         *max_difficulty = Difficulty::min();
                         let _unused = self.stats_broadcast.send_pool_block_accepted(pow_algo);

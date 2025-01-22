@@ -100,11 +100,11 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_tip(&self) -> Result<Option<(u64, FixedHash)>, ShareChainError>;
 
     /// Generate shares based on the previous blocks.
-    async fn generate_shares(
+    async fn generate_shares_and_get_target_difficulty(
         &self,
         new_tip_block: &P2Block,
         solo_mine: bool,
-    ) -> Result<Vec<NewBlockCoinbase>, ShareChainError>;
+    ) -> Result<(Vec<NewBlockCoinbase>, Difficulty), ShareChainError>;
 
     /// Generate a new block on tip of the chain.
     async fn generate_new_tip_block(
@@ -125,8 +125,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
     ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError>;
-
-    async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 
     async fn all_blocks(
         &self,

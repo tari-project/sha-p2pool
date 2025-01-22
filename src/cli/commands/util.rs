@@ -141,7 +141,6 @@ genesis_block_hash.to_hex());
         config.clone(),
         PowAlgorithm::Sha3x,
         None,
-        consensus_manager.clone(),
         coinbase_extras_sha3x.clone(),
         stats_broadcast_client.clone(),
     )?;
@@ -150,7 +149,6 @@ genesis_block_hash.to_hex());
         config.clone(),
         PowAlgorithm::RandomX,
         Some(block_validation_params.clone()),
-        consensus_manager,
         coinbase_extras_random_x.clone(),
         stats_broadcast_client.clone(),
     )?;

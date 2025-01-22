@@ -87,7 +87,6 @@ where S: ShareChain
                 p2p_service.client(),
                 share_chain_sha3x.clone(),
                 share_chain_random_x.clone(),
-                shutdown_signal.clone(),
                 randomx_factory,
                 consensus_manager,
                 genesis_block_hash,

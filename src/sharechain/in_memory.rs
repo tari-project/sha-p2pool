@@ -8,16 +8,13 @@ use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
-use tari_core::{
-    consensus::ConsensusManager,
-    proof_of_work::{
-        randomx_difficulty,
-        sha3x_difficulty,
-        AccumulatedDifficulty,
-        Difficulty,
-        DifficultyAdjustment,
-        PowAlgorithm,
-    },
+use tari_core::proof_of_work::{
+    randomx_difficulty,
+    sha3x_difficulty,
+    AccumulatedDifficulty,
+    Difficulty,
+    DifficultyAdjustment,
+    PowAlgorithm,
 };
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -55,7 +52,6 @@ pub(crate) struct InMemoryShareChain {
     p2_chain: Arc<RwLock<P2Chain<LmdbBlockStorage>>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
-    consensus_manager: ConsensusManager,
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     stat_client: StatsBroadcastClient,
     config: Config,
@@ -67,7 +63,6 @@ impl InMemoryShareChain {
         config: Config,
         pow_algo: PowAlgorithm,
         block_validation_params: Option<Arc<BlockValidationParams>>,
-        consensus_manager: ConsensusManager,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stat_client: StatsBroadcastClient,
     ) -> Result<Self, ShareChainError> {
@@ -135,7 +130,6 @@ impl InMemoryShareChain {
             p2_chain: Arc::new(RwLock::new(p2chain)),
             pow_algo,
             block_validation_params,
-            consensus_manager,
             coinbase_extras,
             stat_client,
             config,
@@ -570,11 +564,11 @@ impl ShareChain for InMemoryShareChain {
     //     res
     // }
 
-    async fn generate_shares(
+    async fn generate_shares_and_get_target_difficulty(
         &self,
         new_tip_block: &P2Block,
         solo_mine: bool,
-    ) -> Result<Vec<NewBlockCoinbase>, ShareChainError> {
+    ) -> Result<(Vec<NewBlockCoinbase>, Difficulty), ShareChainError> {
         let mut chain_read_lock = self.p2_chain.read().await;
         // first check if there is a cached hashmap of shares
         let mut miners_to_shares = if solo_mine {
@@ -635,7 +629,15 @@ impl ShareChain for InMemoryShareChain {
             });
         }
 
-        Ok(res)
+        let min = match self.pow_algo {
+            PowAlgorithm::RandomX => Difficulty::from_u64(MIN_RANDOMX_DIFFICULTY).unwrap(),
+            PowAlgorithm::Sha3x => Difficulty::from_u64(MIN_SHA3X_DIFFICULTY).unwrap(),
+        };
+
+        let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let difficulty = cmp::max(min, difficulty);
+
+        Ok((res, difficulty))
     }
 
     async fn generate_new_tip_block(
@@ -786,20 +788,20 @@ impl ShareChain for InMemoryShareChain {
         Ok((blocks, tip_level, chain_pow))
     }
 
-    async fn get_target_difficulty(&self, height: u64) -> Difficulty {
-        let min = match self.pow_algo {
-            PowAlgorithm::RandomX => Difficulty::from_u64(MIN_RANDOMX_DIFFICULTY).unwrap(),
-            PowAlgorithm::Sha3x => Difficulty::from_u64(MIN_SHA3X_DIFFICULTY).unwrap(),
-        };
-        let max = self
-            .consensus_manager
-            .consensus_constants(height)
-            .max_pow_difficulty(self.pow_algo);
-        let chain_read_lock = self.p2_chain.read().await;
+    // async fn get_target_difficulty(&self, height: u64) -> Difficulty {
+    //     let min = match self.pow_algo {
+    //         PowAlgorithm::RandomX => Difficulty::from_u64(MIN_RANDOMX_DIFFICULTY).unwrap(),
+    //         PowAlgorithm::Sha3x => Difficulty::from_u64(MIN_SHA3X_DIFFICULTY).unwrap(),
+    //     };
+    //     let max = self
+    //         .consensus_manager
+    //         .consensus_constants(height)
+    //         .max_pow_difficulty(self.pow_algo);
+    //     let chain_read_lock = self.p2_chain.read().await;
 
-        let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
-        cmp::max(min, cmp::min(max, difficulty))
-    }
+    //     let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
+    //     cmp::max(min, cmp::min(max, difficulty))
+    // }
 
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty {
         let chain_read_lock = self.p2_chain.read().await;
