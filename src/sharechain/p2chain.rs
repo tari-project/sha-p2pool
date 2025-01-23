@@ -28,6 +28,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use log::*;
 use tari_common_types::types::FixedHash;
@@ -168,18 +169,48 @@ impl<T: BlockCache> P2Chain<T> {
         share_window: u64,
         block_time: u64,
         from_block_cache: T,
-        new_block_cache: T,
-    ) -> Result<Self, ShareChainError> {
-        let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
-        for block in from_block_cache.all_blocks()? {
-            if block.version != PROTOCOL_VERSION {
-                warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
-                continue;
+        // _new_block_cache: T,
+    ) -> Result<Self, anyhow::Error> {
+        let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, from_block_cache);
+        // let chain_blocks = HashMap::from(from_block_cache.all_levels()?);
+        let mut chain_blocks = HashMap::new();
+        for (height, block_hash) in new_chain.block_cache.all_levels()? {
+            chain_blocks.insert(height, block_hash);
+        }
+
+        let max_blocks = new_chain.block_cache.num_blocks()?;
+        let page_size = 10;
+        let mut last_hash = None;
+        for page_number in 0..(max_blocks + page_size - 1) / page_size {
+            let mut hash = None;
+            for header in new_chain.block_cache.all_blocks(last_hash, page_size)? {
+                let h = header.hash;
+                hash = Some(h);
+                if header.version != PROTOCOL_VERSION {
+                    warn!(target: LOG_TARGET, "Block version mismatch, expected {}, got {}", PROTOCOL_VERSION, header.version);
+                    return Err(anyhow!(
+                        "Block version mismatch, expected {}, got {}",
+                        PROTOCOL_VERSION,
+                        header.version
+                    ));
+                }
+                info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", header.height, header.hash[0], header.hash[1], header.hash[2], header.hash[3]);
+                let entry = new_chain.levels.entry(header.height).or_insert_with(|| {
+                    P2ChainLevel::load(header.clone(), new_chain.block_cache.clone())
+                    // level.set_chain_block(*chain_block);
+                });
+                entry.load_block(header.clone());
+                if let Some(chain_block) = chain_blocks.get(&header.height) {
+                    if chain_block == &header.hash {
+                        entry.set_chain_block(*chain_block, false)?;
+                    }
+                }
             }
-            info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
-            let _unused = new_chain.add_block_to_chain(block).inspect_err(|e| {
-                error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
-            });
+            last_hash = hash;
+            // info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0],
+            // block.hash[1], block.hash[2], block.hash[3]); let _unused =
+            // new_chain.add_block_to_chain(block).inspect_err(|e| { error!(target: LOG_TARGET, "Failed to
+            // load block into chain: {}", e); });
         }
         Ok(new_chain)
     }
@@ -255,7 +286,8 @@ impl<T: BlockCache> P2Chain<T> {
         let level = self
             .level_at_height(new_height)
             .ok_or(ShareChainError::BlockLevelNotFound)?;
-        level.set_chain_block(hash);
+        level.set_chain_block(hash, true)?;
+
         self.current_tip = level.height();
 
         self.cleanup_chain()
@@ -462,7 +494,7 @@ impl<T: BlockCache> P2Chain<T> {
                 let chain_height = self
                     .level_at_height(block.height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
-                chain_height.set_chain_block(block.hash);
+                chain_height.set_chain_block(block.hash, true);
                 self.cached_shares = None;
                 self.current_tip = block.height;
                 // lets fix the chain
@@ -470,7 +502,7 @@ impl<T: BlockCache> P2Chain<T> {
                 let mut current_height = block.height;
                 while self.level_at_height(current_height.saturating_add(1)).is_some() {
                     let mut_child_level = self.level_at_height(current_height.saturating_add(1)).unwrap();
-                    mut_child_level.set_chain_block(FixedHash::zero());
+                    mut_child_level.set_chain_block(FixedHash::zero(), true);
                     current_height += 1;
                 }
 
@@ -494,7 +526,7 @@ impl<T: BlockCache> P2Chain<T> {
                         }
                         // fix the main chain
                         let mut_parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
-                        mut_parent_level.set_chain_block(current_block.prev_hash);
+                        mut_parent_level.set_chain_block(current_block.prev_hash, true);
                         current_block = nextblock.unwrap().clone();
                         self.lwma
                             .add_front(current_block.timestamp, current_block.target_difficulty);

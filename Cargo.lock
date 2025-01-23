@@ -4737,6 +4737,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "bincode",
  "blake2",
  "chrono",
  "clap 4.5.18",

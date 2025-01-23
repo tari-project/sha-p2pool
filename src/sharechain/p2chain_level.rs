@@ -26,6 +26,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use serde::{Deserialize, Serialize};
 use tari_common_types::types::{BlockHash, FixedHash};
 use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
 use tari_utilities::epoch_time::EpochTime;
@@ -33,7 +34,7 @@ use tari_utilities::epoch_time::EpochTime;
 use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct P2BlockHeader {
     pub height: u64,
     pub hash: FixedHash,
@@ -86,6 +87,36 @@ impl<T: BlockCache> P2ChainLevel<T> {
         }
     }
 
+    pub fn load(block: Arc<P2Block>, block_cache: Arc<T>) -> Self {
+        // although this is the only block on this level, it might not be part of the main chain, so we need to set this
+        // later
+        let chain_block = RwLock::new(FixedHash::zero());
+        let height = block.height;
+        let header = P2BlockHeader {
+            height: block.height,
+            hash: block.hash,
+            prev_hash: block.prev_hash,
+            uncles: block.uncles.clone(),
+            timestamp: block.timestamp,
+            target_difficulty: block.target_difficulty(),
+            total_pow: block.total_pow(),
+            verified: block.verified,
+            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            coinbase_extra: block.miner_coinbase_extra.clone(),
+        };
+        let mut block_headers = HashMap::new();
+        block_headers.insert(block.hash, header);
+
+        // block_cache.insert(block.hash, block);
+
+        Self {
+            block_cache,
+            height,
+            chain_block,
+            block_headers: RwLock::new(block_headers),
+        }
+    }
+
     pub fn all_children_and_nephews_of(&self, hash: &FixedHash) -> Vec<(u64, FixedHash)> {
         let mut res = vec![];
         // TODO: Optimize
@@ -126,9 +157,34 @@ impl<T: BlockCache> P2ChainLevel<T> {
         *self.chain_block.read().expect("read lock")
     }
 
-    pub fn set_chain_block(&self, hash: BlockHash) {
+    pub fn set_chain_block(&self, hash: BlockHash, persist: bool) -> Result<(), ShareChainError> {
         let mut lock = self.chain_block.write().expect("could not lock");
         *lock = hash;
+        if persist {
+            self.block_cache.set_chain_block(self.height, hash)?;
+        }
+        Ok(())
+    }
+
+    pub fn load_block(&self, block: Arc<P2Block>) {
+        let mut rwlock = self.block_headers.write().expect("Could not lock");
+        if rwlock.contains_key(&block.hash) {
+            return;
+        }
+        let header = P2BlockHeader {
+            height: block.height,
+            hash: block.hash,
+            prev_hash: block.prev_hash,
+            uncles: block.uncles.clone(),
+            timestamp: block.timestamp,
+            target_difficulty: block.target_difficulty(),
+            total_pow: block.total_pow(),
+            verified: block.verified,
+            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            coinbase_extra: block.miner_coinbase_extra.clone(),
+        };
+        rwlock.insert(block.hash, header);
+        // self.block_cache.insert(block.hash, block);
     }
 
     pub fn add_block(&self, block: Arc<P2Block>) -> Result<(), ShareChainError> {

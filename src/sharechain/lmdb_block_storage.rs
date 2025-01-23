@@ -22,15 +22,20 @@
 // DAMAGE.
 
 use std::{
+    collections::HashMap,
+    env,
     fs,
     path::Path,
     sync::{Arc, RwLock},
 };
 
 use anyhow::{anyhow, Error};
+use digest::block_buffer::Block;
 use log::{error, info};
+use log4rs::encode::writer;
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
+    store,
     Manager,
     Rkv,
     StoreError,
@@ -39,7 +44,7 @@ use rkv::{
 use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
 
-use super::P2Block;
+use super::{p2chain_level::P2BlockHeader, P2Block};
 use crate::server::p2p::messages::{deserialize_message, serialize_message};
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::lmdb_block_storage";
@@ -75,6 +80,49 @@ impl LmdbBlockStorage {
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
+        let env = file_handle.read().expect("reader");
+        // let dbs = env.get_dbs().expect("No dbs");
+        // if !dbs.contains(&Some("migrations".to_string())) {
+        //     let store = env.open_integer("migrations", StoreOptions::create()).unwrap();
+        //     let writer = env.write().expect("writer");
+        //     store.put(&writer, 0, &rkv::Value::Str("init")).unwrap();
+        //     writer.commit();
+        // }
+        let mut migrations = HashMap::new();
+        {
+            let store = env.open_single("migrations", StoreOptions::create()).unwrap();
+            let reader = env.read().expect("reader");
+            let iter = store.iter_start(&reader).unwrap();
+            for r in iter {
+                let (k, v) = r.unwrap();
+                match v {
+                    rkv::Value::Str(s) => {
+                        migrations.insert(s.to_string(), ());
+                    },
+                    _ => {
+                        panic!("Invalid migration in storage");
+                    },
+                }
+            }
+        }
+        if !migrations.contains_key(&"01_remove_block_cache".to_string()) {
+            let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+            let mut writer = env.write().expect("writer");
+            store.clear(&mut writer).unwrap();
+            writer.commit().unwrap();
+
+            let s = env.open_single("migrations", StoreOptions::create()).unwrap();
+            let mut writer = env.write().expect("writer");
+            s.put(
+                &mut writer,
+                1_u16.to_le_bytes(),
+                &rkv::Value::Str("01_remove_block_cache"),
+            )
+            .unwrap();
+            writer.commit().unwrap();
+        }
+
+        drop(env);
         Self { file_handle }
     }
 }
@@ -82,13 +130,13 @@ impl LmdbBlockStorage {
 impl BlockCache for LmdbBlockStorage {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
         let env = self.file_handle.read().expect("reader");
-        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
         let reader = env.read().expect("reader");
         let block = store.get(&reader, hash.as_bytes()).unwrap();
         if let Some(block) = block {
             match block {
                 rkv::Value::Blob(b) => {
-                    let block = Arc::new(deserialize_message(b).unwrap());
+                    let block = Arc::new(bincode::deserialize(b).unwrap());
                     return Some(block);
                 },
                 _ => {
@@ -101,7 +149,7 @@ impl BlockCache for LmdbBlockStorage {
 
     fn delete(&self, hash: &BlockHash) {
         let env = self.file_handle.read().expect("reader");
-        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
         let mut writer = env.write().expect("writer");
         store.delete(&mut writer, hash.as_bytes()).unwrap();
         if let Err(e) = writer.commit() {
@@ -121,9 +169,9 @@ impl BlockCache for LmdbBlockStorage {
                 resize_db(&env);
                 // next_resize = false;
             }
-            let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+            let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
             let mut writer = env.write().expect("writer");
-            let block_blob = serialize_message(&block).unwrap();
+            let block_blob = bincode::serialize(&block).unwrap();
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
                 Ok(_) => match writer.commit() {
                     Ok(_) => {
@@ -150,26 +198,122 @@ impl BlockCache for LmdbBlockStorage {
         }
     }
 
-    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+    fn all_levels(&self) -> Result<Vec<(u64, BlockHash)>, Error> {
         let env = self.file_handle.read().expect("reader");
-        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let store = env.open_single("block_levels", StoreOptions::create()).unwrap();
         let reader = env.read().expect("reader");
         let mut res = vec![];
         let iter = store.iter_start(&reader)?;
         for r in iter {
+            let (k, v) = r?;
+            match v {
+                rkv::Value::Blob(b) => {
+                    // let level = bincode::deserialize(b).unwrap();
+
+                    res.push((
+                        u64::from_le_bytes(k[0..8].try_into().expect("Should not fail")),
+                        BlockHash::try_from(b.to_vec())?,
+                    ));
+                },
+                _ => {
+                    return Err(anyhow!("Invalid block in storage"));
+                },
+            }
+            // let hash = BlockHash::from_bytes(v.to_vec());
+            // res.push((k, hash));
+        }
+        Ok(res)
+    }
+
+    fn set_chain_block(&self, level: u64, hash: BlockHash) -> Result<(), Error> {
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_levels", StoreOptions::create()).unwrap();
+        let mut writer = env.write().expect("writer");
+        let level_bytes = level.to_le_bytes();
+        store.put(&mut writer, &level_bytes, &rkv::Value::Blob(&hash.as_bytes()))?;
+
+        writer.commit()?;
+        Ok(())
+    }
+
+    fn num_blocks(&self) -> Result<usize, Error> {
+        // TODO: better implementation that doesn't require iterating over all blocks
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
+        let reader = env.read().expect("reader");
+        let mut count = 0;
+        let iter = store.iter_start(&reader)?;
+        for _ in iter {
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    fn all_blocks(&self, from: Option<BlockHash>, count: usize) -> Result<Vec<Arc<P2Block>>, Error> {
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
+        let reader = env.read().expect("reader");
+        let mut res = vec![];
+        let iter = if let Some(f) = from {
+            store.iter_from(&reader, f.as_bytes().to_vec())?
+        } else {
+            store.iter_start(&reader)?
+        };
+
+        let mut i = 0;
+        for r in iter {
             let (_k, v) = r?;
             match v {
                 rkv::Value::Blob(b) => {
-                    let block = Arc::new(deserialize_message(b).unwrap());
+                    let block = Arc::new(bincode::deserialize(b).unwrap());
                     res.push(block);
                 },
                 _ => {
                     return Err(anyhow!("Invalid block in storage"));
                 },
             }
+            i += 1;
+            if i >= count {
+                break;
+            }
         }
         Ok(res)
     }
+
+    // fn all_headers(&self, last_height: Option<u64>, count: usize) -> Result<Vec<P2BlockHeader>, Error> {
+    //     let env = self.file_handle.read().expect("reader");
+    //     let store = env.open_single("block_cache_headers", StoreOptions::create()).unwrap();
+    //     let reader = env.read().expect("reader");
+    //     let mut res = vec![];
+
+    //     let iter = if let Some(start) = last_height {
+    //         store.iter_from(&reader, start)?
+    //     } else {
+    //         store.iter_start(reader)?
+    //     };
+    //     let mut i = 0;
+    //     for r in iter {
+    //         let (_k, v) = r?;
+    //         // if i< page {
+    //         //     i+=1;
+    //         //     continue;
+    //         // }
+    //         match v {
+    //             rkv::Value::Blob(b) => {
+    //                 let header = bincode::deserialize(b).unwrap();
+    //                 res.push(header);
+    //                 i += 1;
+    //                 if i >= page + count {
+    //                     break;
+    //                 }
+    //             },
+    //             _ => {
+    //                 return Err(anyhow!("Invalid block in storage"));
+    //             },
+    //         }
+    //     }
+    //     Ok(res)
+    // }
 }
 
 fn resize_db(env: &Rkv<LmdbEnvironment>) {
@@ -181,8 +325,13 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
     fn delete(&self, hash: &BlockHash);
+    // TODO: return error
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
-    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
+    fn all_blocks(&self, from: Option<BlockHash>, count: usize) -> Result<Vec<Arc<P2Block>>, Error>;
+    fn num_blocks(&self) -> Result<usize, Error>;
+    // fn all_headers(&self, last_header: Option<u64>, count: usize) -> Result<Vec<P2BlockHeader>, Error>;
+    fn all_levels(&self) -> Result<Vec<(u64, BlockHash)>, Error>;
+    fn set_chain_block(&self, level: u64, hash: BlockHash) -> Result<(), Error>;
 }
 
 #[cfg(test)]
