@@ -20,8 +20,7 @@ use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
-    lmdb_block_storage::{BlockCache, InMemoryBlockCache, LmdbBlockStorage},
-    p2chain,
+    lmdb_block_storage::LmdbBlockStorage,
     MAIN_REWARD_SHARE,
     MIN_RANDOMX_DIFFICULTY,
     MIN_SHA3X_DIFFICULTY,
@@ -70,15 +69,62 @@ impl InMemoryShareChain {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
         }
-        // Create a temporary chain so that we can start all services and then
-        // load the actual one
-        let p2chain = P2Chain::new_empty(
-            pow_algo,
-            config.share_window * 2,
-            config.share_window,
-            config.block_time,
-            LmdbBlockStorage::new_from_temp_dir(),
-        );
+
+        let data_path = config.block_cache_file.join(pow_algo.to_string());
+
+        let mut p2chain = None;
+        if fs::exists(&data_path).map_err(|e| anyhow!("block cache file errored when checking exists: {}", e))? {
+            let bkp_file = config
+                .block_cache_file
+                .as_path()
+                .parent()
+                .ok_or_else(|| anyhow!("Block cache file has no parent"))?
+                .join("block_cache_backup")
+                .join(pow_algo.to_string());
+            info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
+
+            // First remove the old backup file
+            let _unused = fs::remove_dir_all(bkp_file.as_path())
+                .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
+            fs::create_dir_all(bkp_file.parent().unwrap())
+                .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
+            fs::rename(data_path.as_path(), bkp_file.as_path())
+                .map_err(|e| anyhow::anyhow!("Could not rename file to old file:{:?}", e))?;
+            let old = LmdbBlockStorage::new_from_path(bkp_file.as_path());
+            let new = LmdbBlockStorage::new_from_path(&data_path);
+            match P2Chain::try_load(
+                pow_algo,
+                config.share_window * 2,
+                config.share_window,
+                config.block_time,
+                old,
+                new,
+            ) {
+                Ok(p) => {
+                    let _unused =
+                        stat_client.send_chain_changed(pow_algo, p.get_height(), p.get_max_chain_length() as u64);
+
+                    p2chain = Some(p);
+                },
+                Err(e) => error!(target: LOG_TARGET, "Could not load chain from file: {}", e),
+            };
+
+            // fs::remove_dir_all(bkp_file.as_path())
+            //     .map_err(|e| anyhow::anyhow!("Could not remove old block cache file:{:?}", e))?;
+        }
+
+        if p2chain.is_none() {
+            let block_cache = LmdbBlockStorage::new_from_path(&data_path);
+            p2chain = Some(P2Chain::new_empty(
+                pow_algo,
+                config.share_window * 2,
+                config.share_window,
+                config.block_time,
+                block_cache,
+            ));
+        }
+
+        let p2chain = p2chain.unwrap();
 
         Ok(Self {
             p2_chain: Arc::new(RwLock::new(p2chain)),
@@ -379,73 +425,6 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn load(&self) -> Result<(), ShareChainError> {
-        let mut p2_chain_w_lock = self.p2_chain.write().await;
-        let data_path = self.config.block_cache_file.join(self.pow_algo.to_string());
-
-        let mut p2chain = None;
-        if fs::exists(&data_path).map_err(|e| anyhow!("block cache file errored when checking exists: {}", e))? {
-            let bkp_file = self
-                .config
-                .block_cache_file
-                .as_path()
-                .parent()
-                .ok_or_else(|| anyhow!("Block cache file has no parent"))?
-                .join("block_cache_backup")
-                .join(self.pow_algo.to_string());
-            info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
-
-            // First remove the old backup file
-            let _unused = fs::remove_dir_all(bkp_file.as_path())
-                .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
-            fs::create_dir_all(bkp_file.parent().unwrap())
-                .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
-            fs::rename(data_path.as_path(), bkp_file.as_path())
-                .map_err(|e| anyhow::anyhow!("Could not rename file to old file:{:?}", e))?;
-            let old = LmdbBlockStorage::new_from_path(bkp_file.as_path());
-            let new = LmdbBlockStorage::new_from_path(&data_path);
-            match P2Chain::try_load(
-                self.pow_algo,
-                self.config.share_window * 2,
-                self.config.share_window,
-                self.config.block_time,
-                old,
-                new,
-            ) {
-                Ok(p) => {
-                    let _unused = self.stat_client.send_chain_changed(
-                        self.pow_algo,
-                        p.get_height(),
-                        p.get_max_chain_length() as u64,
-                    );
-
-                    p2chain = Some(p);
-                },
-                Err(e) => error!(target: LOG_TARGET, "Could not load chain from file: {}", e),
-            };
-
-            // fs::remove_dir_all(bkp_file.as_path())
-            //     .map_err(|e| anyhow::anyhow!("Could not remove old block cache file:{:?}", e))?;
-        }
-
-        if p2chain.is_none() {
-            let block_cache = LmdbBlockStorage::new_from_path(&data_path);
-            p2chain = Some(P2Chain::new_empty(
-                self.pow_algo,
-                self.config.share_window * 2,
-                self.config.share_window,
-                self.config.block_time,
-                block_cache,
-            ));
-        }
-
-        let p2chain = p2chain.unwrap();
-
-        // let mut p2_chain = self.p2_chain.write().await;
-        *p2_chain_w_lock = p2chain;
-        Ok(())
-    }
-
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
             return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));

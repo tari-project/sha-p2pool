@@ -13,7 +13,6 @@ use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::ShutdownSignal;
-use tokio::task;
 
 use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
@@ -56,23 +55,6 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let sha3x_chain = share_chain_sha3x.clone();
-        let rx_chain = share_chain_random_x.clone();
-        task::spawn(async move {
-            let _res = sha3x_chain
-                .load()
-                .await
-                .inspect_err(|e| error!(target: LOG_TARGET, "Error loading sha3x chain: {:?}", e));
-            let _res = rx_chain
-                .load()
-                .await
-                .inspect_err(|e| error!(target: LOG_TARGET, "Error loading randomx chain: {:?}", e));
-        });
-        // task::spawn(async move {
-        // rx_chain.load().await;
-        // });
-        share_chain_sha3x.load().await?;
-        share_chain_random_x.load().await?;
         let are_we_synced_with_randomx_p2pool = Arc::new(AtomicBool::new(false));
         let are_we_synced_with_sha3x_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();

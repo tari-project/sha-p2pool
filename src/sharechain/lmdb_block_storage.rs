@@ -22,7 +22,6 @@
 // DAMAGE.
 
 use std::{
-    collections::HashMap,
     fs,
     path::Path,
     sync::{Arc, RwLock},
@@ -39,7 +38,6 @@ use rkv::{
 };
 use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
-use tempfile::TempDir;
 
 use super::P2Block;
 use crate::server::p2p::messages::{deserialize_message, serialize_message};
@@ -47,10 +45,10 @@ use crate::server::p2p::messages::{deserialize_message, serialize_message};
 const LOG_TARGET: &str = "tari::p2pool::sharechain::lmdb_block_storage";
 pub(crate) struct LmdbBlockStorage {
     file_handle: Arc<RwLock<Rkv<LmdbEnvironment>>>,
-    temp_dir: Option<TempDir>,
 }
 
 impl LmdbBlockStorage {
+    #[cfg(test)]
     pub fn new_from_temp_dir() -> Self {
         use rand::{distributions::Alphanumeric, Rng};
         use tempfile::Builder;
@@ -65,10 +63,7 @@ impl LmdbBlockStorage {
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
-        Self {
-            file_handle,
-            temp_dir: Some(root),
-        }
+        Self { file_handle }
     }
 
     pub fn new_from_path(path: &Path) -> Self {
@@ -80,10 +75,7 @@ impl LmdbBlockStorage {
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
-        Self {
-            file_handle,
-            temp_dir: None,
-        }
+        Self { file_handle }
     }
 }
 
@@ -193,40 +185,41 @@ pub trait BlockCache {
     fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }
 
-pub(crate) struct InMemoryBlockCache {
-    blocks: Arc<RwLock<HashMap<BlockHash, Arc<P2Block>>>>,
-}
-
-impl InMemoryBlockCache {
-    pub fn new() -> Self {
-        Self {
-            blocks: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
-
-impl BlockCache for InMemoryBlockCache {
-    fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
-        self.blocks.read().unwrap().get(hash).cloned()
-    }
-
-    fn delete(&self, hash: &BlockHash) {
-        self.blocks.write().unwrap().remove(hash);
-    }
-
-    fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
-        self.blocks.write().unwrap().insert(hash, block);
-    }
-
-    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
-        Ok(self.blocks.read().unwrap().values().cloned().collect())
-    }
-}
-
 #[cfg(test)]
 pub mod test {
+    use std::collections::HashMap;
 
     use super::*;
+
+    pub(crate) struct InMemoryBlockCache {
+        blocks: Arc<RwLock<HashMap<BlockHash, Arc<P2Block>>>>,
+    }
+
+    impl InMemoryBlockCache {
+        pub fn new() -> Self {
+            Self {
+                blocks: Arc::new(RwLock::new(HashMap::new())),
+            }
+        }
+    }
+
+    impl BlockCache for InMemoryBlockCache {
+        fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
+            self.blocks.read().unwrap().get(hash).cloned()
+        }
+
+        fn delete(&self, hash: &BlockHash) {
+            self.blocks.write().unwrap().remove(hash);
+        }
+
+        fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+            self.blocks.write().unwrap().insert(hash, block);
+        }
+
+        fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+            Ok(self.blocks.read().unwrap().values().cloned().collect())
+        }
+    }
 
     #[test]
     fn test_saving_and_retrieving_blocks() {
