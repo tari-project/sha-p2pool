@@ -23,6 +23,8 @@ use minotari_app_grpc::{
         GetBlocksRequest,
         GetHeaderByHashRequest,
         GetMempoolTransactionsRequest,
+        GetNetworkStateRequest,
+        GetNetworkStateResponse,
         GetNewBlockBlobResult,
         GetNewBlockResult,
         GetNewBlockTemplateWithCoinbasesRequest,
@@ -216,6 +218,13 @@ impl tari_rpc::base_node_server::BaseNode for TariBaseNodeGrpc {
 
     async fn get_blocks(&self, request: Request<GetBlocksRequest>) -> Result<Response<Self::GetBlocksStream>, Status> {
         proxy_stream_result!(self, get_blocks, request, GET_BLOCKS_PAGE_SIZE)
+    }
+
+    async fn get_network_state(
+        &self,
+        request: Request<GetNetworkStateRequest>,
+    ) -> Result<Response<GetNetworkStateResponse>, Status> {
+        proxy_simple_result!(self, get_network_state, request)
     }
 
     async fn get_block_timing(&self, request: Request<HeightRequest>) -> Result<Response<BlockTimingResponse>, Status> {
