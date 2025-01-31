@@ -877,7 +877,7 @@ impl ShareChain for InMemoryShareChain {
 pub mod test {
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
-    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+    use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 
     use super::*;
 
@@ -909,8 +909,8 @@ pub mod test {
 
     pub fn new_random_address() -> TariAddress {
         let mut rng = rand::thread_rng();
-        let (_, view) = RistrettoPublicKey::random_keypair(&mut rng);
-        let (_, spend) = RistrettoPublicKey::random_keypair(&mut rng);
+        let (_, view) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
+        let (_, spend) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
         TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
     }
 
