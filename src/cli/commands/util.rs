@@ -64,6 +64,9 @@ pub async fn server(
 
     config_builder.with_squad_prefix(args.squad_prefix.clone());
     config_builder.with_num_squads(args.num_squads);
+    if let Some(squad_override) = args.squad_override.clone() {
+        config_builder.with_squad_override(squad_override);
+    }
 
     // set default tari network specific seed peer address
     let mut seed_peers = vec![];
@@ -140,8 +143,11 @@ genesis_block_hash.to_hex());
     let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
 
     let swarm = crate::server::p2p::setup::new_swarm(&config).await?;
-    let squad_id = (*swarm.local_peer_id().to_bytes().last().unwrap_or(&0) as usize) % config.p2p_service.num_squads;
-    let squad = format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id);
+    let squad = config.p2p_service.squad_override.clone().unwrap_or_else(|| {
+        let squad_id =
+            (*swarm.local_peer_id().to_bytes().last().unwrap_or(&0) as usize) % config.p2p_service.num_squads;
+        format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id)
+    });
     info!(target: LOG_TARGET, "Swarm created. Our id: {}, our squad:{}", swarm.local_peer_id(), squad);
     let share_chain_sha3x = InMemoryShareChain::new(
         config.clone(),
