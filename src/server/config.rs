@@ -81,6 +81,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_squad_override(&mut self, squad: String) -> &mut Self {
+        self.config.p2p_service.squad_override = Some(squad);
+        self
+    }
+
     pub fn with_num_squads(&mut self, num_squads: usize) -> &mut Self {
         self.config.p2p_service.num_squads = num_squads;
         self
