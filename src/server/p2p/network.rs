@@ -58,10 +58,7 @@ use tokio::{
     time::MissedTickBehavior,
 };
 
-use super::{
-    messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse, NotifyNewTipBlock},
-    setup,
-};
+use super::messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse, NotifyNewTipBlock};
 use crate::{
     server::{
         config,
@@ -318,12 +315,9 @@ where S: ShareChain
         are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
         stats_broadcast_client: StatsBroadcastClient,
         share_window: u64,
+        swarm: Swarm<ServerNetworkBehaviour>,
+        squad: String,
     ) -> Result<Self, Error> {
-        let swarm = setup::new_swarm(config).await?;
-        let squad_id =
-            (*swarm.local_peer_id().to_bytes().last().unwrap_or(&0) as usize) % config.p2p_service.num_squads;
-        let squad = format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id);
-        info!(target: LOG_TARGET, "Swarm created. Our id: {}, our squad:{}", swarm.local_peer_id(), squad);
         let _res = stats_broadcast_client.send_info_changed(squad.clone(), *swarm.local_peer_id());
 
         let network_peer_store = PeerStore::new(stats_broadcast_client.clone(), squad.clone());

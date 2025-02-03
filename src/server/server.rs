@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::Error;
+use libp2p::Swarm;
 use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
@@ -21,6 +22,7 @@ use crate::{
         grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
         p2p,
+        p2p::ServerNetworkBehaviour,
     },
     sharechain::ShareChain,
 };
@@ -52,6 +54,8 @@ where S: ShareChain
         stats_collector: StatsCollector,
         stats_broadcast_client: StatsBroadcastClient,
         shutdown_signal: ShutdownSignal,
+        swarm: Swarm<ServerNetworkBehaviour>,
+        squad: String,
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
@@ -67,6 +71,8 @@ where S: ShareChain
             are_we_synced_with_sha3x_p2pool.clone(),
             stats_broadcast_client.clone(),
             config.share_window,
+            swarm,
+            squad.clone(),
         )
         .await?;
         let local_peer_id = p2p_service.local_peer_id();
@@ -93,7 +99,7 @@ where S: ShareChain
                 stats_broadcast_client.clone(),
                 are_we_synced_with_randomx_p2pool.clone(),
                 are_we_synced_with_sha3x_p2pool.clone(),
-                p2p_service.squad.clone(),
+                squad,
             )
             .await?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));

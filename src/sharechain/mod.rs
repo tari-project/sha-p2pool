@@ -118,7 +118,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
 
     /// Returns the requested blocks from this chain
     async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>>;
-
     async fn request_sync(
         &self,
         their_blocks: &[(u64, FixedHash)],

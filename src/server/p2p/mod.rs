@@ -11,5 +11,5 @@ pub mod messages;
 mod network;
 pub mod peer_store;
 mod relay_store;
-mod setup;
+pub mod setup;
 pub mod util;

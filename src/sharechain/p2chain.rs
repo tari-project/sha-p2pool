@@ -169,11 +169,16 @@ impl<T: BlockCache> P2Chain<T> {
         block_time: u64,
         from_block_cache: T,
         new_block_cache: T,
+        squad: &str,
     ) -> Result<Self, ShareChainError> {
         let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
         for block in from_block_cache.all_blocks()? {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
+                continue;
+            }
+            if block.squad != squad {
+                warn!(target: LOG_TARGET, "Block squad mismatch, skipping block");
                 continue;
             }
             info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);

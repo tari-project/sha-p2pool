@@ -55,6 +55,7 @@ pub(crate) struct InMemoryShareChain {
     coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     stat_client: StatsBroadcastClient,
     config: Config,
+    squad: String,
 }
 
 #[allow(dead_code)]
@@ -65,6 +66,7 @@ impl InMemoryShareChain {
         block_validation_params: Option<Arc<BlockValidationParams>>,
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stat_client: StatsBroadcastClient,
+        squad: String,
     ) -> Result<Self, ShareChainError> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
@@ -99,6 +101,7 @@ impl InMemoryShareChain {
                 config.block_time,
                 old,
                 new,
+                &squad,
             ) {
                 Ok(p) => {
                     let _unused =
@@ -125,7 +128,6 @@ impl InMemoryShareChain {
         }
 
         let p2chain = p2chain.unwrap();
-
         Ok(Self {
             p2_chain: Arc::new(RwLock::new(p2chain)),
             pow_algo,
@@ -133,6 +135,7 @@ impl InMemoryShareChain {
             coinbase_extras,
             stat_client,
             config,
+            squad,
         })
     }
 
@@ -427,7 +430,14 @@ impl InMemoryShareChain {
 impl ShareChain for InMemoryShareChain {
     async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
-            return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));
+            return Err(ShareChainError::BlockValidation(
+                "Block version not supported".to_string(),
+            ));
+        }
+        if block.squad != self.squad {
+            return Err(ShareChainError::BlockValidation(
+                "Block squad not supported".to_string(),
+            ));
         }
         let mut p2_chain_write_lock = self.p2_chain.write().await;
         let height = block.height;
@@ -471,6 +481,11 @@ impl ShareChain for InMemoryShareChain {
         'outer: for block in blocks {
             if block.version != PROTOCOL_VERSION {
                 return Err(ShareChainError::BlockValidation("Block version is too low".to_string()));
+            }
+            if block.squad != self.squad {
+                return Err(ShareChainError::BlockValidation(
+                    "Block squad not supported".to_string(),
+                ));
             }
             let height = block.height;
             // info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
@@ -722,6 +737,7 @@ impl ShareChain for InMemoryShareChain {
             .with_uncles(&uncles)?
             .with_miner_wallet_address(miner_address.clone())
             .with_miner_coinbase_extra(coinbase_extra)
+            .with_squad(self.squad.clone())
             .build()?)
     }
 
@@ -904,6 +920,7 @@ pub mod test {
             coinbase_extras,
             stat_client,
             config,
+            squad: "NoSquad".to_string(),
         }
     }
 

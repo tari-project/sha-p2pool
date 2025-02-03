@@ -24,6 +24,8 @@ use crate::{
     sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
 };
 
+const LOG_TARGET: &str = "tari::p2pool::server::p2p";
+
 #[allow(clippy::too_many_lines)]
 pub async fn server(
     cli: Arc<Cli>,
@@ -137,12 +139,17 @@ genesis_block_hash.to_hex());
     let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
     let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
 
+    let swarm = crate::server::p2p::setup::new_swarm(&config).await?;
+    let squad_id = (*swarm.local_peer_id().to_bytes().last().unwrap_or(&0) as usize) % config.p2p_service.num_squads;
+    let squad = format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id);
+    info!(target: LOG_TARGET, "Swarm created. Our id: {}, our squad:{}", swarm.local_peer_id(), squad);
     let share_chain_sha3x = InMemoryShareChain::new(
         config.clone(),
         PowAlgorithm::Sha3x,
         None,
         coinbase_extras_sha3x.clone(),
         stats_broadcast_client.clone(),
+        squad.clone(),
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
@@ -151,8 +158,8 @@ genesis_block_hash.to_hex());
         Some(block_validation_params.clone()),
         coinbase_extras_random_x.clone(),
         stats_broadcast_client.clone(),
+        squad.clone(),
     )?;
-
     Server::new(
         config,
         share_chain_sha3x,
@@ -160,6 +167,8 @@ genesis_block_hash.to_hex());
         stats_collector,
         stats_broadcast_client,
         shutdown_signal,
+        swarm,
+        squad,
     )
     .await
 }
