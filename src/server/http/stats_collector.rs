@@ -41,6 +41,7 @@ pub(crate) struct StatsCollector {
     total_peers: u64,
     total_grey_list: u64,
     total_black_list: u64,
+    total_non_squad_peers: u64,
     pending_incoming: u32,
     pending_outgoing: u32,
     established_incoming: u32,
@@ -72,6 +73,7 @@ impl StatsCollector {
             total_peers: 0,
             total_grey_list: 0,
             total_black_list: 0,
+            total_non_squad_peers: 0,
             sha_network_difficulty: Difficulty::min(),
             randomx_network_difficulty: Difficulty::min(),
             sha_target_difficulty: Difficulty::min(),
@@ -133,11 +135,13 @@ impl StatsCollector {
                 total_peers,
                 total_grey_list,
                 total_black_list,
+                total_non_squad,
                 ..
             } => {
                 self.total_peers = total_peers;
                 self.total_grey_list = total_grey_list;
                 self.total_black_list = total_black_list;
+                self.total_non_squad_peers = total_non_squad;
             },
             StatData::TargetDifficultyChanged {
                 target_difficulty,
@@ -194,7 +198,7 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
+                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b/o) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
@@ -216,6 +220,7 @@ impl StatsCollector {
                                     self.total_peers,
                                     self.total_grey_list,
                                     self.total_black_list,
+                                    self.total_non_squad_peers,
                                     self.established_incoming,
                                     self.established_outgoing,
                                     humantime::format_duration(Duration::from_secs(
@@ -329,6 +334,7 @@ pub(crate) enum StatData {
         total_peers: u64,
         total_grey_list: u64,
         total_black_list: u64,
+        total_non_squad: u64,
         timestamp: EpochTime,
     },
     LibP2PStats {
@@ -452,11 +458,13 @@ impl StatsBroadcastClient {
         total_peers: u64,
         total_grey_list: u64,
         total_black_list: u64,
+        total_non_squad: u64,
     ) -> Result<(), anyhow::Error> {
         self.broadcast(StatData::NewPeer {
             total_peers,
             total_grey_list,
             total_black_list,
+            total_non_squad,
             timestamp: EpochTime::now(),
         })
     }

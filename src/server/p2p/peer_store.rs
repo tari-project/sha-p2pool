@@ -206,16 +206,19 @@ impl PeerStore {
     }
 
     pub fn best_peers_to_share(&self, count: usize, squad: &str, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
-        let mut peers = if squad == self.my_squad {
-            self.whitelist_peers.values().collect::<Vec<_>>()
-        } else {
-            self.non_squad_peers.values().collect::<Vec<_>>()
-        };
-        peers.retain(|peer| {
-            !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some() && peer.peer_info.squad == squad
+        // let mut peers = if squad == self.my_squad {
+        //     self.whitelist_peers.values().collect::<Vec<_>>()
+        // } else {
+        //     self.non_squad_peers.values().collect::<Vec<_>>()
+        // };
+        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
+        peers.extend(self.non_squad_peers.values().collect::<Vec<_>>());
+        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some());
+        peers.sort_by(|a, b| {
+            (if a.peer_info.squad == squad { 0 } else { 1 })
+                .cmp(&(if b.peer_info.squad == squad { 0 } else { 1 }))
+                .then(b.last_seen().cmp(&a.last_seen()))
         });
-        peers.sort_by_key(|a| a.last_seen());
-        peers.reverse();
 
         peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
         peers.truncate(count);
@@ -224,6 +227,7 @@ impl PeerStore {
 
     pub fn best_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
+        peers.extend(self.non_squad_peers.values().collect::<Vec<_>>());
         peers.retain(|peer| {
             !peer.peer_info.public_addresses().is_empty() &&
                 (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
@@ -231,6 +235,10 @@ impl PeerStore {
         peers.sort_by(|a, b| {
             b.num_grey_listings
                 .cmp(&a.num_grey_listings)
+                .then(
+                    (if a.peer_info.squad == self.my_squad { 0 } else { 1 })
+                        .cmp(&(if b.peer_info.squad == self.my_squad { 0 } else { 1 })),
+                )
                 .then(b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow))
                 .then(b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow))
         });
@@ -308,6 +316,12 @@ impl PeerStore {
         if peer_info.squad != self.my_squad {
             self.non_squad_peers
                 .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
+            let _unused = self.stats_broadcast_client.send_new_peer(
+                self.whitelist_peers.len() as u64,
+                self.greylist_peers.len() as u64,
+                self.blacklist_peers.len() as u64,
+                self.non_squad_peers.len() as u64,
+            );
             return AddPeerStatus::NonSquad;
         }
 
@@ -333,6 +347,7 @@ impl PeerStore {
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
+            self.non_squad_peers.len() as u64,
         );
 
         // self.peer_removals.insert(peer_id, removal_count).await;
@@ -359,6 +374,7 @@ impl PeerStore {
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
+            self.non_squad_peers.len() as u64,
         );
     }
 
@@ -373,6 +389,7 @@ impl PeerStore {
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
+            self.non_squad_peers.len() as u64,
         );
     }
 
@@ -428,6 +445,7 @@ impl PeerStore {
                     self.whitelist_peers.len() as u64,
                     self.greylist_peers.len() as u64,
                     self.blacklist_peers.len() as u64,
+                    self.non_squad_peers.len() as u64,
                 );
             }
         }
@@ -449,6 +467,7 @@ impl PeerStore {
                 self.whitelist_peers.len() as u64,
                 self.greylist_peers.len() as u64,
                 self.blacklist_peers.len() as u64,
+                self.non_squad_peers.len() as u64,
             );
         }
     }

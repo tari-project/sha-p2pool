@@ -786,9 +786,7 @@ where S: ShareChain
                 return;
             }
             let peer_store_read_lock = self.network_peer_store.read().await;
-            let my_best_peers = peer_store_read_lock.best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, &self.squad, &[]);
-
-            let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
+            let my_best_peers = vec![];
             let known_peers = peer_store_read_lock.get_known_peers();
             drop(peer_store_read_lock);
             self.swarm
@@ -850,6 +848,9 @@ where S: ShareChain
         let num_peers = request.best_peers.len();
 
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?} with {num_peers} new peers");
+        for peer in &request.best_peers {
+            info!(target: PEER_INFO_LOGGING_LOG_TARGET, "new peer from request received. {:?}, squad: {}", peer.peer_id, peer.squad);
+        }
         let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())
@@ -1069,12 +1070,12 @@ where S: ShareChain
                 // Keep going until we have all the peers
                 if num_peers_added > 0 {
                     self.initiate_direct_peer_exchange(&peer_id).await;
-                } else {
-                    // Once we have peer info from the seed peers, disconnect from them.
-                    if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
-                        warn!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
-                        let _ = self.swarm.disconnect_peer_id(peer_id);
-                    }
+                }
+
+                // Once we have peer info from the seed peers, disconnect from them.
+                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                    warn!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
                 }
             },
             Err(error) => {
