@@ -41,7 +41,6 @@ use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
 
 use super::P2Block;
-use crate::server::p2p::messages::{deserialize_message, serialize_message};
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::lmdb_block_storage";
 pub(crate) struct LmdbBlockStorage {
@@ -90,7 +89,7 @@ impl LmdbBlockStorage {
             let reader = env.read().expect("reader");
             let iter = store.iter_start(&reader).unwrap();
             for r in iter {
-                let (k, v) = r.unwrap();
+                let (_k, v) = r.unwrap();
                 match v {
                     rkv::Value::Str(s) => {
                         migrations.insert(s.to_string(), ());
@@ -101,7 +100,7 @@ impl LmdbBlockStorage {
                 }
             }
         }
-        if !migrations.contains_key(&"01_remove_block_cache".to_string()) {
+        if !migrations.contains_key("01_remove_block_cache") {
             let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
             let mut writer = env.write().expect("writer");
             store.clear(&mut writer).unwrap();
