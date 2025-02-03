@@ -40,6 +40,7 @@ lazy_static! {
 pub(crate) struct P2Block {
     #[serde(default)]
     pub version: u64,
+    pub squad: String,
     pub hash: BlockHash,
     pub timestamp: EpochTime,
     pub prev_hash: BlockHash,
@@ -63,6 +64,7 @@ impl Default for P2Block {
         Self {
             version: PROTOCOL_VERSION,
             hash: Default::default(),
+            squad: "NoSquad".to_string(),
             timestamp: EpochTime::now(),
             prev_hash: Default::default(),
             height: 0,
@@ -85,6 +87,7 @@ impl P2Block {
     pub fn generate_hash(&self) -> BlockHash {
         DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
             .chain(&self.prev_hash)
+            .chain(&self.squad.as_bytes())
             .chain(&self.version.to_le_bytes())
             .chain(&self.timestamp)
             .chain(&self.height)
@@ -186,6 +189,11 @@ impl P2BlockBuilder {
             added_target_difficulty: false,
             block,
         }
+    }
+
+    pub fn with_squad(mut self, squad: String) -> Self {
+        self.block.squad = squad;
+        self
     }
 
     pub fn with_timestamp(mut self, timestamp: EpochTime) -> Self {
