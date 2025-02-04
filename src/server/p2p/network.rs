@@ -727,6 +727,7 @@ where S: ShareChain
     async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> bool {
         // Don't add ourselves
         if &peer == self.swarm.local_peer_id() {
+            error!(target: LOG_TARGET, "Peer {} has same local id as us, skipping", peer);
             return false;
         }
 
@@ -754,15 +755,20 @@ where S: ShareChain
 
                 return true;
             },
-            AddPeerStatus::Existing => {},
+            AddPeerStatus::Existing => {
+                error!(target: LOG_TARGET, "Peer {} already exists", peer);
+            },
             AddPeerStatus::Greylisted => {
                 debug!(target: LOG_TARGET, "Added peer but it was grey listed");
+                error!(target: LOG_TARGET, "Peer {} grelistedg", peer);
             },
             AddPeerStatus::Blacklisted => {
                 debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
+                error!(target: LOG_TARGET, "Peer {} blackisted", peer);
             },
             AddPeerStatus::NonSquad => {
                 debug!(target: LOG_TARGET, "Added peer {} but it was not in the same squad", peer);
+                error!(target: LOG_TARGET, "Peer {} not ouur squad", peer);
             },
         }
 
@@ -841,9 +847,10 @@ where S: ShareChain
         }
 
         let source_peer = request.my_info.peer_id;
+        let source_peer_squad = request.my_info.squad.clone();
         let num_peers = request.best_peers.len();
 
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?} with {num_peers} new peers");
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?}, squad: {source_peer_squad:?} with {num_peers} new peers");
         for peer in &request.best_peers {
             info!(target: PEER_INFO_LOGGING_LOG_TARGET, "new peer from request received. {:?}, squad: {}", peer.peer_id, peer.squad);
         }
@@ -968,7 +975,20 @@ where S: ShareChain
             Ok(peer_id) => {
                 if response.info.squad != self.squad {
                     warn!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    let mut are_we_their_relay = false;
+                    for address in &response.info.public_addresses() {
+                        for protocol in address.iter() {
+                            if let Protocol::P2p(p2p) = protocol {
+                                if p2p == self.local_peer_id() {
+                                    are_we_their_relay = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if !are_we_their_relay {
+                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                    }
                     return;
                 }
                 if self.add_peer(response.info.clone(), peer_id).await {
@@ -1042,7 +1062,7 @@ where S: ShareChain
                 // }
                 let mut num_peers_added = 0;
                 for mut peer in response.best_peers {
-                    debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}  [rx {}, sha {}]received from {}", peer.peer_id, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
+                    debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}, squad: {}  [rx {}, sha {}]received from {}", peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
                     if let Some(peer_id) = peer.peer_id {
                         // Reset the timestamp so that we can try to ping them
                         peer.timestamp = EpochTime::now().as_u64();
@@ -1066,6 +1086,8 @@ where S: ShareChain
                 // Keep going until we have all the peers
                 if num_peers_added > 0 {
                     self.initiate_direct_peer_exchange(&peer_id).await;
+                } else {
+                    debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "No peers added from peer");
                 }
 
                 // Once we have peer info from the seed peers, disconnect from them.
