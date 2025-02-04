@@ -977,7 +977,7 @@ where S: ShareChain
                     warn!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer_id);
                     let mut are_we_their_relay = false;
                     for address in &response.info.public_addresses() {
-                        for protocol in address.iter() {
+                        for protocol in address {
                             if let Protocol::P2p(p2p) = protocol {
                                 if p2p == self.local_peer_id() {
                                     are_we_their_relay = true;
