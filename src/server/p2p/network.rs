@@ -531,11 +531,6 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Reject);
                             }
 
-                            if payload.squad != self.squad {
-                                debug!(target: LOG_TARGET, "Peer {} is in a different squad, skipping", source_peer);
-                                return Ok(MessageAcceptance::Accept);
-                            }
-
                             // 60 seconds. TODO: make config
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
                                 debug!(target: LOG_TARGET,  "Peer {} sent a peer info message that is too old, skipping", source_peer);
@@ -756,19 +751,16 @@ where S: ShareChain
                 return true;
             },
             AddPeerStatus::Existing => {
-                error!(target: LOG_TARGET, "Peer {} already exists", peer);
+                trace!(target: LOG_TARGET, "Peer was already added");
             },
             AddPeerStatus::Greylisted => {
                 debug!(target: LOG_TARGET, "Added peer but it was grey listed");
-                error!(target: LOG_TARGET, "Peer {} grelistedg", peer);
             },
             AddPeerStatus::Blacklisted => {
                 debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
-                error!(target: LOG_TARGET, "Peer {} blackisted", peer);
             },
             AddPeerStatus::NonSquad => {
                 debug!(target: LOG_TARGET, "Added peer {} but it was not in the same squad", peer);
-                error!(target: LOG_TARGET, "Peer {} not ouur squad", peer);
             },
         }
 
@@ -850,9 +842,9 @@ where S: ShareChain
         let source_peer_squad = request.my_info.squad.clone();
         let num_peers = request.best_peers.len();
 
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?}, squad: {source_peer_squad:?} with {num_peers} new peers");
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?}({source_peer_squad:?}) with {num_peers} new peers");
         for peer in &request.best_peers {
-            info!(target: PEER_INFO_LOGGING_LOG_TARGET, "new peer from request received. {:?}, squad: {}", peer.peer_id, peer.squad);
+            info!(target: PEER_INFO_LOGGING_LOG_TARGET, "new peer from request received. {:?}({})", peer.peer_id, peer.squad);
         }
         let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
@@ -895,7 +887,7 @@ where S: ShareChain
                 }
                 for mut peer in request.best_peers {
                     if let Some(peer_id) = peer.peer_id {
-                        debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {:?} squad {}  [rx {}, sha {}]received from {}", peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
+                        debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {:?}({})  [rx {}, sha {}]received from {}", peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
 
                         // Reset the timestamp so that we can try to ping them
                         peer.timestamp = EpochTime::now().as_u64();
