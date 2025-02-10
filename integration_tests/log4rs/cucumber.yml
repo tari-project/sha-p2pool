@@ -1,0 +1,118 @@
+#  See https://docs.rs/log4rs/1.1.1/log4rs/encode/pattern/index.html for deciphering the log pattern.
+refresh_rate: 30 seconds
+appenders:
+
+  stdout:
+    kind: rolling_file
+    path: "{{log_dir}}/log/stdout.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 2
+        pattern: "{{log_dir}}/log/stdout.{}.log"
+    encoder:
+      pattern: "{m}"
+
+  cucumber:
+    kind: rolling_file
+    path: "{{log_dir}}/log/cucumber.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 2
+        pattern: "{{log_dir}}/log/cucumber.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+  base_node:
+    kind: rolling_file
+    path: "{{log_dir}}/log/base_node.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 2
+        pattern: "{{log_dir}}/log/base_node.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+  other:
+    kind: rolling_file
+    path: "{{log_dir}}/log/other.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 2
+        pattern: "{{log_dir}}/log/other.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
+
+# We don't want prints during cucumber test, everything useful will in logs.
+# root:
+#   level: warn
+#   appenders:
+#     - stdout
+
+root:
+  level: debug
+  appenders:
+    - stdout
+
+loggers:
+  # stdout
+  stdout:
+    level: info # we have only single print, and it's info
+    appenders:
+      - stdout
+  # cucumber
+  cucumber:
+    level: debug
+    appenders:
+      - cucumber
+    additive: false
+  # base_node
+  comms:
+    level: debug
+    appenders:
+      - base_node
+    additive: false
+  p2p:
+    level: debug
+    appenders:
+      - base_node
+    additive: false
+  c:
+    level: debug
+    appenders:
+      - base_node
+    additive: false
+  # other (we do not want these unless there are errors)
+  globset:
+    level: error
+    appenders:
+      - other
+    additive: false
+  hickory_proto:
+    level: error
+    appenders:
+      - other
+    additive: false

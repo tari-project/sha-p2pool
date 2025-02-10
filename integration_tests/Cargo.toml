@@ -1,0 +1,63 @@
+[package]
+name = "tari_integration_tests"
+authors = ["The Tari Development Community"]
+repository = "https://github.com/tari-project/sha-p2pool"
+license = "BSD-3-Clause"
+version = "0.22.1"
+edition = "2021"
+
+[dependencies]
+# From tari base layer project
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_core = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+# From the tari crypto project
+tari_crypto = "0.22.0"
+# From tari sha-p2pool project
+sha_p2pool = { path = "../p2pool" }
+# Other dependencies
+cucumber = { version = "0.20.0", features = ["default", "libtest", "output-junit"] }
+indexmap = "1.9.1"
+libp2p = { version = "0.54.1", features = [
+    "dns",
+    "identify",
+    "macros",
+    "tokio",
+    "serde",
+    "noise",
+    "tcp",
+    "yamux",
+    "mdns",
+    "gossipsub",
+    "request-response",
+    "json",
+    "cbor",
+    "relay",
+    "dcutr",
+    "autonat",
+    "memory-connection-limits",
+    "rsa",
+    "ecdsa",
+    "ping",
+    "quic",
+] }
+log = { version = "0.4.8", features = ["std"] }
+rand = "0.8"
+reqwest = { version = "0.11", features = ["json"] }
+serde_json = "1.0.128"
+thiserror = "^1.0.20"
+tonic = "0.12.3"
+tokio = { version = "1.41.0", features = ["full"] }
+
+[[test]]
+name = "cucumber" # this should be the same as the filename of your test target
+harness = false # allows Cucumber to print output instead of libtest
+
