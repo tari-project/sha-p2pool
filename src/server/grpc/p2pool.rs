@@ -1,6 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use core::sync;
 use std::{
     collections::{HashMap, VecDeque},
     str::FromStr,
@@ -296,7 +297,7 @@ where S: ShareChain
                 .map_err(|error| Status::internal(format!("failed to get new tip block {error:?}")))?)
             .clone();
             info!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
-            let (shares, target_difficulty) = share_chain
+            let (shares, mut target_difficulty) = share_chain
                 .generate_shares_and_get_target_difficulty(&new_tip_block, !synced_status)
                 .await
                 .map_err(|error| Status::internal(format!("failed to generate shares {error:?}")))?;
@@ -372,9 +373,15 @@ where S: ShareChain
                     },
                 }
 
-                // what happens p2pool difficulty > base chain diff
                 if target_difficulty.as_u64() < miner_data.target_difficulty && synced_status {
                     miner_data.target_difficulty = target_difficulty.as_u64();
+                }
+
+                // If we are not synced, return the target difficulty from the miner data.
+                // In future we should remove this duplicate data and only rely on the target_difficulty
+                // in miner_data.
+                if !synced_status {
+                    target_difficulty = Difficulty::from_u64(miner_data.target_difficulty).unwrap();
                 }
             }
 
