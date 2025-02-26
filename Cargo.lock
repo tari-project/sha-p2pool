@@ -3253,8 +3253,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -3283,8 +3283,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_ledger_wallet_common"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "bs58 0.5.1",
 ]
@@ -3292,7 +3292,7 @@ dependencies = [
 [[package]]
 name = "minotari_node_grpc_client"
 version = "0.1.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -5271,8 +5271,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "config",
@@ -5295,8 +5295,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_sqlite"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -5309,8 +5309,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_types"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "base64 0.21.7",
  "bitflags 2.8.0",
@@ -5335,8 +5335,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5378,8 +5378,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_dht"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "bitflags 2.8.0",
@@ -5412,8 +5412,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_rpc_macros"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5422,8 +5422,8 @@ dependencies = [
 
 [[package]]
 name = "tari_core"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5516,13 +5516,13 @@ dependencies = [
 
 [[package]]
 name = "tari_features"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 
 [[package]]
 name = "tari_hashing"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "borsh",
  "digest",
@@ -5531,8 +5531,8 @@ dependencies = [
 
 [[package]]
 name = "tari_key_manager"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5564,8 +5564,8 @@ dependencies = [
 
 [[package]]
 name = "tari_max_size"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "borsh",
  "serde",
@@ -5575,8 +5575,8 @@ dependencies = [
 
 [[package]]
 name = "tari_mmr"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "borsh",
  "digest",
@@ -5589,8 +5589,8 @@ dependencies = [
 
 [[package]]
 name = "tari_p2p"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "fs2",
@@ -5620,8 +5620,8 @@ dependencies = [
 
 [[package]]
 name = "tari_script"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "blake2",
  "borsh",
@@ -5638,8 +5638,8 @@ dependencies = [
 
 [[package]]
 name = "tari_service_framework"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5653,16 +5653,16 @@ dependencies = [
 
 [[package]]
 name = "tari_shutdown"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "futures 0.3.31",
 ]
 
 [[package]]
 name = "tari_storage"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "bincode",
  "lmdb-zero",
@@ -5673,8 +5673,8 @@ dependencies = [
 
 [[package]]
 name = "tari_test_utils"
-version = "1.11.3-pre.0"
-source = "git+https://github.com/stringhandler/tari.git?branch=st-add-p2pool-tip-info#afcbd4a2411f792168fd53ba9230a4e55050c31e"
+version = "1.11.5-pre.0"
+source = "git+https://github.com/tari-project/tari.git?rev=b3dc63f79e7bedd19854c17e5d9809deb652e61d#b3dc63f79e7bedd19854c17e5d9809deb652e61d"
 dependencies = [
  "futures 0.3.31",
  "rand",
