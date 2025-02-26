@@ -16,9 +16,12 @@ use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     pow_algo::PowAlgos,
     sha_p2_pool_server::ShaP2Pool,
+    Empty,
     GetNewBlockRequest,
     GetNewBlockResponse,
     GetNewBlockTemplateWithCoinbasesRequest,
+    GetTipInfoRequest,
+    GetTipInfoResponse,
     SubmitBlockRequest,
     SubmitBlockResponse,
 };
@@ -153,16 +156,16 @@ where S: ShareChain
         };
         match share_chain.submit_block(block.clone()).await {
             Ok(new_tip) => {
-                let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(block.clone())];
-                let mut uncles = share_chain
-                    .get_blocks(&block.uncles)
-                    .await
-                    .into_iter()
-                    .map(Arc::<P2Block>::unwrap_or_clone)
-                    .collect();
-                new_blocks.append(&mut uncles);
                 if new_tip.new_tip.is_some() {
+                    let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
+                    let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(block.clone())];
+                    let mut uncles = share_chain
+                        .get_blocks(&block.uncles)
+                        .await
+                        .into_iter()
+                        .map(Arc::<P2Block>::unwrap_or_clone)
+                        .collect();
+                    new_blocks.append(&mut uncles);
                     let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks);
                     let res = self
                         .p2p_client
@@ -172,6 +175,9 @@ where S: ShareChain
                         info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
                     }
                     return res;
+                } else {
+                    // missed the tip
+                    let _unused = self.stats_broadcast.send_miner_block_rejected(pow_algo);
                 }
                 Ok(())
             },
@@ -188,6 +194,57 @@ where S: ShareChain
 impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 where S: ShareChain
 {
+    async fn get_tip_info(&self, _request: Request<GetTipInfoRequest>) -> Result<Response<GetTipInfoResponse>, Status> {
+        let timer = Instant::now();
+        let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT;
+
+        let result = timeout(timeout_duration, async {
+            let (rx_height, rx_hash) = self
+                .share_chain_random_x
+                .get_tip()
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?
+                .map(|s| (s.0, s.1.to_vec()))
+                .unwrap_or((0, FixedHash::zero().to_vec()));
+
+            let (sha3_height, sha3_hash) = self
+                .share_chain_sha3x
+                .get_tip()
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?
+                .map(|s| (s.0, s.1.to_vec()))
+                .unwrap_or((0, FixedHash::zero().to_vec()));
+
+            let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+            let tip_info = client.get_tip_info(Empty {}).await?.into_inner();
+            let (node_height, node_tip_hash) = tip_info
+                .metadata
+                .map(|m| (m.best_block_height, m.best_block_hash))
+                .unwrap_or_else(|| (0, FixedHash::zero().to_vec()));
+
+            let response = GetTipInfoResponse {
+                node_height,
+                node_tip_hash,
+                p2pool_rx_height: rx_height,
+                p2pool_rx_tip_hash: rx_hash.to_vec(),
+                p2pool_sha_height: sha3_height,
+                p2pool_sha_tip_hash: sha3_hash.to_vec(),
+            };
+            Ok(Response::new(response))
+        })
+        .await;
+
+        match result {
+            Ok(response) => response.inspect_err(|e| error!(target: LOG_TARGET, "get_tip_info failed: {e:?}")),
+            Err(_) => {
+                error!(target: LOG_TARGET, "get_tip_info timed out after {}ms.", timer.elapsed().as_millis());
+                Err(Status::deadline_exceeded("get_tip_info timed out"))
+            },
+        }
+    }
+
     /// Returns a new block (that can be mined) which contains all the shares generated
     /// from the current share chain as coinbase transactions.
     #[allow(clippy::too_many_lines)]
