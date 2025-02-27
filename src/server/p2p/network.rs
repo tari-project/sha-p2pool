@@ -142,7 +142,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(60 * 15),
+            peer_info_publish_interval: Duration::from_secs(60 * 5),
             stable_peer: true,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -525,7 +525,7 @@ where S: ShareChain
                 topic if topic == Self::network_topic(PEER_INFO_TOPIC) => {
                     match messages::PeerInfo::try_from(message) {
                         Ok(payload) => {
-                            debug!(target: LOG_TARGET,  "[squad] New peer info: {source_peer:?} -> {payload:?}");
+                            debug!(target: LOG_TARGET,  "[PEER_INFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
                             if payload.version != PROTOCOL_VERSION {
                                 debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
@@ -537,18 +537,8 @@ where S: ShareChain
                                 // TODO: should be punish
                                 return Ok(MessageAcceptance::Ignore);
                             }
-                            if payload.peer_id.as_ref() == Some(self.swarm.local_peer_id()) {
-                                return Ok(MessageAcceptance::Ignore);
-                            }
-
-                            if payload.peer_id != Some(source_peer) {
-                                warn!(target: LOG_TARGET,  "Peer {} sent a peer info message with a different peer id: {}, skipping", source_peer, payload.peer_id.as_ref().map(|p| p.to_string()).unwrap_or("None".to_string()));
-                                // return Ok(MessageAcceptance::Ignore);
-                            }
-                            debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
 
                             self.add_peer(payload, source_peer).await;
-                            // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
                             return Ok(MessageAcceptance::Accept);
                         },
                         Err(error) => {
@@ -731,19 +721,11 @@ where S: ShareChain
             return false;
         }
 
-        // if payload.squad != self.squad {
-        //     debug!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer);
-        //     return false;
-        // }
-
         let public_addresses = payload.public_addresses();
         let add_status = self.network_peer_store.write().await.add(peer, payload).await;
 
         match add_status {
             AddPeerStatus::NewPeer => {
-                // self.initiate_direct_peer_exchange(&peer).await;
-                // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                // let _unused = self.swarm.dial(peer);
                 for addr in &public_addresses {
                     self.swarm.add_peer_address(peer, addr.clone());
                 }
@@ -752,15 +734,18 @@ where S: ShareChain
             },
             AddPeerStatus::Existing => {
                 trace!(target: LOG_TARGET, "Peer was already added");
+                return true;
             },
             AddPeerStatus::Greylisted => {
                 debug!(target: LOG_TARGET, "Added peer but it was grey listed");
-            },
-            AddPeerStatus::Blacklisted => {
-                debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
+                return true;
             },
             AddPeerStatus::NonSquad => {
                 debug!(target: LOG_TARGET, "Added peer {} but it was not in the same squad", peer);
+                return true;
+            },
+            AddPeerStatus::Blacklisted => {
+                debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
             },
         }
 
@@ -1375,6 +1360,10 @@ where S: ShareChain
                     DialError::Transport(transport_error) => {
                         // There are a lot of cancelled errors, so ignore them
                         warn!(target: LOG_TARGET, "Outgoing connection error, ignoring: {peer_id:?} -> {transport_error:?}");
+                        // self.network_peer_store
+                        //     .write()
+                        //     .await
+                        //     .move_to_grey_list(peer_id, format!("Outgoing connection error: {:?}", transport_error));
                     },
                     _ => {
                         warn!(target: LOG_TARGET, "Outgoing connection error: {peer_id:?} -> {error:?}");
@@ -1436,7 +1425,7 @@ where S: ShareChain
                     }
                 },
                 ServerNetworkBehaviourEvent::MetaDataExchange(event) => match event {
-                    request_response::Event::Message { peer: _, message } => match message {
+                    request_response::Event::Message { peer, message } => match message {
                         request_response::Message::Request {
                             request_id: _request_id,
                             request,
@@ -1452,7 +1441,7 @@ where S: ShareChain
                                 self.handle_meta_data_exchange_response(response).await;
                             },
                             Err(error) => {
-                                error!(target: LOG_TARGET, "REQ-RES peer info response error: {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES peer: {peer} info response error: {error:?}");
                             },
                         },
                     },
@@ -1466,7 +1455,7 @@ where S: ShareChain
                     request_response::Event::ResponseSent { .. } => {},
                 },
                 ServerNetworkBehaviourEvent::DirectPeerExchange(event) => match event {
-                    request_response::Event::Message { peer: _, message } => match message {
+                    request_response::Event::Message { peer, message } => match message {
                         request_response::Message::Request {
                             request_id: _request_id,
                             request,
@@ -1482,7 +1471,7 @@ where S: ShareChain
                                 self.handle_direct_peer_exchange_response(response).await;
                             },
                             Err(error) => {
-                                error!(target: LOG_TARGET, "REQ-RES peer info response error: {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES peer: {peer} info response error: {error:?}");
                             },
                         },
                     },

@@ -55,6 +55,7 @@ impl PeerStoreRecord {
     }
 }
 
+#[derive(PartialEq)]
 pub enum AddPeerStatus {
     NewPeer,
     Existing,
@@ -206,11 +207,6 @@ impl PeerStore {
     }
 
     pub fn best_peers_to_share(&self, count: usize, squad: &str, other_nodes_peers: &[PeerId]) -> Vec<PeerStoreRecord> {
-        // let mut peers = if squad == self.my_squad {
-        //     self.whitelist_peers.values().collect::<Vec<_>>()
-        // } else {
-        //     self.non_squad_peers.values().collect::<Vec<_>>()
-        // };
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         peers.extend(self.non_squad_peers.values().collect::<Vec<_>>());
         peers.retain(|peer| !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some());
@@ -309,20 +305,23 @@ impl PeerStore {
             return AddPeerStatus::Greylisted;
         }
 
-        if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
-            return AddPeerStatus::Existing;
-        }
-
         if peer_info.squad != self.my_squad {
+            let return_type = if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
+                AddPeerStatus::NonSquad
+            } else {
+                AddPeerStatus::Existing
+            };
             self.non_squad_peers
                 .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
-            let _unused = self.stats_broadcast_client.send_new_peer(
-                self.whitelist_peers.len() as u64,
-                self.greylist_peers.len() as u64,
-                self.blacklist_peers.len() as u64,
-                self.non_squad_peers.len() as u64,
-            );
-            return AddPeerStatus::NonSquad;
+            if return_type == AddPeerStatus::NonSquad {
+                let _unused = self.stats_broadcast_client.send_new_peer(
+                    self.whitelist_peers.len() as u64,
+                    self.greylist_peers.len() as u64,
+                    self.blacklist_peers.len() as u64,
+                    self.non_squad_peers.len() as u64,
+                );
+            }
+            return return_type;
         }
 
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
@@ -349,11 +348,6 @@ impl PeerStore {
             self.blacklist_peers.len() as u64,
             self.non_squad_peers.len() as u64,
         );
-
-        // self.peer_removals.insert(peer_id, removal_count).await;
-        // }
-
-        // self.set_tip_of_block_heights().await;
         AddPeerStatus::NewPeer
     }
 
