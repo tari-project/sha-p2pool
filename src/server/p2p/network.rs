@@ -2493,11 +2493,6 @@ where S: ShareChain
                     }
                 },
                 event = self.swarm.select_next_some() => {
-                    let public_addresses: Vec<Multiaddr> = self.swarm.external_addresses().cloned().collect();
-                    warn!(target: LOG_TARGET, "We have this many externaled address: {:?}", public_addresses.len());
-                    for addr in public_addresses {
-                        warn!(target: LOG_TARGET, "External address: {}", addr);
-                    }
                     let timer = Instant::now();
                     self.handle_event(event).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
