@@ -198,7 +198,7 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b/o) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
+                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(tot/gr/bl/non) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
