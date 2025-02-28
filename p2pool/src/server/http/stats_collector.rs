@@ -197,34 +197,39 @@ impl StatsCollector {
                 _ = stats_report_timer.tick() => {
                     let formatter = Formatter::new();
 
-                            info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(tot/gr/bl/non) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
-                                    humantime::format_duration(Duration::from_secs(
-                                        EpochTime::now().as_u64().checked_sub(
-                                            self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
-                                .unwrap_or_default())),
-                                env!("CARGO_PKG_VERSION"),
-                                self.last_squad.as_deref().unwrap_or("Not set"),
-                                    self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
-                                    self.randomx_chain_height,
-                                    self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
-                                    self.sha3x_chain_height,
-                                    formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
-            formatter.format(                            self.randomx_network_difficulty.as_u64() as f64),
-                                    formatter.format(self.sha_target_difficulty.as_u64() as f64),
-                                    formatter.format(self.sha_network_difficulty.as_u64() as f64),
-                                    self.miner_rx_accepted,
-                                    self.miner_sha_accepted,
-                                    self.pool_rx_accepted,
-                                    self.pool_sha_accepted,
-                                    self.total_peers,
-                                    self.total_grey_list,
-                                    self.total_black_list,
-                                    self.total_non_squad_peers,
-                                    self.established_incoming,
-                                    self.established_outgoing,
-                                    humantime::format_duration(Duration::from_secs(
-                                        EpochTime::now().as_u64().checked_sub(self.last_gossip_message.as_u64()).unwrap_or_default())),
+                    info!(target: LOG_TARGET,
+                        "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(tot/gr/bl/non) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
+                        humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
+                            self.first_stat_received.unwrap_or(EpochTime::now()).as_u64()
+                        ).unwrap_or_default())),
+                        env!("CARGO_PKG_VERSION"),
+                        self.last_squad.as_deref().unwrap_or("Not set"),
+                            self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
+                            self.randomx_chain_height,
+                            self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
+                            self.sha3x_chain_height,
+                            formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
+                            formatter.format(self.randomx_network_difficulty.as_u64() as f64),
+                            formatter.format(self.sha_target_difficulty.as_u64() as f64),
+                            formatter.format(self.sha_network_difficulty.as_u64() as f64),
+                            self.miner_rx_accepted,
+                            self.miner_sha_accepted,
+                            self.pool_rx_accepted,
+                            self.pool_sha_accepted,
+                            self.total_peers,
+                            self.total_grey_list,
+                            self.total_black_list,
+                            self.total_non_squad_peers,
+                            self.established_incoming,
+                            self.established_outgoing,
+                            humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
+                                self.last_gossip_message.as_u64()
+                            ).unwrap_or_default())),
+                        );
+                    },
+                res = self.request_rx.recv() => {
+                    match res {
+                        Some(StatsRequest::GetStats(pow, tx)) => {
 
                             match pow {
                                 PowAlgorithm::Sha3x => {
@@ -261,19 +266,13 @@ impl StatsCollector {
                                 self.first_stat_received = Some(sample.timestamp());
                             }
                             self.handle_stat(sample);
-                            // Expect 2 samples per second per device
-                            // let entry = self.hashrate_samples.entry(sample.device_id).or_insert_with(|| VecDeque::with_capacity(181));
-                    // if entry.len() > 180 {
-                        // entry.pop_front();
-                    // }
-                    // entry.push_back(sample);
                         },
                         Err(e) => {
                             error!(target: LOG_TARGET, "ShareChainError receiving hashrate sample: {:?}", e);
                             // break;
                         }
                     }
-                                    }
+                }
             }
         }
         Ok(())
