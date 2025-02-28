@@ -23,7 +23,7 @@ use tari_common::{configuration::Network, network_check::set_network_if_choice_v
 use tari_core::proof_of_work::Difficulty;
 use tonic::{codegen::InterceptedService, transport::Channel as TonicChannel};
 
-use crate::{get_port, wait_for_service, TariWorld, TestResult, HUNDRED_MS, THIRTY_SECONDS_WITH_100_MS_SLEEP};
+use crate::{get_port, wait_for_service, TariWorld, TestResult};
 
 pub const LOG_TARGET: &str = "cucumber::p2pool_process";
 pub const LIBP2P_INFO_FILE: &str = "libp2p_info.json";
@@ -41,6 +41,7 @@ pub struct P2PoolProcess {
     pub running_instance: Option<Child>,
     pub grpc_port: u16,
     pub p2p_port: u16,
+    pub connected_base_node: String,
 }
 
 impl Drop for P2PoolProcess {
@@ -49,48 +50,30 @@ impl Drop for P2PoolProcess {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn spawn_p2pool_node_and_wait_for_start(
     world: &mut TariWorld,
     is_seed_node: bool,
-    seed_name: String,
+    p2pool_name: String,
     squad: String,
-    base_node_name: String,
+    connected_base_node: String,
 ) -> TestResult<()> {
-    spawn_p2pool_node_with_config(
-        world,
-        is_seed_node,
-        seed_name,
-        squad,
-        ShaP2PoolConfig::default(),
-        base_node_name,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_lines)]
-async fn spawn_p2pool_node_with_config(
-    world: &mut TariWorld,
-    is_seed_node: bool,
-    name: String,
-    squad: String,
-    mut node_config: ShaP2PoolConfig,
-    base_node_name: String,
-) -> TestResult<()> {
+    let mut node_config = ShaP2PoolConfig::default();
     std::env::set_var("TARI_NETWORK", "localnet");
     set_network_if_choice_valid(Network::LocalNet)?;
 
     let temp_dir_path: PathBuf;
 
-    if let Some(node_ps) = world.p2pool_nodes.get(&name) {
+    if let Some(node_ps) = world.p2pool_nodes.get(&p2pool_name) {
         temp_dir_path = node_ps.temp_dir_path.clone();
         node_config = node_ps.config.clone();
     } else {
         node_config.p2p_service.squad_prefix = squad.clone();
         node_config.p2p_service.squad_override = Some(squad.clone());
         node_config.p2p_service.is_seed_peer = is_seed_node;
-        node_config.p2p_service.peer_info_publish_interval = Duration::from_secs(2);
-        node_config.p2p_service.peer_exchange_interval = Duration::from_secs(2);
-        node_config.p2p_service.meta_data_exchange_interval = Duration::from_secs(2);
+        node_config.p2p_service.peer_info_publish_interval = Duration::from_secs(1);
+        node_config.p2p_service.peer_exchange_interval = Duration::from_secs(1);
+        node_config.p2p_service.meta_data_exchange_interval = Duration::from_secs(1);
         node_config.network_silence_delay = 0;
         // Each spawned p2pool node will use different ports
         node_config.p2p_port = get_port(18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
@@ -102,7 +85,7 @@ async fn spawn_p2pool_node_with_config(
                 get_port(19000..19499, Duration::from_secs(20)).ok_or("http_server_port no free port")?;
             node_config.http_server.enabled = true;
         }
-        // "/ip4/127.0.0.1/tcp/{}" or "/ip4/127.0.0.1/udp/{}/quic-v1"
+        // The format for this addrress can be either "/ip4/127.0.0.1/tcp/{}" or "/ip4/127.0.0.1/udp/{}/quic-v1"
         node_config.p2p_service.external_addr = Some(format!("/ip4/127.0.0.1/udp/{}/quic-v1", node_config.p2p_port));
         // Create a new temporary directory
         temp_dir_path = world
@@ -110,7 +93,7 @@ async fn spawn_p2pool_node_with_config(
             .as_ref()
             .expect("p2pool dir on world")
             .join("p2pool_nodes")
-            .join(format!("{}_grpc_port_{}", name.clone(), node_config.grpc_port));
+            .join(format!("{}_grpc_port_{}", p2pool_name.clone(), node_config.grpc_port));
         if let Err(err) = fs::create_dir_all(&temp_dir_path) {
             return Err(format!(
                 "Failed to create temp_dir_path at: '{}', error: {}",
@@ -132,7 +115,7 @@ async fn spawn_p2pool_node_with_config(
     let msg = format!(
         "Initializing p2pool node: '{}', p2p_port; '{}', grpc_port: '{}', http_server.port: '{}', is_seed_node: '{}', \
          base_dir: '{}'",
-        name,
+        p2pool_name,
         node_config.p2p_port,
         node_config.grpc_port,
         node_config.http_server.port,
@@ -142,7 +125,7 @@ async fn spawn_p2pool_node_with_config(
     debug!(target: LOG_TARGET, "{}", msg);
     println!("{}", msg);
 
-    let base_node_address = if let Some(base_node_process) = world.base_nodes.get(&base_node_name) {
+    let base_node_address = if let Some(base_node_process) = world.base_nodes.get(&connected_base_node) {
         format!("http://127.0.0.1:{}", base_node_process.grpc_port)
     } else if let Some(base_node_process) = world.base_nodes.get_index(0) {
         format!("http://127.0.0.1:{}", base_node_process.1.grpc_port)
@@ -150,7 +133,7 @@ async fn spawn_p2pool_node_with_config(
         let msg = format!(
             "No base node found for p2pool node '{}' to connect to; at least one base node must be spawned before any \
              p2pool nodes can be spawned",
-            name
+            p2pool_name
         );
         debug!(target: LOG_TARGET, "{}", msg);
         return Err(msg.to_string().into());
@@ -199,7 +182,7 @@ async fn spawn_p2pool_node_with_config(
         minimum_randomx_target_difficulty: Some(Difficulty::min().as_u64()),
     };
 
-    let name_cloned = name.clone();
+    let name_cloned = p2pool_name.clone();
     let temp_dir_path_clone = temp_dir_path.clone();
     let running_instance = {
         let mut command = Command::new(get_p2pool_exe_path());
@@ -218,7 +201,7 @@ async fn spawn_p2pool_node_with_config(
     let libp2p_info = LibP2pInfo::read_from_file(&temp_dir_path.join(LIBP2P_INFO_FILE), Duration::from_secs(30))?;
 
     let process = P2PoolProcess {
-        name: name.clone(),
+        name: p2pool_name.clone(),
         temp_dir_path: temp_dir_path.clone(),
         is_seed_node,
         config: node_config.clone(),
@@ -227,10 +210,11 @@ async fn spawn_p2pool_node_with_config(
         running_instance: Some(running_instance),
         grpc_port: node_config.grpc_port,
         p2p_port: node_config.p2p_port,
+        connected_base_node,
     };
     debug!(target: LOG_TARGET, "Initialized: {:?}", process);
 
-    world.p2pool_nodes.insert(name, process);
+    world.p2pool_nodes.insert(p2pool_name, process);
     if !is_seed_node {
         wait_for_service(node_config.p2p_port).await;
         wait_for_service(node_config.grpc_port).await;
@@ -277,6 +261,34 @@ impl P2PoolProcess {
             }
         }
     }
+}
+
+pub async fn shut_down_node(world: &mut TariWorld, p2pool_name: String) -> TestResult<()> {
+    debug!(target: LOG_TARGET, "shut down p2pool node '{}'", p2pool_name);
+
+    let p2pool_process: &mut P2PoolProcess = world.get_p2pool_node(&p2pool_name)?;
+    p2pool_process.kill();
+
+    Ok(())
+}
+
+pub async fn restart_node(world: &mut TariWorld, p2pool_name: String) -> TestResult<()> {
+    debug!(target: LOG_TARGET, "re-start p2pool node '{}'", p2pool_name);
+
+    let p2pool_process = world.get_p2pool_node(&p2pool_name)?;
+    let is_seed_node = p2pool_process.is_seed_node;
+    let name = p2pool_process.name.clone();
+    let squad = p2pool_process.squad.clone();
+    let connected_base_node = p2pool_process.connected_base_node.clone();
+
+    spawn_p2pool_node_and_wait_for_start(
+        world,
+        is_seed_node,
+        name.clone(),
+        squad.clone(),
+        connected_base_node.clone(),
+    )
+    .await
 }
 
 pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
@@ -435,7 +447,8 @@ pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, p
 
     let peer_process = world.get_p2pool_node(&peer_name)?;
 
-    for i in 0..(THIRTY_SECONDS_WITH_100_MS_SLEEP * 10) {
+    let mut counter = 0;
+    while start.elapsed() < Duration::from_secs(360) {
         let response = p2pool_client.get(connections_url.clone()).send().await?;
         if response.status().is_success() {
             let response_json: Value = response.json().await?;
@@ -474,11 +487,12 @@ pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, p
             )
             .into());
         }
-        if i % 10 == 0 {
-            debug!(target: LOG_TARGET, "{}: waiting for '{}' to show peer connected", i, connections_url);
+        if counter % 10 == 0 {
+            debug!(target: LOG_TARGET, "{}: waiting for '{}' to show peer connected", counter, connections_url);
         }
+        counter += 1;
 
-        tokio::time::sleep(Duration::from_millis(HUNDRED_MS)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     let msg = format!("Peer '{}' is NOT connected to '{}'", peer_name, p2pool_name);

@@ -22,7 +22,7 @@ use tari_core::{
 use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 use tokio::time::{timeout, Duration};
 
-use crate::{TariWorld, TestResult, HUNDRED_MS, THIRTY_SECONDS_WITH_100_MS_SLEEP};
+use crate::{TariWorld, TestResult};
 pub const LOG_TARGET: &str = "cucumber::miner";
 
 pub async fn mine_and_submit_tari_blocks(
@@ -129,7 +129,8 @@ pub async fn verify_block_height(world: &mut TariWorld, p2pool_name: String, hei
 
     let mut local_height = 0;
     let mut stats: Value = Value::Null;
-    for i in 0..(THIRTY_SECONDS_WITH_100_MS_SLEEP) {
+    let mut counter = 0;
+    while start.elapsed() < Duration::from_secs(30) {
         let response = timeout(Duration::from_secs(10), async {
             p2pool_client.get(stats_url.clone()).send().await
         })
@@ -160,20 +161,21 @@ pub async fn verify_block_height(world: &mut TariWorld, p2pool_name: String, hei
                     .into());
                 },
                 std::cmp::Ordering::Less => {
-                    if i % 10 == 0 {
+                    if counter % 10 == 0 {
                         debug!(
                             target: LOG_TARGET,
                             "{}: '{}' is at height {}, need to be at {}",
-                            i, p2pool_name, local_height, height
+                            counter, p2pool_name, local_height, height
                         );
                     }
+                    counter += 1;
                 },
             }
         } else {
             return Err(format!("Failed to query {} for stats: {}", stats_url, response.status()).into());
         }
 
-        tokio::time::sleep(Duration::from_millis(HUNDRED_MS)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     error!(target: LOG_TARGET, "Height not achieved. Stats: {:?}", stats);

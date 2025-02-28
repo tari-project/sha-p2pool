@@ -19,9 +19,6 @@ pub use base_node_process::BaseNodeProcess;
 use rand::Rng;
 pub use world::TariWorld;
 
-pub const THIRTY_SECONDS_WITH_100_MS_SLEEP: u64 = 30 * 10;
-pub const HUNDRED_MS: u64 = 100;
-
 type TestResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub fn get_port(range: Range<u16>, time_out: Duration) -> Option<u16> {

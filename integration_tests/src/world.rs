@@ -57,7 +57,7 @@ impl Debug for TariWorld {
 
 impl TariWorld {
     pub async fn get_p2pool_grpc_client<S: AsRef<str> + std::fmt::Display>(
-        &self,
+        &mut self,
         name: &S,
     ) -> anyhow::Result<ShaP2PoolClient<TonicChannel>> {
         self.get_p2pool_node(name).inspect_err(|e| {
@@ -80,10 +80,10 @@ impl TariWorld {
             )
     }
 
-    pub fn get_p2pool_node<S: AsRef<str>>(&self, node_name: &S) -> anyhow::Result<&P2PoolProcess> {
+    pub fn get_p2pool_node<S: AsRef<str>>(&mut self, node_name: &S) -> anyhow::Result<&mut P2PoolProcess> {
         Ok(self
             .p2pool_nodes
-            .get(node_name.as_ref())
+            .get_mut(node_name.as_ref())
             .ok_or_else(|| TariWorldError::P2PoolProcessNotFound(node_name.as_ref().to_string()))?)
     }
 

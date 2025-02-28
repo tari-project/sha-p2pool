@@ -5,7 +5,7 @@ use cucumber::{given, when};
 use log::*;
 use tari_integration_tests::{
     miner::{mine_and_submit_tari_blocks, verify_block_height},
-    p2pool_process::{spawn_p2pool_node_and_wait_for_start, verify_peer_connected},
+    p2pool_process::{restart_node, shut_down_node, spawn_p2pool_node_and_wait_for_start, verify_peer_connected},
     TariWorld,
 };
 use tokio::time::Duration;
@@ -61,6 +61,28 @@ async fn verify_p2pool_block_height(world: &mut TariWorld, p2pool_name: String, 
 async fn verify_p2pool_peer_connected(world: &mut TariWorld, p2pool_name: String, peer_name: String) {
     if let Err(err) = verify_peer_connected(world, p2pool_name, peer_name).await {
         let msg = format!("verify_p2pool_peer_connected: {}", err);
+        error!(target: LOG_TARGET, "{}", msg);
+        panic!("{}", msg);
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+#[given(expr = "I stop p2pool node {}")]
+#[when(expr = "I stop p2pool node {}")]
+async fn shut_down_p2pool_node(world: &mut TariWorld, p2pool_name: String) {
+    if let Err(err) = shut_down_node(world, p2pool_name).await {
+        let msg = format!("shut_down_p2pool_node: {}", err);
+        error!(target: LOG_TARGET, "{}", msg);
+        panic!("{}", msg);
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+#[given(expr = "I re-start p2pool node {}")]
+#[when(expr = "I re-start p2pool node {}")]
+async fn restart_p2pool_node(world: &mut TariWorld, p2pool_name: String) {
+    if let Err(err) = restart_node(world, p2pool_name).await {
+        let msg = format!("restart_p2pool_node: {}", err);
         error!(target: LOG_TARGET, "{}", msg);
         panic!("{}", msg);
     }

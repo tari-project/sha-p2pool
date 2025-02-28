@@ -1418,10 +1418,7 @@ where S: ShareChain
             },
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
-                #[cfg(test)]
-                {
-                    info!(target: "p2pool::server", "Listening on {address:?}");
-                }
+                info!(target: "p2pool::server", "Listening on {address:?}");
             },
             SwarmEvent::ConnectionClosed {
                 peer_id,
@@ -1473,7 +1470,7 @@ where S: ShareChain
             SwarmEvent::Behaviour(event) => {
                 match event {
                     ServerNetworkBehaviourEvent::Mdns(mdns_event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Mdns: {:?}", mdns_event.clone());
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Mdns: {:?}", mdns_event.clone());
                         match mdns_event {
                             mdns::Event::Discovered(peers) => {
                                 for (peer, addr) in peers {
@@ -1489,7 +1486,7 @@ where S: ShareChain
                         }
                     },
                     ServerNetworkBehaviourEvent::Gossipsub(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Gossipsub: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Gossipsub: {:?}", event);
                         match event {
                             gossipsub::Event::Message {
                                 message,
@@ -1524,7 +1521,7 @@ where S: ShareChain
                         }
                     },
                     ServerNetworkBehaviourEvent::MetaDataExchange(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::MetaDataExchange: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::MetaDataExchange: {:?}", event);
                         match event {
                             request_response::Event::Message { peer: _, message } => match message {
                                 request_response::Message::Request {
@@ -1557,7 +1554,7 @@ where S: ShareChain
                         }
                     },
                     ServerNetworkBehaviourEvent::DirectPeerExchange(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::DirectPeerExchange: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::DirectPeerExchange: {:?}", event);
                         match event {
                             request_response::Event::Message { peer: _, message } => {
                                 debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "DirectPeerExchange: {:?}", message);
@@ -1600,7 +1597,7 @@ where S: ShareChain
                         }
                     },
                     ServerNetworkBehaviourEvent::ShareChainSync(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::ShareChainSync: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::ShareChainSync: {:?}", event);
                         match event {
                             request_response::Event::Message { peer, message } => match message {
                                 request_response::Message::Request {
@@ -1665,7 +1662,7 @@ where S: ShareChain
                         };
                     },
                     ServerNetworkBehaviourEvent::CatchUpSync(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::CatchUpSync: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::CatchUpSync: {:?}", event);
                         match event {
                             request_response::Event::Message { peer: _peer, message } => match message {
                                 request_response::Message::Request {
@@ -1755,7 +1752,7 @@ where S: ShareChain
                     },
 
                     ServerNetworkBehaviourEvent::Identify(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Identify: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Identify: {:?}", event);
                         match event {
                             identify::Event::Received { peer_id, info, .. } => {
                                 self.handle_peer_identified(peer_id, info).await
@@ -1778,7 +1775,7 @@ where S: ShareChain
                         info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                     },
                     ServerNetworkBehaviourEvent::Autonat(event) => {
-                        debug!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Autonat: {:?}", event);
+                        trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Autonat: {:?}", event);
                         self.handle_autonat_event(event).await
                     },
                     ServerNetworkBehaviourEvent::Ping(event) => {
@@ -2282,10 +2279,7 @@ where S: ShareChain
                 match self.swarm.listen_on(listen_addr.clone()) {
                     Ok(_) => {
                         info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
-                        #[cfg(test)]
-                        {
-                            info!(target: "p2pool::server", "Listening on {listen_addr:?}");
-                        }
+                        info!(target: "p2pool::server", "Listening on {listen_addr:?}");
                         relay.is_circuit_established = true;
                     },
                     Err(error) => {

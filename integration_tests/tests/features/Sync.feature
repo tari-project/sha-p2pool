@@ -5,17 +5,52 @@
 Feature: Sync p2pool nodes
 
   @critical
-  Scenario: New node should sync with peers and propagate blocks
+  Scenario: New node sync with peers
     Given I have a base node BASE_NODE_A
-    And I have a p2pool seed node SEED in squad WINNERS connected to base node BASE_NODE_A
-    And I have a p2pool node NODE_A in squad WINNERS connected to base node BASE_NODE_A
-    And I have a p2pool node NODE_B in squad WINNERS connected to base node BASE_NODE_A
+    And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I add 10 blocks to p2pool node NODE_A
+    And p2pool node NODE_A stats is at height 10
+    # Add new node, it syncs
+    And I have a p2pool node NODE_B in squad DOLPHINS connected to base node BASE_NODE_A
+    And p2pool node NODE_A stats shows connected to peer NODE_B
+    And p2pool node NODE_B stats is at height 10
+    Then I wait 1 seconds and stop
+
+  @critical
+  Scenario: New node can be offline and then sync with peers
+    Given I have a base node BASE_NODE_A
+    And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I add 10 blocks to p2pool node NODE_A
+    And p2pool node NODE_A stats is at height 10
+    # Add new node, it syncs
+    And I have a p2pool node NODE_B in squad DOLPHINS connected to base node BASE_NODE_A
+    And p2pool node NODE_A stats shows connected to peer NODE_B
+    And p2pool node NODE_B stats is at height 10
+    # Stop new node
+    And I stop p2pool node NODE_B
+    # Mine some more blocks on NODE_A
+    And I add 10 blocks to p2pool node NODE_A
+    And p2pool node NODE_A stats is at height 20
+    # Start-up the new node again, it syncs
+    And I re-start p2pool node NODE_B
+    And p2pool node NODE_A stats shows connected to peer NODE_B
+    And p2pool node NODE_B stats is at height 20
+    Then I wait 1 seconds and stop
+
+  @critical
+  Scenario: New node participate in block propagation
+    Given I have a base node BASE_NODE_A
+    And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_B in squad DOLPHINS connected to base node BASE_NODE_A
     And p2pool node NODE_A stats shows connected to peer NODE_B
     And I add 10 blocks to p2pool node NODE_A
     And p2pool node NODE_A stats is at height 10
     And p2pool node NODE_B stats is at height 10
     # Add new node, also syncs
-    And I have a p2pool node NODE_C in squad WINNERS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_C in squad DOLPHINS connected to base node BASE_NODE_A
     And p2pool node NODE_A stats shows connected to peer NODE_C
     And p2pool node NODE_B stats shows connected to peer NODE_C
     And p2pool node NODE_C stats is at height 10
@@ -27,34 +62,34 @@ Feature: Sync p2pool nodes
     Then I wait 1 seconds and stop
 
   @critical
-  Scenario: Different squads should stay on their respective chains
-    # WINNERS
+  Scenario: Different squads stay on their respective chains
+    # DOLPHINS
     Given I have a base node BASE_NODE_A
-    And I have a p2pool seed node SEED_A in squad WINNERS connected to base node BASE_NODE_A
-    And I have a p2pool node NODE_A1 in squad WINNERS connected to base node BASE_NODE_A
-    And I have a p2pool node NODE_A2 in squad WINNERS connected to base node BASE_NODE_A
-    # LOSERS
+    And I have a p2pool seed node SEED_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A1 in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A2 in squad DOLPHINS connected to base node BASE_NODE_A
+    # TURTLES
     Given I have a base node BASE_NODE_B
-    And I have a p2pool seed node SEED_B in squad LOSERS connected to base node BASE_NODE_B
-    And I have a p2pool node NODE_B1 in squad LOSERS connected to base node BASE_NODE_B
-    And I have a p2pool node NODE_B2 in squad LOSERS connected to base node BASE_NODE_B
-    # WINNERS connected to WINNERS
+    And I have a p2pool seed node SEED_B in squad TURTLES connected to base node BASE_NODE_B
+    And I have a p2pool node NODE_B1 in squad TURTLES connected to base node BASE_NODE_B
+    And I have a p2pool node NODE_B2 in squad TURTLES connected to base node BASE_NODE_B
+    # DOLPHINS connected to DOLPHINS
     And p2pool node NODE_A1 stats shows connected to peer NODE_A2
-    # LOSERS connected to LOSERS
+    # TURTLES connected to TURTLES
     And p2pool node NODE_B1 stats shows connected to peer NODE_B2
-    # WINNERS mine and sync
+    # DOLPHINS mine and sync
     And I add 10 blocks to p2pool node NODE_A1
     And p2pool node NODE_A1 stats is at height 10
     And p2pool node NODE_A2 stats is at height 10
-    # LOSERS mine and sync
+    # TURTLES mine and sync
     And I add 5 blocks to p2pool node NODE_B1
     And p2pool node NODE_B1 stats is at height 5
     And p2pool node NODE_B2 stats is at height 5
-    # WINNERS mine and sync some more
+    # DOLPHINS mine and sync some more
     And I add 5 blocks to p2pool node NODE_A1
     And p2pool node NODE_A1 stats is at height 15
     And p2pool node NODE_A2 stats is at height 15
-    # LOSERS stay on their chain
+    # TURTLES stay on their chain
     And p2pool node NODE_B1 stats is at height 5
     And p2pool node NODE_B2 stats is at height 5
     Then I wait 1 seconds and stop
