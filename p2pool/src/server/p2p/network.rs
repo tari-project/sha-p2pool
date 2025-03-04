@@ -1403,7 +1403,6 @@ where S: ShareChain
             },
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
-                info!(target: "p2pool::server", "Listening on {address:?}");
             },
             SwarmEvent::ConnectionClosed {
                 peer_id,
@@ -1445,10 +1444,10 @@ where S: ShareChain
                     },
                     _ => {
                         warn!(target: LOG_TARGET, "Outgoing connection error: {peer_id:?} -> {error:?}");
-                        // self.network_peer_store
-                        //     .write()
-                        //     .await
-                        //     .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
+                         self.network_peer_store
+                             .write()
+                             .await
+                            .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
                     },
                 };
             },
@@ -1542,7 +1541,7 @@ where S: ShareChain
                         trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::DirectPeerExchange: {:?}", event);
                         match event {
                             request_response::Event::Message { peer, message } => {
-                                debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "DirectPeerExchange: {:?}", message);
+                                trace!(target: PEER_INFO_LOGGING_LOG_TARGET, "DirectPeerExchange: {:?}", message);
                                 match message {
                                     request_response::Message::Request {
                                         request_id: _request_id,
@@ -2264,7 +2263,6 @@ where S: ShareChain
                 match self.swarm.listen_on(listen_addr.clone()) {
                     Ok(_) => {
                         info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
-                        info!(target: "p2pool::server", "Listening on {listen_addr:?}");
                         relay.is_circuit_established = true;
                     },
                     Err(error) => {
