@@ -1444,9 +1444,9 @@ where S: ShareChain
                     },
                     _ => {
                         warn!(target: LOG_TARGET, "Outgoing connection error: {peer_id:?} -> {error:?}");
-                         self.network_peer_store
-                             .write()
-                             .await
+                        self.network_peer_store
+                            .write()
+                            .await
                             .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
                     },
                 };

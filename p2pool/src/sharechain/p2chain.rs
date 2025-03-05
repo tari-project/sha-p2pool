@@ -223,7 +223,7 @@ impl<T: BlockCache> P2Chain<T> {
     }
 
     pub fn block_exists(&self, height: u64, hash: &FixedHash) -> bool {
-        self.level_at_height(height).map_or(false, |level| level.contains(hash))
+        self.level_at_height(height).is_some_and(|level| level.contains(hash))
     }
 
     #[cfg(test)]
@@ -666,14 +666,8 @@ impl<T: BlockCache> P2Chain<T> {
     }
 
     pub fn get_parent_block(&self, block: &P2Block) -> Option<Arc<P2Block>> {
-        let parent_height = match block.height.checked_sub(1) {
-            Some(height) => height,
-            None => return None,
-        };
-        let parent_level = match self.level_at_height(parent_height) {
-            Some(level) => level,
-            None => return None,
-        };
+        let parent_height = block.height.checked_sub(1)?;
+        let parent_level = self.level_at_height(parent_height)?;
         parent_level.get(&block.prev_hash)
     }
 

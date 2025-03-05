@@ -389,46 +389,6 @@ impl PeerStore {
         );
     }
 
-    /// Removes a peer from store.
-    // pub async fn remove(&self, peer_id: &PeerId) {
-    //     // if self.banned_peers.contains_key(peer_id) {
-    //     // return;
-    //     // }
-    //     self.peers.remove(peer_id).await;
-
-    //     // counting peer removals
-    //     // let removal_count = match self.peer_removals.get(peer_id).await {
-    //     //     Some(value) => {
-    //     //         let removals = value + 1;
-    //     //         self.peer_removals.insert(*peer_id, removals).await;
-    //     //         removals
-    //     //     },
-    //     //     None => {
-    //     //         self.peer_removals.insert(*peer_id, 1).await;
-    //     //         1
-    //     //     },
-    //     // };
-    //     // if removal_count >= self.peers_max_fail {
-    //     //     warn!("Banning peer {peer_id:?} for {:?}!", PEER_BAN_TIME);
-    //     //     self.peer_removals.remove(peer_id).await;
-    //     //     self.banned_peers.insert(*peer_id, ()).await;
-    //     // }
-
-    //     self.set_tip_of_block_heights().await;
-    //     self.set_last_connected().await;
-    // }
-
-    /// Collects all current squads from all PeerInfo collected from broadcasts.
-    // pub async fn squads(&self) -> Vec<Squad> {
-    //     self.peers
-    //         .iter()
-    //         .map(|(_, record)| record.peer_info.squad)
-    //         .unique()
-    //         .collect_vec()
-    // }
-    /// Returns count of peers.
-    /// Note: it is needed to calculate number of validations needed to make sure a new block is valid.
-
     pub fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
         if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
             let record = self.whitelist_peers.remove(&peer_id.to_base58());
