@@ -8,33 +8,26 @@ name: Integration tests
       - reopened
       - synchronize
   merge_group:
-  schedule:
-    - cron: '0 2 * * *'   # daily @ 02h00 (non-critical)
-    - cron: '0 12 * * 6'  # weekly - Saturday @ noon (long-running)
   workflow_dispatch:
     inputs:
       ci_bins:
         type: boolean
         default: true
         description: 'run ci on binaries'
-      ci_ffi:
-        type: boolean
-        default: true
-        description: 'run ci on ffi'
       ci_profile:
         default: ci
         description: 'ci profile to run'
         type: string
 
 env:
-  toolchain: nightly-2024-03-01
+  toolchain: nightly-2024-09-05
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   # cancel-in-progress: true
 
 jobs:
-  base_layer:
+  sha_p2pool:
     name: Cucumber tests / Base Layer
     runs-on: [self-hosted, ubuntu-high-cpu]
     steps:
@@ -45,20 +38,13 @@ jobs:
         id: envs_setup
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "CI_FFI=false" >> $GITHUB_ENV
-            if [ "${{ github.event.schedule }}" == "0 2 * * *" ] ; then
-              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_ENV
-            elif [ "${{ github.event.schedule }}" == "0 12 * * 6" ] ; then
-              echo "CI_PROFILE=@long-running" >> $GITHUB_ENV
-            fi
-          else
-            echo "CI ..."
-            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
-            CI_BINS=${{ inputs.ci_bins }}
-            echo "Run binary - ${CI_BINS}"
-            echo "CI_BINS=${CI_BINS:-true}" >> $GITHUB_ENV
-          fi
+          echo "CI ..."
+          echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
+          # This will prohibit the sha_p2pool executable from being rebuilt (see 'cucunber.rs' for more info)
+          echo "DO_NOT_REBUILD_SHA_P2POOL=true" >> $GITHUB_ENV
+          CI_BINS=${{ inputs.ci_bins }}
+          echo "Run binary - ${CI_BINS}"
+          echo "CI_BINS=${CI_BINS:-true}" >> $GITHUB_ENV
 
       - name: Setup rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -91,75 +77,31 @@ jobs:
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
 
+      - name: cargo test compile
+        run: |
+          # We need the main sha_p2pool executable to be built before building the cucumber test
+          cargo build --release --bin sha_p2pool
+          cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
+
+      - name: Run ${{ env.CI_PROFILE }} integration tests for binaries
+        if: ${{ env.CI_BINS == 'true' }}
+        timeout-minutes: 90
+        run: |
+          cargo test \
+            --test cucumber \
+            -v \
+            --all-features \
+            --release \
+            --package tari_integration_tests \
+            -- -t "${{ env.CI_PROFILE }} and (not @broken)" \
+            -c 5 \
+            --retry 2
+
       - name: upload artifact
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()
         with:
           name: junit-cucumber
-          path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
-
-  ffi:
-    name: Cucumber tests / FFI
-    runs-on: [self-hosted, ubuntu-high-cpu]
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-
-      - name: Envs setup
-        id: envs_setup
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "CI_FFI=false" >> $GITHUB_ENV
-            if [ "${{ github.event.schedule }}" == "0 2 * * *" ] ; then
-              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_ENV
-            elif [ "${{ github.event.schedule }}" == "0 12 * * 6" ] ; then
-              echo "CI_PROFILE=@long-running" >> $GITHUB_ENV
-            fi
-          else
-            echo "CI ..."
-            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
-            CI_FFI=${{ inputs.ci_ffi }}
-            echo "Run FFI - ${CI_FFI}"
-            echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_ENV
-          fi
-
-      - name: Setup rust toolchain
-        if: ${{ env.CI_FFI == 'true' }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          components: rustfmt, clippy
-          toolchain: ${{ env.toolchain }}
-
-      - name: Install ubuntu dependencies
-        if: ${{ env.CI_FFI == 'true' }}
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - name: Cache cargo files and outputs
-        if: ${{ env.CI_FFI == 'true' }}
-        # Don't use rust-cache.
-        # This job runs on self-hosted, so use local-cache instead.
-        uses: maxnowack/local-cache@v2
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/CACHEDIR.TAG
-            ~/.cargo/git
-            target
-          key: tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-            tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
-
-      - name: upload artifact
-        uses: actions/upload-artifact@v4  # upload test results as artifact
-        if: always()
-        with:
-          name: junit-ffi-cucumber
           path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
 
   # needed for test results
