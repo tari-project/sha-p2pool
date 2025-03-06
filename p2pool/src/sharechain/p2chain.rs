@@ -463,7 +463,6 @@ impl<T: BlockCache> P2Chain<T> {
                 // lets start by resetting the lwma
                 self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
                     .expect("Failed to create LWMA");
-                self.lwma.add_front(block.timestamp, block.target_difficulty);
                 let chain_height = self
                     .level_at_height(block.height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
