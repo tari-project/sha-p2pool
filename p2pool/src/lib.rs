@@ -11,4 +11,7 @@ pub use server::{
 mod sharechain;
 pub use sharechain::{lmdb_block_storage::LmdbBlockStorage, p2block::P2BlockBuilder, p2chain::P2Chain};
 
+mod diagnostics;
+pub use diagnostics::Config as DiagnosticsConfig;
+
 pub const PROFILING_LOG_TARGET: &str = "tari::profiling";

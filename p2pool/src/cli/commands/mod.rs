@@ -10,5 +10,8 @@ pub use list_squads::*;
 mod start;
 pub use start::handle_start;
 
+mod diagnostics;
+pub use diagnostics::handle_diagnostics;
+
 mod util;
 pub use util::LibP2pInfo;

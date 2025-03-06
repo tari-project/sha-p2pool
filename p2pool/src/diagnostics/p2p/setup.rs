@@ -28,23 +28,25 @@ use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
 };
 
-use super::{
-    messages::{CatchUpSyncRequest, CatchUpSyncResponse, MetaDataRequest, MetaDataResponse},
-    Config,
-    ServerNetworkBehaviour,
-    CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL,
-    DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL,
-    META_DATA_EXCHANGE_REQ_RESP_PROTOCOL,
-    SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL,
-    STABLE_PRIVATE_KEY_FILE,
-};
-use crate::server::{
-    config,
-    p2p::messages::{
-        DirectPeerInfoRequest,
-        DirectPeerInfoResponse,
-        SyncMissingBlocksRequest,
-        SyncMissingBlocksResponse,
+use crate::{
+    diagnostics::{config, p2p::Config},
+    server::p2p::{
+        messages::{
+            CatchUpSyncRequest,
+            CatchUpSyncResponse,
+            DirectPeerInfoRequest,
+            DirectPeerInfoResponse,
+            MetaDataRequest,
+            MetaDataResponse,
+            SyncMissingBlocksRequest,
+            SyncMissingBlocksResponse,
+        },
+        ServerNetworkBehaviour,
+        CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL,
+        DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL,
+        META_DATA_EXCHANGE_REQ_RESP_PROTOCOL,
+        SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL,
+        STABLE_PRIVATE_KEY_FILE,
     },
 };
 
@@ -128,24 +130,24 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
             }
 
             // relay server
-            let mut relay_config =  relay::Config{
-                ..Default::default()
-            };
-            if let Some(max) = config.max_relay_circuits  {
-                relay_config.max_circuits = max;
-                relay_config.max_reservations = max;
-            }
-            if let Some(max) = config.max_relay_circuits_per_peer {
-                relay_config.max_circuits_per_peer = max;
-            }
+      let mut relay_config =  relay::Config{
+        ..Default::default()
+    };
+    if let Some(max) = config.max_relay_circuits  {
+        relay_config.max_circuits = max;
+        relay_config.max_reservations = max;
+    }
+    if let Some(max) = config.max_relay_circuits_per_peer {
+        relay_config.max_circuits_per_peer = max;
+    }
 
             let relay_server = if config.p2p_service.relay_server_disabled {
                 Toggle::from(None)
             } else {
                 Toggle::from(Some(relay::Behaviour::new(key_pair.public().to_peer_id(),
-                relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
-                )))
-            };
+            relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
+            )))
+        };
 
             Ok(ServerNetworkBehaviour {
                 gossipsub,

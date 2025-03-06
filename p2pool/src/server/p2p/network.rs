@@ -84,7 +84,14 @@ use crate::{
     },
 };
 
-const PEER_INFO_TOPIC: &str = "peer_info";
+#[derive(Clone, Debug)]
+pub(crate) struct SubscriptionTopic {
+    pub(crate) topic: String,
+    pub(crate) squad: bool,
+    pub(crate) not_for_seed_peer: bool,
+}
+
+pub(crate) const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
 pub(crate) const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/5";
 pub(crate) const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
@@ -98,7 +105,7 @@ const NEW_TIP_NOTIFY_LOGGING_LOG_TARGET: &str = "tari::p2pool::topics::new_tip_n
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 // The amount of time between catch up syncs to the same peer
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
-const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
+pub(crate) const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: u64 = 500;
 const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 10;
@@ -166,6 +173,14 @@ impl Default for Config {
             max_missing_blocks_sync_depth: 8,
         }
     }
+}
+
+pub(crate) struct ShareChainInfo {
+    pub(crate) current_height_sha3x: u64,
+    pub(crate) current_height_random_x: u64,
+    pub(crate) current_pow_sha3x: u128,
+    pub(crate) current_pow_random_x: u128,
+    pub(crate) user_agent: String,
 }
 
 struct SyncMissingBlocks {
@@ -270,12 +285,8 @@ enum InnerRequest {
 pub struct Service<S>
 where S: ShareChain
 {
-    pub squad: String,
-    swarm: Swarm<ServerNetworkBehaviour>,
-    port: u16,
     share_chain_sha3x: Arc<S>,
     share_chain_random_x: Arc<S>,
-    network_peer_store: Arc<RwLock<PeerStore>>,
     config: Config,
     shutdown_signal: ShutdownSignal,
     // share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
@@ -288,7 +299,6 @@ where S: ShareChain
     inner_request_tx: mpsc::UnboundedSender<InnerRequest>,
     inner_request_rx: mpsc::UnboundedReceiver<InnerRequest>,
 
-    relay_store: Arc<RwLock<RelayStore>>,
     are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
     stats_broadcast_client: StatsBroadcastClient,
@@ -301,6 +311,7 @@ where S: ShareChain
     recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
     share_window: u64,
+    inner_service: InnerService,
 }
 
 impl<S> Service<S>
@@ -345,12 +356,8 @@ where S: ShareChain
             ))),
         );
         Ok(Self {
-            squad,
-            swarm,
-            port: config.p2p_port,
             share_chain_sha3x,
             share_chain_random_x,
-            network_peer_store: Arc::new(RwLock::new(network_peer_store)),
             config: config.p2p_service.clone(),
             shutdown_signal,
             client_broadcast_block_tx: broadcast_block_tx,
@@ -359,7 +366,6 @@ where S: ShareChain
             inner_request_rx,
             query_tx,
             query_rx,
-            relay_store: Arc::new(RwLock::new(RelayStore::default())),
             are_we_synced_with_randomx_p2pool,
             are_we_synced_with_sha3x_p2pool,
             stats_broadcast_client,
@@ -372,7 +378,37 @@ where S: ShareChain
             recent_synced_tips,
             missing_blocks_sync_request_depth: HashMap::new(),
             share_window,
+            inner_service: InnerService::new(
+                squad,
+                swarm,
+                Arc::new(RwLock::new(network_peer_store)),
+                Arc::new(RwLock::new(RelayStore::default())),
+                vec![
+                    SubscriptionTopic {
+                        topic: PEER_INFO_TOPIC.to_string(),
+                        squad: false,
+                        not_for_seed_peer: false,
+                    },
+                    SubscriptionTopic {
+                        topic: BLOCK_NOTIFY_TOPIC.to_string(),
+                        squad: true,
+                        not_for_seed_peer: true,
+                    },
+                ],
+                config.p2p_service.is_seed_peer,
+                config.p2p_port,
+                config.p2p_service.seed_peers.clone(),
+                config.p2p_service.external_addr.clone(),
+            ),
         })
+    }
+
+    pub async fn start(&mut self) -> Result<(), Error> {
+        self.inner_service.start().await?;
+        warn!(target: LOG_TARGET, "Starting main loop");
+        self.main_loop().await?;
+        info!(target: LOG_TARGET,"P2P service has been stopped!");
+        Ok(())
     }
 
     /// Creates a new client for this service, it is thread safe (Send + Sync).
@@ -381,49 +417,26 @@ where S: ShareChain
         ServiceClient::new(self.client_broadcast_block_tx.clone())
     }
 
-    /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
-    /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
-    async fn broadcast_peer_info(&mut self) -> Result<(), Error> {
-        let public_addresses: Vec<Multiaddr> = self.swarm.external_addresses().cloned().collect();
-        if public_addresses.is_empty() {
-            warn!("No public addresses found, skipping peer info broadcast");
-            return Ok(());
-        }
-        // get peer info
-        let peer_info_squad_raw: Vec<u8> = self.create_peer_info(public_addresses).await?.try_into()?;
-
-        let topic = Self::network_topic(PEER_INFO_TOPIC);
-        // broadcast peer info to squad
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(IdentTopic::new(topic), peer_info_squad_raw)?;
-
-        Ok(())
-    }
-
     pub fn local_peer_id(&self) -> PeerId {
-        *self.swarm.local_peer_id()
+        *self.inner_service.swarm.local_peer_id()
     }
 
-    async fn create_peer_info(&mut self, public_addresses: Vec<Multiaddr>) -> Result<PeerInfo, Error> {
+    async fn share_chain_info(&self) -> ShareChainInfo {
         let share_chain_sha3x = self.share_chain_sha3x.clone();
         let share_chain_random_x = self.share_chain_random_x.clone();
-        let current_height_sha3x = share_chain_sha3x.tip_height().await?;
-        let current_height_random_x = share_chain_random_x.tip_height().await?;
-        let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
-        let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
-        let peer_info_squad_raw = PeerInfo::new(
-            *self.swarm.local_peer_id(),
-            current_height_sha3x,
-            current_height_random_x,
-            current_pow_sha3x,
-            current_pow_random_x,
-            self.squad.clone(),
-            public_addresses,
-            Some(self.config.user_agent.clone()),
-        );
-        Ok(peer_info_squad_raw)
+        ShareChainInfo {
+            current_height_sha3x: share_chain_sha3x.tip_height().await.unwrap_or_else(|err| {
+                error!(target: LOG_TARGET, "Failed to get sha3x tip height: {err:?}");
+                0
+            }),
+            current_height_random_x: share_chain_random_x.tip_height().await.unwrap_or_else(|err| {
+                error!(target: LOG_TARGET, "Failed to get random_x tip height: {err:?}");
+                0
+            }),
+            current_pow_sha3x: share_chain_sha3x.chain_pow().await.as_u128(),
+            current_pow_random_x: share_chain_random_x.chain_pow().await.as_u128(),
+            user_agent: self.config.user_agent.clone(),
+        }
     }
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
@@ -437,9 +450,9 @@ where S: ShareChain
                 let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
-                        let squad = self.squad_topic(BLOCK_NOTIFY_TOPIC);
+                        let squad = self.inner_service.squad_topic(BLOCK_NOTIFY_TOPIC);
                         match self
-                            .swarm
+                        .inner_service.swarm
                             .behaviour_mut()
                             .gossipsub
                             .publish(
@@ -469,46 +482,6 @@ where S: ShareChain
         }
     }
 
-    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
-    /// blocks and peers with different Tari networks.
-    fn network_topic(topic: &str) -> String {
-        let network = Network::get_current_or_user_setting_or_default().as_key_str();
-        let chain_id = CURRENT_CHAIN_ID.clone();
-        format!("{network}_{chain_id}_{topic}_{PROTOCOL_VERSION}")
-    }
-
-    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
-    /// blocks and peers with different Tari networks and the given squad name.
-    fn squad_topic(&self, topic: &str) -> String {
-        let network = Network::get_current_or_user_setting_or_default().as_key_str();
-        let chain_id = CURRENT_CHAIN_ID.clone();
-        let squad = &self.squad;
-        format!("{network}_{chain_id}_{squad}_{topic}_{PROTOCOL_VERSION}")
-    }
-
-    /// Subscribing to a gossipsub topic.
-    fn subscribe(&mut self, topic: &str, squad: bool) {
-        let topic = if squad {
-            self.squad_topic(topic)
-        } else {
-            Self::network_topic(topic)
-        };
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .subscribe(&IdentTopic::new(topic))
-            .expect("must be subscribed to topic");
-    }
-
-    /// Subscribes to all topics we need.
-    async fn subscribe_to_topics(&mut self) {
-        self.subscribe(PEER_INFO_TOPIC, false);
-        if self.config.is_seed_peer {
-            return;
-        }
-        self.subscribe(BLOCK_NOTIFY_TOPIC, true);
-    }
-
     /// Main method to handle any message comes from gossipsub.
     #[allow(clippy::too_many_lines)]
     async fn handle_new_gossipsub_message(
@@ -522,35 +495,13 @@ where S: ShareChain
         if let Some(source_peer) = source_peer {
             let topic = message.topic.to_string();
             match topic {
-                topic if topic == Self::network_topic(PEER_INFO_TOPIC) => {
-                    match messages::PeerInfo::try_from(message) {
-                        Ok(payload) => {
-                            debug!(target: LOG_TARGET, "[PEER_INFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
-                            if payload.version != PROTOCOL_VERSION {
-                                debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
-                                return Ok(MessageAcceptance::Reject);
-                            }
-
-                            // 60 seconds. TODO: make config
-                            if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
-                                debug!(target: LOG_TARGET, "Peer {} sent a peer info message that is too old, skipping", source_peer);
-                                // TODO: should be punish
-                                return Ok(MessageAcceptance::Ignore);
-                            }
-
-                            self.add_peer(payload, source_peer).await;
-                            return Ok(MessageAcceptance::Accept);
-                        },
-                        Err(error) => {
-                            debug!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
-                            return Ok(MessageAcceptance::Reject);
-                        },
-                    }
+                topic if topic == InnerService::network_topic(PEER_INFO_TOPIC) => {
+                    return Ok(self.inner_service.handle_peer_info_topic(message, source_peer).await)
                 },
                 // TODO: send a signature that proves that the actual block was coming from this peer
                 // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent
                 // (like 20%))
-                topic if topic == self.squad_topic(BLOCK_NOTIFY_TOPIC) => {
+                topic if topic == self.inner_service.squad_topic(BLOCK_NOTIFY_TOPIC) => {
                     // if self.sync_in_progress.load(Ordering::SeqCst) {
                     //     return;
                     // }
@@ -675,7 +626,8 @@ where S: ShareChain
                                 },
                                 Err(error) => {
                                     error!(target: LOG_TARGET, "Failed to add synced blocks to share chain: {error:?}");
-                                    self.network_peer_store
+                                    self.inner_service
+                                        .network_peer_store
                                         .write()
                                         .await
                                         .move_to_grey_list(*message_peer, format!("Block failed validation: {error}"));
@@ -688,7 +640,7 @@ where S: ShareChain
                         Err(error) => {
                             // TODO: elevate to error
                             debug!(target: LOG_TARGET, "Can't deserialize broadcast block payload: {:?}", error);
-                            self.network_peer_store.write().await.move_to_grey_list(
+                            self.inner_service.network_peer_store.write().await.move_to_grey_list(
                                 source_peer,
                                 format!("Node sent a block that could not be deserialized: {:?}", error),
                             );
@@ -698,7 +650,6 @@ where S: ShareChain
                 },
                 _ => {
                     debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Unknown topic {topic:?}!");
-
                     warn!(target: LOG_TARGET, "Unknown topic {topic:?}!");
                     return Ok(MessageAcceptance::Reject);
                 },
@@ -709,263 +660,6 @@ where S: ShareChain
         Ok(MessageAcceptance::Reject)
     }
 
-    async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> bool {
-        // Don't add ourselves
-        if &peer == self.swarm.local_peer_id() {
-            error!(target: LOG_TARGET, "Peer {} has same local id as us, skipping", peer);
-            return false;
-        }
-
-        if payload.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", peer);
-            return false;
-        }
-
-        let public_addresses = payload.public_addresses();
-        let add_status = self.network_peer_store.write().await.add(peer, payload).await;
-
-        match add_status {
-            AddPeerStatus::NewPeer => {
-                for addr in &public_addresses {
-                    self.swarm.add_peer_address(peer, addr.clone());
-                    debug!(target: LOG_TARGET, "Added peer {}", peer);
-                }
-
-                return true;
-            },
-            AddPeerStatus::Existing => {
-                trace!(target: LOG_TARGET, "Peer was already added");
-                return true;
-            },
-            AddPeerStatus::Greylisted => {
-                debug!(target: LOG_TARGET, "Added peer but it was grey listed");
-                return true;
-            },
-            AddPeerStatus::NonSquad => {
-                debug!(target: LOG_TARGET, "Added peer {} but it was not in the same squad", peer);
-                return true;
-            },
-            AddPeerStatus::Blacklisted => {
-                debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
-            },
-        }
-
-        false
-    }
-
-    async fn initiate_direct_peer_exchange(&mut self, peer: &PeerId) {
-        if let Ok(my_info) = self
-            .create_peer_info(self.swarm.external_addresses().cloned().collect())
-            .await
-            .inspect_err(|error| {
-                error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
-            })
-        {
-            let local_peer_id = *self.swarm.local_peer_id();
-            if peer == &local_peer_id {
-                return;
-            }
-            let peer_store_read_lock = self.network_peer_store.read().await;
-            let my_best_peers = vec![];
-            let known_peers = peer_store_read_lock.get_known_peers();
-            drop(peer_store_read_lock);
-            let request = DirectPeerInfoRequest {
-                my_info,
-                peer_id: local_peer_id.to_base58(),
-                best_peers: my_best_peers,
-                known_peer_ids: known_peers.into_iter().collect(),
-            };
-            debug!(target: LOG_TARGET, "Initiate direct peer exchange with peer: {}, request: {:?}", peer, request);
-            self.swarm
-                .behaviour_mut()
-                .direct_peer_exchange
-                .send_request(peer, request);
-        } else {
-            error!(target: LOG_TARGET, "Failed to create peer info");
-        }
-    }
-
-    async fn initiate_meta_data_exchange(&mut self, peer: &PeerId) {
-        if let Ok(my_info) = self
-            .create_peer_info(self.swarm.external_addresses().cloned().collect())
-            .await
-            .inspect_err(|error| {
-                error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
-            })
-        {
-            let local_peer_id = *self.swarm.local_peer_id();
-            if peer == &local_peer_id {
-                return;
-            }
-
-            let request = MetaDataRequest {
-                my_info,
-                peer_id: local_peer_id.to_base58(),
-            };
-            debug!(target: LOG_TARGET, "Initiate meta data exchange with peer: {}, request: {:?}", peer, request);
-            self.swarm
-                .behaviour_mut()
-                .meta_data_exchange
-                .send_request(peer, request);
-        } else {
-            error!(target: LOG_TARGET, "Failed to create peer info");
-        }
-    }
-
-    async fn handle_direct_peer_exchange_request(
-        &mut self,
-        channel: ResponseChannel<Result<DirectPeerInfoResponse, String>>,
-        request: DirectPeerInfoRequest,
-    ) {
-        if request.my_info.version != PROTOCOL_VERSION {
-            // debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping",
-            // request.peer_id);
-            let _unused = self
-                .swarm
-                .behaviour_mut()
-                .direct_peer_exchange
-                .send_response(channel, Err("Peer has an outdated version".to_string()))
-                .inspect_err(|e| {
-                    error!(target: LOG_TARGET, "Failed to send peer info response: {e:?}");
-                });
-
-            return;
-        }
-
-        let source_peer = request.my_info.peer_id;
-        let source_peer_squad = request.my_info.squad.clone();
-        let num_peers = request.best_peers.len();
-
-        info!(
-            target: LOG_TARGET,
-            "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?}({source_peer_squad:?}) with {num_peers} new peers"
-        );
-        for peer in &request.best_peers {
-            info!(
-                target: LOG_TARGET,
-                "[DIRECT_PEER_EXCHANGE_REQ] new peer from request received. {:?}({})",
-                peer.peer_id, peer.squad
-            );
-        }
-        let local_peer_id = *self.swarm.local_peer_id();
-        if let Ok(info) = self
-            .create_peer_info(self.swarm.external_addresses().cloned().collect())
-            .await
-            .inspect_err(|error| {
-                error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] Failed to create peer info: {error:?}");
-            })
-        {
-            let num_peers = if request.best_peers.is_empty() {
-                NUM_PEERS_INITIAL_SYNC
-            } else {
-                NUM_PEERS_TO_SYNC_PER_ALGO
-            };
-
-            let my_best_peers = self.network_peer_store.read().await.best_peers_to_share(
-                num_peers,
-                &request.my_info.squad,
-                &request.known_peer_ids,
-            );
-            let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
-            if let Err(e) = self.swarm.behaviour_mut().direct_peer_exchange.send_response(
-                channel,
-                Ok(DirectPeerInfoResponse {
-                    peer_id: local_peer_id.to_base58(),
-                    info,
-                    best_peers: my_best_peers,
-                }),
-            ) {
-                error!(
-                    target: LOG_TARGET,
-                    "[DIRECT_PEER_EXCHANGE_REQ] Failed to send peer info response to {:?}: {:?}",
-                    source_peer, e
-                );
-            }
-        } else {
-            error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] Failed to create peer info");
-        }
-
-        match request.peer_id.parse::<PeerId>() {
-            Ok(peer_id) => {
-                if self.add_peer(request.my_info, peer_id).await {
-                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
-                for mut peer in request.best_peers {
-                    if let Some(peer_id) = peer.peer_id {
-                        debug!(
-                            target: LOG_TARGET,
-                            "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {:?}({})  [rx {}, sha {}]received from {}",
-                            peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id
-                        );
-
-                        // Reset the timestamp so that we can try to ping them
-                        peer.timestamp = EpochTime::now().as_u64();
-                        self.add_peer(peer, peer_id).await;
-                    }
-                }
-            },
-            Err(error) => {
-                error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] Failed to parse peer id: {error:?}");
-            },
-        }
-    }
-
-    async fn handle_meta_data_exchange_request(
-        &mut self,
-        channel: ResponseChannel<Result<MetaDataResponse, String>>,
-        request: MetaDataRequest,
-    ) {
-        if request.my_info.version != PROTOCOL_VERSION {
-            // debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping",
-            // request.peer_id);
-            let _unused = self
-                .swarm
-                .behaviour_mut()
-                .meta_data_exchange
-                .send_response(channel, Err("Peer has an outdated version".to_string()))
-                .inspect_err(|e| {
-                    error!(target: LOG_TARGET, "Failed to send peer info response: {e:?}");
-                });
-
-            return;
-        }
-
-        let source_peer = request.my_info.peer_id;
-
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_REQ] New peer info: {source_peer:?}");
-        let local_peer_id = *self.swarm.local_peer_id();
-        if let Ok(info) = self
-            .create_peer_info(self.swarm.external_addresses().cloned().collect())
-            .await
-            .inspect_err(|error| {
-                error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
-            })
-        {
-            if let Err(e) = self.swarm.behaviour_mut().meta_data_exchange.send_response(
-                channel,
-                Ok(MetaDataResponse {
-                    peer_id: local_peer_id.to_base58(),
-                    info,
-                }),
-            ) {
-                error!(target: LOG_TARGET, "Failed to send meta data response to {:?}: {:?}", source_peer, e);
-            }
-        } else {
-            error!(target: LOG_TARGET, "Failed to create peer info");
-        }
-
-        match request.peer_id.parse::<PeerId>() {
-            Ok(peer_id) => {
-                if self.add_peer(request.my_info, peer_id).await {
-                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
-            },
-            Err(error) => {
-                error!(target: LOG_TARGET, "Failed to parse peer id: {error:?}");
-            },
-        }
-    }
-
     async fn handle_meta_data_exchange_response(&mut self, response: MetaDataResponse) {
         if response.info.version != PROTOCOL_VERSION {
             debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
@@ -974,7 +668,7 @@ where S: ShareChain
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_EXCHANGE_RESP] New peer info: {}", response.peer_id);
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if response.info.squad != self.squad {
+                if response.info.squad != self.inner_service.squad {
                     warn!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer_id);
                     let mut are_we_their_relay = false;
                     for address in &response.info.public_addresses() {
@@ -988,24 +682,34 @@ where S: ShareChain
                         }
                     }
                     if !are_we_their_relay {
-                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                        let _ = self.inner_service.swarm.disconnect_peer_id(peer_id);
                     }
                     return;
                 }
-                if self.add_peer(response.info.clone(), peer_id).await {
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                if self.inner_service.add_peer(response.info.clone(), peer_id).await {
+                    self.inner_service
+                        .swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .add_explicit_peer(&peer_id);
                 }
                 // Once we have peer info from the seed peers, disconnect from them.
-                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                if self
+                    .inner_service
+                    .network_peer_store
+                    .read()
+                    .await
+                    .is_seed_peer(&peer_id)
+                {
                     info!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    let _ = self.inner_service.swarm.disconnect_peer_id(peer_id);
                     return;
                 }
 
                 // If they are talking an older version, disconnect
                 if response.info.version != PROTOCOL_VERSION {
                     warn!(target: LOG_TARGET, "Peer {} has an outdated version, disconnecting", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    let _ = self.inner_service.swarm.disconnect_peer_id(peer_id);
                     return;
                 }
                 // if we are a seed peer, end here
@@ -1050,81 +754,6 @@ where S: ShareChain
         }
     }
 
-    async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        if response.info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
-            return;
-        }
-        info!(
-            target: LOG_TARGET,
-            "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers",
-            response.peer_id, response.best_peers.len()
-        );
-        match response.peer_id.parse::<PeerId>() {
-            Ok(peer_id) => {
-                // if self.add_peer(response.info.clone(), peer_id).await {
-                //     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                // }
-                let mut num_peers_added = 0;
-                for mut peer in response.best_peers {
-                    debug!(
-                        target: LOG_TARGET,
-                        "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}, squad: {}  [rx {}, sha {}]received from {}",
-                        peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id
-                    );
-                    if let Some(peer_id) = peer.peer_id {
-                        // Reset the timestamp so that we can try to ping them
-                        peer.timestamp = EpochTime::now().as_u64();
-                        if self.add_peer(peer, peer_id).await {
-                            num_peers_added += 1;
-                        }
-                    }
-                }
-                // If they are talking an older version, disconnect
-                if response.info.version != PROTOCOL_VERSION {
-                    warn!(
-                        target: LOG_TARGET,
-                        "[DIRECT_PEER_EXCHANGE_RESP] Peer {} has an outdated version, disconnecting",
-                        peer_id
-                    );
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    return;
-                }
-
-                // if we are a seed peer, end here
-                if self.config.is_seed_peer {
-                    debug!(
-                        target: LOG_TARGET,
-                        "[DIRECT_PEER_EXCHANGE_RESP] Is seed peer, skipping direct peer exchange with {}",
-                        response.peer_id
-                    );
-                    return;
-                }
-
-                // Keep going until we have all the peers
-                if num_peers_added > 0 {
-                    debug!(
-                        target: LOG_TARGET,
-                        "[DIRECT_PEER_EXCHANGE_RESP] {} peers added from peer {}",
-                        num_peers_added, peer_id
-                    );
-                    self.initiate_direct_peer_exchange(&peer_id).await;
-                } else {
-                    debug!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] No peers added from peer {}", peer_id);
-                }
-
-                // Once we have peer info from the seed peers, disconnect from them.
-                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
-                    info!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Disconnecting from seed peer {}", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                }
-            },
-            Err(error) => {
-                error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Failed to parse peer id: {error:?}");
-            },
-        }
-    }
-
     /// Handles share chain sync request (coming from other peer).
     async fn handle_sync_missing_blocks_request(
         &mut self,
@@ -1137,11 +766,12 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let local_peer_id = *self.swarm.local_peer_id();
+        let local_peer_id = *self.inner_service.swarm.local_peer_id();
         let blocks = share_chain.get_blocks(request.missing_blocks()).await;
         if blocks.is_empty() {
             warn!(target: LOG_TARGET, "No blocks found for sync request: {} {} from {}", request.algo(), request.missing_blocks().iter().map(|(height, hash)| format!("{}({:x}{:x}{:x}{:x})", height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>().join(","), from);
             let _unused = self
+                .inner_service
                 .swarm
                 .behaviour_mut()
                 .share_chain_sync
@@ -1154,6 +784,7 @@ where S: ShareChain
         let response = SyncMissingBlocksResponse::new(local_peer_id, request.algo(), &blocks);
 
         let _unused = self
+            .inner_service
             .swarm
             .behaviour_mut()
             .share_chain_sync
@@ -1190,7 +821,7 @@ where S: ShareChain
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
-        let peer_store = self.network_peer_store.clone();
+        let peer_store = self.inner_service.network_peer_store.clone();
         let max_sync_depth = self.config.max_missing_blocks_sync_depth;
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
@@ -1240,7 +871,7 @@ where S: ShareChain
             is_from_new_block_notify,
             depth,
         } = sync_share_chain;
-        let peer_height = match self.network_peer_store.read().await.get(&peer) {
+        let peer_height = match self.inner_service.network_peer_store.read().await.get(&peer) {
             Some(p) => match algo {
                 PowAlgorithm::RandomX => p.peer_info.current_random_x_height,
                 PowAlgorithm::Sha3x => p.peer_info.current_sha3x_height,
@@ -1302,6 +933,7 @@ where S: ShareChain
             );
 
             let outbound_id = self
+                .inner_service
                 .swarm
                 .behaviour_mut()
                 .share_chain_sync
@@ -1311,8 +943,8 @@ where S: ShareChain
         }
         // ask our connected peers rather than everyone swarming the original peer
         // let mut sent_to_original_peer = false;
-        let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
-        let read_lock = self.network_peer_store.read().await;
+        let connected_peers: Vec<_> = self.inner_service.swarm.connected_peers().copied().collect();
+        let read_lock = self.inner_service.network_peer_store.read().await;
         let min_height = missing_parents.iter().map(|(height, _)| height).min().unwrap_or(&0);
         let mut peers_asked = 0;
         let mut highest_peer_height = 0;
@@ -1348,7 +980,7 @@ where S: ShareChain
                 }
             }
 
-            let outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
+            let outbound_id = self.inner_service.swarm.behaviour_mut().share_chain_sync.send_request(
                 &connected_peer,
                 SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
             );
@@ -1367,7 +999,7 @@ where S: ShareChain
 
     /// Main method to handle libp2p events.
     #[allow(clippy::too_many_lines)]
-    async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
+    async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>, share_chain_info: ShareChainInfo) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New event: {event:?}");
 
         match event {
@@ -1380,12 +1012,18 @@ where S: ShareChain
                 ..
             } => {
                 {
-                    if self.network_peer_store.read().await.is_blacklisted(&peer_id) {
+                    if self
+                        .inner_service
+                        .network_peer_store
+                        .read()
+                        .await
+                        .is_blacklisted(&peer_id)
+                    {
                         warn!(
                             target: LOG_TARGET,
                             "Connection established with blacklisted peer: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
                         );
-                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                        let _ = self.inner_service.swarm.disconnect_peer_id(peer_id);
                         return;
                     }
                 }
@@ -1394,8 +1032,10 @@ where S: ShareChain
                     "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
                 );
                 // if num_established == NonZeroU32::new(1).expect("Can't fail") {
-                self.initiate_direct_peer_exchange(&peer_id).await;
-                // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                self.inner_service
+                    .initiate_direct_peer_exchange(share_chain_info, &peer_id)
+                    .await;
+                // self.inner_service.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 // }
             },
             SwarmEvent::Dialing { peer_id, .. } => {
@@ -1430,7 +1070,7 @@ where S: ShareChain
             },
             SwarmEvent::ExternalAddrExpired { address } => {
                 warn!(target: LOG_TARGET, "External address has expired: {address:?}. TODO: Do we need to create a new one?");
-                self.attempt_relay_reservation().await;
+                self.inner_service.attempt_relay_reservation().await;
             },
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer_id),
@@ -1444,7 +1084,8 @@ where S: ShareChain
                     },
                     _ => {
                         warn!(target: LOG_TARGET, "Outgoing connection error: {peer_id:?} -> {error:?}");
-                        self.network_peer_store
+                        self.inner_service
+                            .network_peer_store
                             .write()
                             .await
                             .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
@@ -1458,13 +1099,17 @@ where S: ShareChain
                         match mdns_event {
                             mdns::Event::Discovered(peers) => {
                                 for (peer, addr) in peers {
-                                    self.swarm.add_peer_address(peer, addr);
-                                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                                    self.inner_service.swarm.add_peer_address(peer, addr);
+                                    // self.inner_service.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                                 }
                             },
                             mdns::Event::Expired(peers) => {
                                 for (peer, _addr) in peers {
-                                    self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                                    self.inner_service
+                                        .swarm
+                                        .behaviour_mut()
+                                        .gossipsub
+                                        .remove_explicit_peer(&peer);
                                 }
                             },
                         }
@@ -1478,27 +1123,29 @@ where S: ShareChain
                                 propagation_source,
                             } => match self.handle_new_gossipsub_message(message, propagation_source).await {
                                 Ok(res) => {
-                                    let _unused = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                            &message_id,
-                            &propagation_source,
-                            res,
-                        ).inspect_err(|e| {
-                            error!(target: LOG_TARGET, "Failed to report message validation result: {e:?}");
-                        });
+                                    let _unused = self.inner_service.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                                            &message_id,
+                                            &propagation_source,
+                                            res,
+                                        ).inspect_err(|e| {
+                                            error!(target: LOG_TARGET, "Failed to report message validation result: {e:?}");
+                                        });
                                 },
                                 Err(error) => {
                                     error!(target: LOG_TARGET, "Failed to handle gossipsub message: {error:?}");
-                                    let _unused = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                                &message_id,
-                                &propagation_source,
-                                MessageAcceptance::Reject,
-                            ).inspect_err(|e| {
-                                error!(target: LOG_TARGET, "Failed to report message validation result: {e:?}");
-                            });
+                                    let _unused = self.inner_service.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                                            &message_id,
+                                            &propagation_source,
+                                            MessageAcceptance::Reject,
+                                        ).inspect_err(|e| {
+                                            error!(target: LOG_TARGET, "Failed to report message validation result: {e:?}");
+                                        });
                                 },
                             },
                             gossipsub::Event::Subscribed { peer_id, .. } => {
-                                self.initiate_direct_peer_exchange(&peer_id).await;
+                                self.inner_service
+                                    .initiate_direct_peer_exchange(share_chain_info, &peer_id)
+                                    .await;
                             },
                             gossipsub::Event::Unsubscribed { .. } => {},
                             gossipsub::Event::GossipsubNotSupported { .. } => {},
@@ -1513,7 +1160,9 @@ where S: ShareChain
                                     request,
                                     channel,
                                 } => {
-                                    self.handle_meta_data_exchange_request(channel, request).await;
+                                    self.inner_service
+                                        .handle_meta_data_exchange_request(share_chain_info, channel, request)
+                                        .await;
                                 },
                                 request_response::Message::Response {
                                     request_id: _request_id,
@@ -1548,14 +1197,18 @@ where S: ShareChain
                                         request,
                                         channel,
                                     } => {
-                                        self.handle_direct_peer_exchange_request(channel, request).await;
+                                        self.inner_service
+                                            .handle_direct_peer_exchange_request(share_chain_info, channel, request)
+                                            .await;
                                     },
                                     request_response::Message::Response {
                                         request_id: _request_id,
                                         response,
                                     } => match response {
                                         Ok(response) => {
-                                            self.handle_direct_peer_exchange_response(response).await;
+                                            self.inner_service
+                                                .handle_direct_peer_exchange_response(share_chain_info, response)
+                                                .await;
                                         },
                                         Err(error) => {
                                             error!(target: LOG_TARGET, "REQ-RES peer: {peer} info response error: {error:?}");
@@ -1567,7 +1220,7 @@ where S: ShareChain
                                 // Peers can be offline
                                 debug!(target: LOG_TARGET, "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
                                 // TODO: find out why this errors
-                                // self.network_peer_store
+                                // self.inner_service.network_peer_store
                                 //     .move_to_grey_list(
                                 //         peer,
                                 //         format!("ShareChainError during direct peer exchange: {}",
@@ -1629,7 +1282,7 @@ where S: ShareChain
                                     },
                                 }
                                 if should_grey_list {
-                                    self.network_peer_store.write().await.move_to_grey_list(
+                                    self.inner_service.network_peer_store.write().await.move_to_grey_list(
                                         peer,
                                         format!("ShareChainError during share chain sync:{}", error),
                                     );
@@ -1637,7 +1290,7 @@ where S: ShareChain
 
                                 // Remove peer from peer store to try to sync from another peer,
                                 // if the peer goes online/accessible again, the peer store will have it again.
-                                // self.network_peer_store.remove(&peer).await;
+                                // self.inner_service.network_peer_store.remove(&peer).await;
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
                                 error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
@@ -1711,7 +1364,11 @@ where S: ShareChain
                                     OutboundFailure::ConnectionClosed => {
                                         // I think it might upgrade to a DCTUR so no need to grey list
                                         debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
-                                        self.network_peer_store.write().await.reset_last_sync_attempt(&peer);
+                                        self.inner_service
+                                            .network_peer_store
+                                            .write()
+                                            .await
+                                            .reset_last_sync_attempt(&peer);
                                         should_grey_list = false;
                                     },
                                     _ => {
@@ -1719,14 +1376,14 @@ where S: ShareChain
                                     },
                                 }
                                 if should_grey_list {
-                                    self.network_peer_store.write().await.move_to_grey_list(
+                                    self.inner_service.network_peer_store.write().await.move_to_grey_list(
                                         peer,
                                         format!("ShareChainError during catch up sync:{}", error),
                                     );
                                 }
                                 // Remove peer from peer store to try to sync from another peer,
                                 // if the peer goes online/accessible again, the peer store will have it again.
-                                // self.network_peer_store.remove(&peer).await;
+                                // self.inner_service.network_peer_store.remove(&peer).await;
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
                                 error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
@@ -1734,17 +1391,16 @@ where S: ShareChain
                             request_response::Event::ResponseSent { .. } => {},
                         };
                     },
-
                     ServerNetworkBehaviourEvent::Identify(event) => {
                         trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Identify: {:?}", event);
                         match event {
                             identify::Event::Received { peer_id, info, .. } => {
-                                self.handle_peer_identified(peer_id, info).await
+                                self.inner_service.handle_peer_identified(peer_id, info).await
                             },
                             identify::Event::Error { peer_id, error, .. } => {
                                 warn!("Failed to identify peer {peer_id:?}: {error:?}");
-                                // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                                // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+                                // self.inner_service.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                                // self.inner_service.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                             },
                             _ => {},
                         }
@@ -1760,12 +1416,13 @@ where S: ShareChain
                     },
                     ServerNetworkBehaviourEvent::Autonat(event) => {
                         trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Autonat: {:?}", event);
-                        self.handle_autonat_event(event).await
+                        self.inner_service.handle_autonat_event(event).await
                     },
                     ServerNetworkBehaviourEvent::Ping(event) => {
                         info!(target: LOG_TARGET, "[PING]: {event:?}");
                         // Remove a peer from the greylist if we are in contact with them
-                        self.network_peer_store
+                        self.inner_service
+                            .network_peer_store
                             .write()
                             .await
                             .set_last_ping(&event.peer, EpochTime::now());
@@ -1781,7 +1438,7 @@ where S: ShareChain
         channel: ResponseChannel<Result<CatchUpSyncResponse, String>>,
         request: CatchUpSyncRequest,
     ) {
-        let our_peer_id = *self.swarm.local_peer_id();
+        let our_peer_id = *self.inner_service.swarm.local_peer_id();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync request from {} for chain {}", our_peer_id, request.algo());
         let algo = request.algo();
         let share_chare = match request.algo() {
@@ -1803,6 +1460,7 @@ where S: ShareChain
             Err(error) => {
                 error!(target: LOG_TARGET, "Failed to get blocks, tip and pow from share chain: {error:?}");
                 if self
+                    .inner_service
                     .swarm
                     .behaviour_mut()
                     .catch_up_sync
@@ -1819,6 +1477,7 @@ where S: ShareChain
         };
 
         if self
+            .inner_service
             .swarm
             .behaviour_mut()
             .catch_up_sync
@@ -1894,8 +1553,9 @@ where S: ShareChain
         let mut blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         if blocks.is_empty() {
             warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} sent 0 blocks for catch up sync", peer);
-            let _res = self.swarm.disconnect_peer_id(peer);
-            self.network_peer_store
+            let _res = self.inner_service.swarm.disconnect_peer_id(peer);
+            self.inner_service
+                .network_peer_store
                 .write()
                 .await
                 .move_to_blacklist(&peer, "Peer sent 0 blocks for catch up sync".to_string());
@@ -1903,7 +1563,7 @@ where S: ShareChain
         }
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);
         let tx = self.inner_request_tx.clone();
-        let network_peer_store = self.network_peer_store.clone();
+        let network_peer_store = self.inner_service.network_peer_store.clone();
         let recent_synced_tips = self.recent_synced_tips.get(&algo).cloned().unwrap();
         // self.print_debug_chain_graph().await;
         let synced_bool = match algo {
@@ -1996,58 +1656,7 @@ where S: ShareChain
         });
     }
 
-    async fn handle_peer_identified(&mut self, peer_id: PeerId, info: Info) {
-        if *self.swarm.local_peer_id() == peer_id {
-            warn!(target: LOG_TARGET, "Dialled ourselves");
-            return;
-        }
-
-        // if self.swarm.external_addresses().count() > 0 {
-        //     debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}",
-        // self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));     // Check
-        // if we can relay     // warn!(target: LOG_TARGET, "No external addresses");
-        //     // self.swarm.add_external_address(info.observed_addr.clone());
-        //     // info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
-        //     return;
-        // }
-
-        if self.config.is_seed_peer {
-            return;
-        }
-
-        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
-
-        // Do not disconnect from relays
-        if !info
-            .protocols
-            .iter()
-            .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
-        {
-            warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
-            // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
-            let _res = self.swarm.disconnect_peer_id(peer_id);
-
-            // return;
-        }
-
-        // adding peer to kademlia and gossipsub
-        for addr in info.listen_addrs {
-            // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
-            if Self::is_p2p_address(&addr)
-                // && addr.is_global_ip()
-                && is_relay
-            {
-                let mut lock = self.relay_store.write().await;
-                if lock.add_possible_relay(peer_id, addr.clone()) {
-                    info!(target: LOG_TARGET, "Added possible relay: {peer_id:?} -> {addr:?}");
-                    drop(lock);
-                    self.attempt_relay_reservation().await;
-                }
-            }
-        }
-        // }
-    }
-
+    #[allow(clippy::too_many_lines)]
     async fn perform_catch_up_sync(&mut self, perform_catch_up_sync: PerformCatchUpSync) -> Result<(), Error> {
         let PerformCatchUpSync {
             algo,
@@ -2060,7 +1669,7 @@ where S: ShareChain
 
         // Check if we have blacklisted them.
         {
-            if self.network_peer_store.read().await.is_blacklisted(&peer) {
+            if self.inner_service.network_peer_store.read().await.is_blacklisted(&peer) {
                 warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is blacklisted, not syncing", peer);
                 return Ok(());
             }
@@ -2100,7 +1709,7 @@ where S: ShareChain
         } else {
             // Check to see if there is a better peer and release the permit if that is the case
             // {
-            //     let peer_store_lock = self.network_peer_store.read().await;
+            //     let peer_store_lock = self.inner_service.network_peer_store.read().await;
             //     // this only gets called after sync completes, lets set synced status = true
             //     let (_max_known_network_height, max_known_network_pow, peer_with_best) =
             //         peer_store_lock.max_known_network_height(algo);
@@ -2175,12 +1784,13 @@ where S: ShareChain
             sync_status.store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
-        let outbound_request_id = self.swarm.behaviour_mut().catch_up_sync.send_request(
+        let outbound_request_id = self.inner_service.swarm.behaviour_mut().catch_up_sync.send_request(
             &peer,
             CatchUpSyncRequest::new(algo, i_have_blocks, last_block_from_them),
         );
         in_progress_syncs.insert(peer, (outbound_request_id, permit));
-        self.network_peer_store
+        self.inner_service
+            .network_peer_store
             .write()
             .await
             .update_last_sync_attempt(peer, algo);
@@ -2188,142 +1798,8 @@ where S: ShareChain
         Ok(())
     }
 
-    fn is_p2p_address(address: &Multiaddr) -> bool {
-        address.iter().any(|p| matches!(p, Protocol::P2p(_)))
-    }
-
-    async fn handle_autonat_event(&mut self, event: autonat::Event) {
-        match event {
-            autonat::Event::StatusChanged { old: _old, new } => match new {
-                NatStatus::Public(public_address) => {
-                    info!(target: LOG_TARGET, "[AUTONAT]: Our public address is {public_address}");
-                    // self.swarm
-                    //     .behaviour_mut()
-                    //     .relay_server
-                    //     .set_public_address(public_address.clone());
-                },
-                NatStatus::Private => {
-                    warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
-                    // let lock = self.relay_store.read().await;
-                    // if !lock.has_active_relay() {
-                    // drop(lock);
-                    if !self.config.is_seed_peer {
-                        self.attempt_relay_reservation().await;
-                    }
-                    // }
-                },
-                _ => {
-                    debug!(target: LOG_TARGET, "[AUTONAT] Ignoring unknown status {new:?}");
-                },
-            },
-            autonat::Event::OutboundProbe(probe_event) => match probe_event {
-                OutboundProbeEvent::Error { probe_id, peer, error } => {
-                    error!(target: LOG_TARGET, "[AUTONAT] Outbound probe error: {probe_id:?} -> {peer:?} -> {error:?}");
-                },
-                _ => {
-                    debug!(target: LOG_TARGET, "[AUTONAT] {probe_event:?}");
-                },
-            },
-            _ => {
-                debug!(target: LOG_TARGET, "[AUTONAT] {event:?}");
-            },
-        }
-    }
-
-    async fn attempt_relay_reservation(&mut self) {
-        // Can happen that a previous lock already set the relaty
-        if self.swarm.external_addresses().count() > 0 {
-            warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
-            return;
-        }
-        let mut lock = self.relay_store.write().await;
-        // TODO: Do relays expire?
-        // if lock.has_active_relay() {
-        //     return;
-        // }
-        lock.select_random_relay();
-        if let Some(relay) = lock.selected_relay_mut() {
-            let mut addresses = relay.addresses.clone();
-            addresses.truncate(8);
-
-            // Try dial, this should already be happening though
-            // if let Err(err) = self.swarm.dial(
-            //     DialOpts::peer_id(relay.peer_id)
-            //         .addresses(relay.addresses.clone())
-            //         // .condition(PeerCondition::NotDialing)
-            //         .build(),
-            // ) {
-            //     debug!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
-            //     // return;
-            // }
-
-            addresses.iter().for_each(|addr| {
-                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
-                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                match self.swarm.listen_on(listen_addr.clone()) {
-                    Ok(_) => {
-                        info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
-                        relay.is_circuit_established = true;
-                    },
-                    Err(error) => {
-                        warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
-                    },
-                }
-            });
-        } else {
-            warn!(target: LOG_TARGET, "No relay selected");
-        }
-    }
-
     async fn handle_query(&mut self, query: P2pServiceQuery) {
         match query {
-            P2pServiceQuery::ConnectionInfo(reply) => {
-                let connection_info = self.get_libp2p_connection_info();
-                let _unused = reply.send(connection_info);
-            },
-
-            P2pServiceQuery::GetPeers(reply) => {
-                let store_read_lock = self.network_peer_store.read().await;
-                let connected_peers = store_read_lock.whitelist_peers();
-                let mut white_list_res = vec![];
-                for (p, info) in connected_peers {
-                    white_list_res.push(ConnectedPeerInfo {
-                        peer_id: p.to_string(),
-                        peer_info: info.peer_info.clone(),
-                        last_grey_list_reason: info.last_grey_list_reason.clone(),
-                        last_ping: info.last_ping,
-                    });
-                }
-                let grey_list_peers = store_read_lock.greylist_peers();
-                let mut grey_list_res = vec![];
-                for (p, info) in grey_list_peers {
-                    grey_list_res.push(ConnectedPeerInfo {
-                        peer_id: p.to_string(),
-                        peer_info: info.peer_info.clone(),
-                        last_grey_list_reason: info.last_grey_list_reason.clone(),
-                        last_ping: info.last_ping,
-                    });
-                }
-                let _unused = reply.send((white_list_res, grey_list_res));
-            },
-            P2pServiceQuery::GetConnections(reply) => {
-                let connected_peers = self.swarm.connected_peers();
-                let mut res = vec![];
-                let store_read_lock = self.network_peer_store.read().await;
-                for p in connected_peers {
-                    let peer_info = store_read_lock.get(p).cloned();
-                    if let Some(peer_info) = peer_info {
-                        let p = ConnectedPeerInfo {
-                            peer_id: p.to_string(),
-                            peer_info: peer_info.peer_info,
-                            last_grey_list_reason: peer_info.last_grey_list_reason,
-                            last_ping: peer_info.last_ping,
-                        };
-                        res.push(p);
-                    }
-                }
-                let _unused = reply.send(res);
-            },
             P2pServiceQuery::GetChain {
                 pow_algo,
                 height,
@@ -2343,26 +1819,8 @@ where S: ShareChain
                 };
                 let _unused = response.send(blocks);
             },
+            _ => self.inner_service.handle_query(query).await,
         }
-    }
-
-    fn get_libp2p_connection_info(&mut self) -> ConnectionInfo {
-        let network_info = self.swarm.network_info();
-        let connection_counters = network_info.connection_counters();
-        let connection_info = ConnectionInfo {
-            listener_addresses: self.swarm.external_addresses().cloned().collect(),
-            connected_peers: self.swarm.connected_peers().count(),
-            network_info: NetworkInfo {
-                num_peers: network_info.num_peers(),
-                connection_counters: ConnectionCounters {
-                    pending_incoming: connection_counters.num_pending_incoming(),
-                    pending_outgoing: connection_counters.num_pending_outgoing(),
-                    established_incoming: connection_counters.num_established_incoming(),
-                    established_outgoing: connection_counters.num_established_outgoing(),
-                },
-            },
-        };
-        connection_info
     }
 
     async fn handle_inner_request(&mut self, req: InnerRequest) {
@@ -2382,7 +1840,13 @@ where S: ShareChain
             } => {
                 // First check if the peer is blacklisted
                 {
-                    if self.network_peer_store.read().await.is_blacklisted(&source_peer) {
+                    if self
+                        .inner_service
+                        .network_peer_store
+                        .read()
+                        .await
+                        .is_blacklisted(&source_peer)
+                    {
                         warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is blacklisted, not syncing", source_peer);
                         return;
                     }
@@ -2414,7 +1878,7 @@ where S: ShareChain
                             let _unused = tx.send(InnerRequest::DoSyncMissingBlocks(sync_share_chain));
                         }
                         let our_pow = share_chain.get_total_chain_pow().await;
-                        let peer_store_lock = self.network_peer_store.read().await;
+                        let peer_store_lock = self.inner_service.network_peer_store.read().await;
                         // this only gets called after sync completes, lets set synced status = true
                         let (max_known_network_height, max_known_network_pow, peer_with_best) =
                             peer_store_lock.max_known_network_height(algo);
@@ -2428,8 +1892,9 @@ where S: ShareChain
                     },
                     Err(error) => {
                         error!(target: SYNC_REQUEST_LOG_TARGET, "Failed to add Catchup synced blocks from {source_peer:?} to share chain: {error:?}");
-                        let _unused = self.swarm.disconnect_peer_id(source_peer);
-                        self.network_peer_store
+                        let _unused = self.inner_service.swarm.disconnect_peer_id(source_peer);
+                        self.inner_service
+                            .network_peer_store
                             .write()
                             .await
                             .move_to_blacklist(&source_peer, format!("Block failed validation: {error}"));
@@ -2495,13 +1960,13 @@ where S: ShareChain
                     let timer = Instant::now();
                     match req {
                         Some(req) => {
-                    self.handle_query(req).await;
-                    },
-                    None => {
-                         warn!(target: LOG_TARGET, "Failed to receive query from channel. Sender dropped?");
+                            self.handle_query(req).await;
+                        },
+                        None => {
+                            warn!(target: LOG_TARGET, "Failed to receive query from channel. Sender dropped?");
+                        }
                     }
-                                   }
-                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Query handling took too long: {:?}", timer.elapsed());
                     }
 
@@ -2509,7 +1974,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        let info = self.swarm.network_info();
+                        let info = self.inner_service.swarm.network_info();
                         let counters = info.connection_counters();
 
                         // let num_connections = counters.num_established_incoming() + counters.num_established_outgoing();
@@ -2519,7 +1984,7 @@ where S: ShareChain
                         }
                          if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
 
-                            match self.dial_seed_peers().await {
+                            match self.inner_service.dial_seed_peers().await {
                                 Ok(_) => {},
                                 Err(e) => {
                                     warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
@@ -2529,12 +1994,12 @@ where S: ShareChain
                          }
 
                         let mut num_dialed = 0;
-                        let mut store_write_lock = self.network_peer_store.write().await;
+                        let mut store_write_lock = self.inner_service.network_peer_store.write().await;
 
                         let mut peers_to_dial = vec![];
                         for record in store_write_lock.best_peers_to_dial(100) {
                             // Only dial seed peers if we have 0 connections
-                            if !self.swarm.is_connected(&record.peer_id)
+                            if !self.inner_service.swarm.is_connected(&record.peer_id)
                              &&  !store_write_lock.is_seed_peer(&record.peer_id)  {
                                 // if &record.peer_id.to_string() != "12D3KooWD6GY3c8cz6AwKaDaqmqGCbmewhjKT5ULN9JUB5oUgWjS" {
                                 // store_write_lock.update_last_dial_attempt(&record.peer_id);
@@ -2546,10 +2011,10 @@ where S: ShareChain
                                 let dial_opts=  DialOpts::peer_id(record.peer_id).addresses(record.peer_info.public_addresses().clone()).extend_addresses_through_behaviour().build();
                                 // let dial_opts=  DialOpts::peer_id(record.peer_id).addresses(vec!["/ip4/152.228.210.16/tcp/19001/p2p/12D3KooWD6GY3c8cz6AwKaDaqmqGCbmewhjKT5ULN9JUB5oUgWjS".parse().unwrap(), "/ip4/152.228.210.16/udp/19001/quic-v1/p2p/12D3KooWD6GY3c8cz6AwKaDaqmqGCbmewhjKT5ULN9JUB5oUgWjS".parse().unwrap()]).build();
                                 // let dial_opts = DialOpts::unknown_peer_id().address("/ip4/152.228.210.16/tcp/19001/p2p/12D3KooWD6GY3c8cz6AwKaDaqmqGCbmewhjKT5ULN9JUB5oUgWjS".parse().unwrap()).build();
-                                let _unused = self.swarm.dial(dial_opts).map_err(|e| {
+                                let _unused = self.inner_service.swarm.dial(dial_opts).map_err(|e| {
                                     warn!(target: LOG_TARGET, "Failed to dial peer: {e:?}");
                                 });
-                                // self.initiate_direct_peer_exchange(&record.peer_id).await;
+                                // self.inner_service.initiate_direct_peer_exchange(&record.peer_id).await;
                                 peers_to_dial.push(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 30 connections
@@ -2563,7 +2028,7 @@ where S: ShareChain
                         }
                         drop(store_write_lock);
                         // for peer in peers_to_dial {
-                        //     self.initiate_direct_peer_exchange(&peer).await;
+                        //     self.inner_service.initiate_direct_peer_exchange(&peer).await;
                         // }
                      }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -2592,9 +2057,9 @@ where S: ShareChain
                         warn!(target: LOG_TARGET, "Client broadcast took too long: {:?}", timer.elapsed());
                     }
                 },
-                event = self.swarm.select_next_some() => {
+                event = self.inner_service.swarm.select_next_some() => {
                     let timer = Instant::now();
-                    self.handle_event(event).await;
+                    self.handle_event(event, self.share_chain_info().await).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Event handling took too long: {:?}", timer.elapsed());
                     }
@@ -2604,7 +2069,7 @@ where S: ShareChain
                     info!(target: LOG_TARGET, "Publishing peer info");
 
                     // broadcast peer info
-                    if let Err(error) = self.broadcast_peer_info().await {
+                    if let Err(error) = self.inner_service.broadcast_peer_info(self.share_chain_info().await).await {
                         warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
                     }
 
@@ -2615,12 +2080,12 @@ where S: ShareChain
                 _ = meta_data_exchange_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
-                        let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
+                        let mut connected_peers = self.inner_service.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
                         for peer in connected_peers.iter().take(NUM_PEERS_TO_META_DATA_EXCHANGE) {
                             // Update their latest tip.
-                            self.initiate_meta_data_exchange(peer).await;
+                            self.inner_service.initiate_meta_data_exchange(self.share_chain_info().await, peer).await;
 
                         }
                         // self.try_sync_from_best_peer().await;
@@ -2633,12 +2098,12 @@ where S: ShareChain
                 _ = peer_exchange_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
-                        let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
+                        let mut connected_peers = self.inner_service.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
                         for peer in connected_peers.iter().take(NUM_PEERS_TO_PEER_INFO_EXCHANGE) {
                             // Update their latest tip.
-                            self.initiate_direct_peer_exchange(peer).await;
+                            self.inner_service.initiate_direct_peer_exchange(self.share_chain_info().await, peer).await;
 
                         }
                         // self.try_sync_from_best_peer().await;
@@ -2649,21 +2114,21 @@ where S: ShareChain
                 },
                _ = grey_list_clear_interval.tick() => {
                     let timer = Instant::now();
-                    self.network_peer_store.write().await.clear_grey_list();
+                    self.inner_service.network_peer_store.write().await.clear_grey_list();
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Clearing grey list took too long: {:?}", timer.elapsed());
                     }
                 },
                 _ = black_list_clear_interval.tick() => {
                     let timer = Instant::now();
-                    self.network_peer_store.write().await.clear_black_list();
+                    self.inner_service.network_peer_store.write().await.clear_black_list();
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Clearing black list took too long: {:?}", timer.elapsed());
                     }
                 },
                 _ = connection_stats_publish.tick() => {
                     let timer = Instant::now();
-                   let connection_info = self.get_libp2p_connection_info();
+                   let connection_info = self.inner_service.get_libp2p_connection_info();
                    let _unused = self.stats_broadcast_client.send_libp2p_stats(
                     connection_info.network_info.connection_counters.pending_incoming,
                     connection_info.network_info.connection_counters.pending_outgoing,
@@ -2760,15 +2225,628 @@ where S: ShareChain
         file.write_all(b"}\n").unwrap();
     }
 
-    async fn parse_seed_peers(&mut self) -> Result<HashMap<PeerId, Multiaddr>, Error> {
+    pub fn create_query_client(&self) -> Sender<P2pServiceQuery> {
+        self.query_tx.clone()
+    }
+}
+
+pub(crate) struct InnerService {
+    pub(crate) squad: String,
+    pub(crate) swarm: Swarm<ServerNetworkBehaviour>,
+    pub(crate) network_peer_store: Arc<RwLock<PeerStore>>,
+    pub(crate) relay_store: Arc<RwLock<RelayStore>>,
+    pub(crate) subscription_topics: Vec<SubscriptionTopic>,
+    pub(crate) is_seed_peer: bool,
+    pub(crate) port: u16,
+    pub(crate) seed_peers: Vec<String>,
+    pub(crate) external_addr: Option<String>,
+}
+
+impl InnerService {
+    pub(crate) fn new(
+        squad: String,
+        swarm: Swarm<ServerNetworkBehaviour>,
+        network_peer_store: Arc<RwLock<PeerStore>>,
+        relay_store: Arc<RwLock<RelayStore>>,
+        subscription_topics: Vec<SubscriptionTopic>,
+        is_seed_peer: bool,
+        port: u16,
+        seed_peers: Vec<String>,
+        external_addr: Option<String>,
+    ) -> Self {
+        InnerService {
+            squad,
+            swarm,
+            network_peer_store,
+            relay_store,
+            subscription_topics,
+            is_seed_peer,
+            port,
+            seed_peers,
+            external_addr,
+        }
+    }
+
+    pub(crate) async fn add_peer(&mut self, payload: PeerInfo, peer: PeerId) -> bool {
+        // Don't add ourselves
+        if &peer == self.swarm.local_peer_id() {
+            error!(target: LOG_TARGET, "Peer {} has same local id as us, skipping", peer);
+            return false;
+        }
+
+        if payload.version != PROTOCOL_VERSION {
+            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", peer);
+            return false;
+        }
+
+        let public_addresses = payload.public_addresses();
+        let add_status = self.network_peer_store.write().await.add(peer, payload).await;
+
+        match add_status {
+            AddPeerStatus::NewPeer => {
+                for addr in &public_addresses {
+                    self.swarm.add_peer_address(peer, addr.clone());
+                    debug!(target: LOG_TARGET, "Added peer {}", peer);
+                }
+
+                return true;
+            },
+            AddPeerStatus::Existing => {
+                trace!(target: LOG_TARGET, "Peer was already added");
+                return true;
+            },
+            AddPeerStatus::Greylisted => {
+                debug!(target: LOG_TARGET, "Added peer but it was grey listed");
+                return true;
+            },
+            AddPeerStatus::NonSquad => {
+                debug!(target: LOG_TARGET, "Added peer {} but it was not in the same squad", peer);
+                return true;
+            },
+            AddPeerStatus::Blacklisted => {
+                debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
+            },
+        }
+
+        false
+    }
+
+    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
+    /// blocks and peers with different Tari networks.
+    pub(crate) fn network_topic(topic: &str) -> String {
+        let network = Network::get_current_or_user_setting_or_default().as_key_str();
+        let chain_id = CURRENT_CHAIN_ID.clone();
+        format!("{network}_{chain_id}_{topic}_{PROTOCOL_VERSION}")
+    }
+
+    /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
+    /// blocks and peers with different Tari networks and the given squad name.
+    pub(crate) fn squad_topic(&self, topic: &str) -> String {
+        let network = Network::get_current_or_user_setting_or_default().as_key_str();
+        let chain_id = CURRENT_CHAIN_ID.clone();
+        let squad = &self.squad;
+        format!("{network}_{chain_id}_{squad}_{topic}_{PROTOCOL_VERSION}")
+    }
+
+    /// Subscribing to a gossipsub topic.
+    pub(crate) fn subscribe(&mut self, topic: &str, squad: bool) {
+        let topic = if squad {
+            self.squad_topic(topic)
+        } else {
+            InnerService::network_topic(topic)
+        };
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&IdentTopic::new(topic))
+            .expect("must be subscribed to topic");
+    }
+
+    pub(crate) async fn create_peer_info(
+        &mut self,
+        share_chain_info: ShareChainInfo,
+        public_addresses: Vec<Multiaddr>,
+    ) -> PeerInfo {
+        PeerInfo::new(
+            *self.swarm.local_peer_id(),
+            share_chain_info.current_height_sha3x,
+            share_chain_info.current_height_random_x,
+            share_chain_info.current_pow_sha3x,
+            share_chain_info.current_pow_random_x,
+            self.squad.clone(),
+            public_addresses,
+            Some(share_chain_info.user_agent),
+        )
+    }
+
+    /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
+    /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
+    pub(crate) async fn broadcast_peer_info(&mut self, share_chain_info: ShareChainInfo) -> Result<(), Error> {
+        let public_addresses: Vec<Multiaddr> = self.swarm.external_addresses().cloned().collect();
+        if public_addresses.is_empty() {
+            warn!("No public addresses found, skipping peer info broadcast");
+            return Ok(());
+        }
+        // get peer info
+        let peer_info_squad_raw: Vec<u8> = self
+            .create_peer_info(share_chain_info, public_addresses)
+            .await
+            .try_into()?;
+
+        let topic = InnerService::network_topic(PEER_INFO_TOPIC);
+        // broadcast peer info to squad
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(IdentTopic::new(topic), peer_info_squad_raw)?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn handle_peer_info_topic(&mut self, message: Message, source_peer: PeerId) -> MessageAcceptance {
+        {
+            match messages::PeerInfo::try_from(message) {
+                Ok(payload) => {
+                    debug!(target: LOG_TARGET, "[PEER_INFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
+                    if payload.version != PROTOCOL_VERSION {
+                        debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
+                        return MessageAcceptance::Reject;
+                    }
+
+                    // 60 seconds. TODO: make config
+                    if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
+                        debug!(target: LOG_TARGET, "Peer {} sent a peer info message that is too old, skipping", source_peer);
+                        // TODO: should be punish
+                        return MessageAcceptance::Ignore;
+                    }
+
+                    self.add_peer(payload, source_peer).await;
+                    MessageAcceptance::Accept
+                },
+                Err(error) => {
+                    debug!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
+                    MessageAcceptance::Reject
+                },
+            }
+        }
+    }
+
+    pub(crate) async fn initiate_direct_peer_exchange(&mut self, share_chain_info: ShareChainInfo, peer: &PeerId) {
+        let my_info = self
+            .create_peer_info(share_chain_info, self.swarm.external_addresses().cloned().collect())
+            .await;
+        let local_peer_id = *self.swarm.local_peer_id();
+        if peer == &local_peer_id {
+            return;
+        }
+        let peer_store_read_lock = self.network_peer_store.read().await;
+        let my_best_peers = vec![];
+        let known_peers = peer_store_read_lock.get_known_peers();
+        drop(peer_store_read_lock);
+        let request = DirectPeerInfoRequest {
+            my_info,
+            peer_id: local_peer_id.to_base58(),
+            best_peers: my_best_peers,
+            known_peer_ids: known_peers.into_iter().collect(),
+        };
+        debug!(target: LOG_TARGET, "Initiate direct peer exchange with peer: {}, request: {:?}", peer, request);
+        self.swarm
+            .behaviour_mut()
+            .direct_peer_exchange
+            .send_request(peer, request);
+    }
+
+    pub(crate) async fn initiate_meta_data_exchange(&mut self, share_chain_info: ShareChainInfo, peer: &PeerId) {
+        let my_info = self
+            .create_peer_info(share_chain_info, self.swarm.external_addresses().cloned().collect())
+            .await;
+        let local_peer_id = *self.swarm.local_peer_id();
+        if peer == &local_peer_id {
+            return;
+        }
+
+        let request = MetaDataRequest {
+            my_info,
+            peer_id: local_peer_id.to_base58(),
+        };
+        debug!(target: LOG_TARGET, "Initiate meta data exchange with peer: {}, request: {:?}", peer, request);
+        self.swarm
+            .behaviour_mut()
+            .meta_data_exchange
+            .send_request(peer, request);
+    }
+
+    pub(crate) async fn handle_direct_peer_exchange_request(
+        &mut self,
+        share_chain_info: ShareChainInfo,
+        channel: ResponseChannel<Result<DirectPeerInfoResponse, String>>,
+        request: DirectPeerInfoRequest,
+    ) {
+        if request.my_info.version != PROTOCOL_VERSION {
+            // debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping",
+            // request.peer_id);
+            let _unused = self
+                .swarm
+                .behaviour_mut()
+                .direct_peer_exchange
+                .send_response(channel, Err("Peer has an outdated version".to_string()))
+                .inspect_err(|e| {
+                    error!(target: LOG_TARGET, "Failed to send peer info response: {e:?}");
+                });
+
+            return;
+        }
+
+        let source_peer = request.my_info.peer_id;
+        let source_peer_squad = request.my_info.squad.clone();
+        let num_peers = request.best_peers.len();
+
+        info!(
+            target: LOG_TARGET,
+            "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?}({source_peer_squad:?}) with {num_peers} new peers"
+        );
+        for peer in &request.best_peers {
+            info!(
+                target: LOG_TARGET,
+                "[DIRECT_PEER_EXCHANGE_REQ] new peer from request received. {:?}({})",
+                peer.peer_id, peer.squad
+            );
+        }
+        let local_peer_id = *self.swarm.local_peer_id();
+        let info = self
+            .create_peer_info(share_chain_info, self.swarm.external_addresses().cloned().collect())
+            .await;
+        let num_peers = if request.best_peers.is_empty() {
+            NUM_PEERS_INITIAL_SYNC
+        } else {
+            NUM_PEERS_TO_SYNC_PER_ALGO
+        };
+
+        let my_best_peers = self.network_peer_store.read().await.best_peers_to_share(
+            num_peers,
+            &request.my_info.squad,
+            &request.known_peer_ids,
+        );
+        let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
+        if let Err(e) = self.swarm.behaviour_mut().direct_peer_exchange.send_response(
+            channel,
+            Ok(DirectPeerInfoResponse {
+                peer_id: local_peer_id.to_base58(),
+                info,
+                best_peers: my_best_peers,
+            }),
+        ) {
+            error!(
+                target: LOG_TARGET,
+                "[DIRECT_PEER_EXCHANGE_REQ] Failed to send peer info response to {:?}: {:?}",
+                source_peer, e
+            );
+        }
+
+        match request.peer_id.parse::<PeerId>() {
+            Ok(peer_id) => {
+                if self.add_peer(request.my_info, peer_id).await {
+                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
+                for mut peer in request.best_peers {
+                    if let Some(peer_id) = peer.peer_id {
+                        debug!(
+                            target: LOG_TARGET,
+                            "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {:?}({})  [rx {}, sha {}]received from {}",
+                            peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id
+                        );
+
+                        // Reset the timestamp so that we can try to ping them
+                        peer.timestamp = EpochTime::now().as_u64();
+                        self.add_peer(peer, peer_id).await;
+                    }
+                }
+            },
+            Err(error) => {
+                error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] Failed to parse peer id: {error:?}");
+            },
+        }
+    }
+
+    pub(crate) async fn handle_meta_data_exchange_request(
+        &mut self,
+        share_chain_info: ShareChainInfo,
+        channel: ResponseChannel<Result<MetaDataResponse, String>>,
+        request: MetaDataRequest,
+    ) {
+        if request.my_info.version != PROTOCOL_VERSION {
+            // debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping",
+            // request.peer_id);
+            let _unused = self
+                .swarm
+                .behaviour_mut()
+                .meta_data_exchange
+                .send_response(channel, Err("Peer has an outdated version".to_string()))
+                .inspect_err(|e| {
+                    error!(target: LOG_TARGET, "Failed to send peer info response: {e:?}");
+                });
+
+            return;
+        }
+
+        let source_peer = request.my_info.peer_id;
+
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_REQ] New peer info: {source_peer:?}");
+        let local_peer_id = *self.swarm.local_peer_id();
+        let info = self
+            .create_peer_info(share_chain_info, self.swarm.external_addresses().cloned().collect())
+            .await;
+        if let Err(e) = self.swarm.behaviour_mut().meta_data_exchange.send_response(
+            channel,
+            Ok(MetaDataResponse {
+                peer_id: local_peer_id.to_base58(),
+                info,
+            }),
+        ) {
+            error!(target: LOG_TARGET, "Failed to send meta data response to {:?}: {:?}", source_peer, e);
+        }
+
+        match request.peer_id.parse::<PeerId>() {
+            Ok(peer_id) => {
+                if self.add_peer(request.my_info, peer_id).await {
+                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
+            },
+            Err(error) => {
+                error!(target: LOG_TARGET, "Failed to parse peer id: {error:?}");
+            },
+        }
+    }
+
+    pub(crate) async fn handle_direct_peer_exchange_response(
+        &mut self,
+        share_chain_info: ShareChainInfo,
+        response: DirectPeerInfoResponse,
+    ) {
+        if response.info.version != PROTOCOL_VERSION {
+            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
+            return;
+        }
+        info!(
+            target: LOG_TARGET,
+            "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers",
+            response.peer_id, response.best_peers.len()
+        );
+        match response.peer_id.parse::<PeerId>() {
+            Ok(peer_id) => {
+                // if self.add_peer(response.info.clone(), peer_id).await {
+                //     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                // }
+                let mut num_peers_added = 0;
+                for mut peer in response.best_peers {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}, squad: {}  [rx {}, sha {}]received from {}",
+                        peer.peer_id, peer.squad, peer.current_random_x_height, peer.current_sha3x_height, peer_id
+                    );
+                    if let Some(peer_id) = peer.peer_id {
+                        // Reset the timestamp so that we can try to ping them
+                        peer.timestamp = EpochTime::now().as_u64();
+                        if self.add_peer(peer, peer_id).await {
+                            num_peers_added += 1;
+                        }
+                    }
+                }
+                // If they are talking an older version, disconnect
+                if response.info.version != PROTOCOL_VERSION {
+                    warn!(
+                        target: LOG_TARGET,
+                        "[DIRECT_PEER_EXCHANGE_RESP] Peer {} has an outdated version, disconnecting",
+                        peer_id
+                    );
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
+
+                // if we are a seed peer, end here
+                if self.is_seed_peer {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[DIRECT_PEER_EXCHANGE_RESP] Is seed peer, skipping direct peer exchange with {}",
+                        response.peer_id
+                    );
+                    return;
+                }
+
+                // Keep going until we have all the peers
+                if num_peers_added > 0 {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[DIRECT_PEER_EXCHANGE_RESP] {} peers added from peer {}",
+                        num_peers_added, peer_id
+                    );
+                    self.initiate_direct_peer_exchange(share_chain_info, &peer_id).await;
+                } else {
+                    debug!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] No peers added from peer {}", peer_id);
+                }
+
+                // Once we have peer info from the seed peers, disconnect from them.
+                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                    info!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Disconnecting from seed peer {}", peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                }
+            },
+            Err(error) => {
+                error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Failed to parse peer id: {error:?}");
+            },
+        }
+    }
+
+    pub(crate) async fn handle_peer_identified(&mut self, peer_id: PeerId, info: Info) {
+        if *self.swarm.local_peer_id() == peer_id {
+            warn!(target: LOG_TARGET, "Dialled ourselves");
+            return;
+        }
+
+        // if self.swarm.external_addresses().count() > 0 {
+        //     debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}",
+        // self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));
+        // // Check if we can relay     // warn!(target: LOG_TARGET, "No external addresses");
+        //     // self.swarm.add_external_address(info.observed_addr.clone());
+        //     // info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
+        //     return;
+        // }
+
+        if self.is_seed_peer {
+            return;
+        }
+
+        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
+
+        // Do not disconnect from relays
+        if !info
+            .protocols
+            .iter()
+            .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
+        {
+            warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
+            // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
+            let _res = self.swarm.disconnect_peer_id(peer_id);
+
+            // return;
+        }
+
+        // adding peer to kademlia and gossipsub
+        for addr in info.listen_addrs {
+            // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+            if Self::is_p2p_address(&addr)
+                // && addr.is_global_ip()
+                && is_relay
+            {
+                let mut lock = self.relay_store.write().await;
+                if lock.add_possible_relay(peer_id, addr.clone()) {
+                    info!(target: LOG_TARGET, "Added possible relay: {peer_id:?} -> {addr:?}");
+                    drop(lock);
+                    self.attempt_relay_reservation().await;
+                }
+            }
+        }
+        // }
+    }
+
+    fn is_p2p_address(address: &Multiaddr) -> bool {
+        address.iter().any(|p| matches!(p, Protocol::P2p(_)))
+    }
+
+    pub(crate) async fn attempt_relay_reservation(&mut self) {
+        // Can happen that a previous lock already set the relaty
+        if self.swarm.external_addresses().count() > 0 {
+            warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
+            return;
+        }
+        let mut lock = self.relay_store.write().await;
+        // TODO: Do relays expire?
+        // if lock.has_active_relay() {
+        //     return;
+        // }
+        lock.select_random_relay();
+        if let Some(relay) = lock.selected_relay_mut() {
+            let mut addresses = relay.addresses.clone();
+            addresses.truncate(8);
+
+            // Try dial, this should already be happening though
+            // if let Err(err) = self.swarm.dial(
+            //     DialOpts::peer_id(relay.peer_id)
+            //         .addresses(relay.addresses.clone())
+            //         // .condition(PeerCondition::NotDialing)
+            //         .build(),
+            // ) {
+            //     debug!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
+            //     // return;
+            // }
+
+            addresses.iter().for_each(|addr| {
+                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+                match self.swarm.listen_on(listen_addr.clone()) {
+                    Ok(_) => {
+                        info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
+                        relay.is_circuit_established = true;
+                    },
+                    Err(error) => {
+                        warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
+                    },
+                }
+            });
+        } else {
+            warn!(target: LOG_TARGET, "No relay selected");
+        }
+    }
+
+    pub(crate) async fn handle_autonat_event(&mut self, event: autonat::Event) {
+        match event {
+            autonat::Event::StatusChanged { old: _old, new } => match new {
+                NatStatus::Public(public_address) => {
+                    info!(target: LOG_TARGET, "[AUTONAT]: Our public address is {public_address}");
+                    // self.swarm
+                    //     .behaviour_mut()
+                    //     .relay_server
+                    //     .set_public_address(public_address.clone());
+                },
+                NatStatus::Private => {
+                    warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
+                    // let lock = self.relay_store.read().await;
+                    // if !lock.has_active_relay() {
+                    // drop(lock);
+                    if !self.is_seed_peer {
+                        self.attempt_relay_reservation().await;
+                    }
+                    // }
+                },
+                _ => {
+                    debug!(target: LOG_TARGET, "[AUTONAT] Ignoring unknown status {new:?}");
+                },
+            },
+            autonat::Event::OutboundProbe(probe_event) => match probe_event {
+                OutboundProbeEvent::Error { probe_id, peer, error } => {
+                    error!(target: LOG_TARGET, "[AUTONAT] Outbound probe error: {probe_id:?} -> {peer:?} -> {error:?}");
+                },
+                _ => {
+                    debug!(target: LOG_TARGET, "[AUTONAT] {probe_event:?}");
+                },
+            },
+            _ => {
+                debug!(target: LOG_TARGET, "[AUTONAT] {event:?}");
+            },
+        }
+    }
+
+    pub(crate) fn get_libp2p_connection_info(&mut self) -> ConnectionInfo {
+        let network_info = self.swarm.network_info();
+        let connection_counters = network_info.connection_counters();
+        let connection_info = ConnectionInfo {
+            listener_addresses: self.swarm.external_addresses().cloned().collect(),
+            connected_peers: self.swarm.connected_peers().count(),
+            network_info: NetworkInfo {
+                num_peers: network_info.num_peers(),
+                connection_counters: ConnectionCounters {
+                    pending_incoming: connection_counters.num_pending_incoming(),
+                    pending_outgoing: connection_counters.num_pending_outgoing(),
+                    established_incoming: connection_counters.num_established_incoming(),
+                    established_outgoing: connection_counters.num_established_outgoing(),
+                },
+            },
+        };
+        connection_info
+    }
+
+    pub(crate) async fn parse_seed_peers(
+        &mut self,
+        seed_peers: Vec<String>,
+    ) -> Result<HashMap<PeerId, Multiaddr>, Error> {
         let mut seed_peers_result = HashMap::new();
 
-        if self.config.seed_peers.is_empty() {
+        if seed_peers.is_empty() {
             return Ok(seed_peers_result);
         }
 
         let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
-        for seed_peer in &self.config.seed_peers {
+        for seed_peer in &seed_peers {
             let addr = seed_peer.parse::<Multiaddr>()?;
             let addr_parts = addr.iter().collect_vec();
             if addr_parts.is_empty() {
@@ -2825,7 +2903,7 @@ where S: ShareChain
     }
 
     /// Adding all peer addresses to kademlia DHT and run bootstrap to get peers.
-    async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
+    pub(crate) async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         let mut peers_to_add = Vec::with_capacity(seed_peers.len());
         seed_peers.iter().for_each(|(peer_id, addr)| {
             info!(target: LOG_TARGET, "Adding seed peer: {:?} -> {:?}", peer_id, addr);
@@ -2845,7 +2923,7 @@ where S: ShareChain
         Ok(())
     }
 
-    fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
+    pub(crate) fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
         let txt_str = String::from_utf8(txt.to_vec())?;
         match txt_str.strip_prefix("dnsaddr=") {
             None => Err(anyhow!("Missing `dnsaddr=` prefix.")),
@@ -2853,15 +2931,75 @@ where S: ShareChain
         }
     }
 
-    pub fn create_query_client(&self) -> Sender<P2pServiceQuery> {
-        self.query_tx.clone()
-    }
-
-    pub async fn dial_seed_peers(&mut self) -> Result<(), Error> {
+    pub(crate) async fn dial_seed_peers(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "Dialing seed peers...");
-        let seed_peers = self.parse_seed_peers().await?;
+        let seed_peers = self.parse_seed_peers(self.seed_peers.clone()).await?;
         self.join_seed_peers(seed_peers).await?;
         Ok(())
+    }
+
+    /// Subscribes to all topics we need.
+    pub(crate) async fn subscribe_to_topics(&mut self) {
+        for subscription in self.subscription_topics.clone() {
+            if subscription.not_for_seed_peer && self.is_seed_peer {
+                continue;
+            }
+            self.subscribe(&subscription.topic, subscription.squad);
+        }
+    }
+
+    pub(crate) async fn handle_query(&mut self, query: P2pServiceQuery) {
+        match query {
+            P2pServiceQuery::ConnectionInfo(reply) => {
+                let connection_info = self.get_libp2p_connection_info();
+                let _unused = reply.send(connection_info);
+            },
+            P2pServiceQuery::GetPeers(reply) => {
+                let store_read_lock = self.network_peer_store.read().await;
+                let connected_peers = store_read_lock.whitelist_peers();
+                let mut white_list_res = vec![];
+                for (p, info) in connected_peers {
+                    white_list_res.push(ConnectedPeerInfo {
+                        peer_id: p.to_string(),
+                        peer_info: info.peer_info.clone(),
+                        last_grey_list_reason: info.last_grey_list_reason.clone(),
+                        last_ping: info.last_ping,
+                    });
+                }
+                let grey_list_peers = store_read_lock.greylist_peers();
+                let mut grey_list_res = vec![];
+                for (p, info) in grey_list_peers {
+                    grey_list_res.push(ConnectedPeerInfo {
+                        peer_id: p.to_string(),
+                        peer_info: info.peer_info.clone(),
+                        last_grey_list_reason: info.last_grey_list_reason.clone(),
+                        last_ping: info.last_ping,
+                    });
+                }
+                let _unused = reply.send((white_list_res, grey_list_res));
+            },
+            P2pServiceQuery::GetConnections(reply) => {
+                let connected_peers = self.swarm.connected_peers();
+                let mut res = vec![];
+                let store_read_lock = self.network_peer_store.read().await;
+                for p in connected_peers {
+                    let peer_info = store_read_lock.get(p).cloned();
+                    if let Some(peer_info) = peer_info {
+                        let p = ConnectedPeerInfo {
+                            peer_id: p.to_string(),
+                            peer_info: peer_info.peer_info,
+                            last_grey_list_reason: peer_info.last_grey_list_reason,
+                            last_ping: peer_info.last_ping,
+                        };
+                        res.push(p);
+                    }
+                }
+                let _unused = reply.send(res);
+            },
+            P2pServiceQuery::GetChain { .. } => {
+                error!(target: LOG_TARGET, "'P2pServiceQuery::GetChain' not handled in InnerService")
+            },
+        }
     }
 
     /// Starts p2p service.
@@ -2883,7 +3021,7 @@ where S: ShareChain
                 .listen_on(format!("/{ip_label}/{addr}/tcp/{port}").parse()?)?;
         }
         // external address
-        if let Some(external_addr) = &self.config.external_addr {
+        if let Some(external_addr) = &self.external_addr {
             self.swarm.add_external_address(
                 // format!("/ip4/{}/tcp/{}", external_addr, self.port)
                 external_addr.parse()?,
@@ -2912,10 +3050,6 @@ where S: ShareChain
         //     .await;
         // });
 
-        warn!(target: LOG_TARGET, "Starting main loop");
-
-        self.main_loop().await?;
-        info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())
     }
 }

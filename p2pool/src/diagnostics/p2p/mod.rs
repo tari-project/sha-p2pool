@@ -6,10 +6,5 @@
 
 pub use network::*;
 
-pub mod client;
-pub mod messages;
 mod network;
-pub mod peer_store;
-pub mod relay_store;
 pub mod setup;
-pub mod util;
