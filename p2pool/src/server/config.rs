@@ -26,6 +26,7 @@ pub struct Config {
     pub block_cache_file: PathBuf,
     pub minimum_sha3_target_difficulty: Option<u64>,
     pub minimum_randomx_target_difficulty: Option<u64>,
+    pub diagnostic_mode_timer: u64,
 }
 
 impl Default for Config {
@@ -47,6 +48,7 @@ impl Default for Config {
             block_cache_file: PathBuf::from("block_cache"),
             minimum_sha3_target_difficulty: None,
             minimum_randomx_target_difficulty: None,
+            diagnostic_mode_timer: 60,
         }
     }
 }

@@ -117,6 +117,8 @@ where S: ShareChain
             None
         };
 
+        let _unused = stats_broadcast_client.update_local_peer_addresses(p2p_service.local_peer_addresses());
+
         Ok(Self {
             config,
             p2p_service,

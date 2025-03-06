@@ -171,10 +171,6 @@ pub async fn server(
     ));
     let coinbase_extras_sha3x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
 
-    let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
-    let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
-
     let swarm = crate::server::p2p::setup::new_swarm(&config).await?;
     let squad = config.p2p_service.squad_override.clone().unwrap_or_else(|| {
         let squad_id =
@@ -182,6 +178,19 @@ pub async fn server(
         format!("{}_{}", config.p2p_service.squad_prefix.clone(), squad_id)
     });
     info!(target: LOG_TARGET, "Swarm created. Our id: {}, our squad:{}", swarm.local_peer_id(), squad);
+
+    let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
+    let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
+    let diagnostic_mode = if args.diagnostic_mode {
+        Some((
+            Duration::from_secs(config.diagnostic_mode_timer),
+            *swarm.local_peer_id(),
+        ))
+    } else {
+        None
+    };
+    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx, diagnostic_mode);
+
     if let Some(path) = args.export_libp2p_info.clone() {
         let libp2p_info = LibP2pInfo {
             peer_id: *swarm.local_peer_id(),

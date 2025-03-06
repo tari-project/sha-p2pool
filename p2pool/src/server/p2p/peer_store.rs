@@ -113,6 +113,7 @@ impl PeerStore {
             record.num_grey_listings = 0;
 
             self.whitelist_peers.insert(peer_id.to_base58(), record);
+            self.update_peer_stats();
         }
 
         if let Some(entry) = self.blacklist_peers.get_mut(&peer_id.to_base58()) {
@@ -296,6 +297,7 @@ impl PeerStore {
             peer_record.last_grey_list_reason = Some("Seed peer".to_string());
 
             self.greylist_peers.insert(peer_id.to_base58(), peer_record);
+            self.update_peer_stats();
             return AddPeerStatus::Greylisted;
         }
         if self.blacklist_peers.contains_key(&peer_id.to_base58()) {
@@ -314,14 +316,7 @@ impl PeerStore {
             };
             self.non_squad_peers
                 .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
-            if return_type == AddPeerStatus::NonSquad {
-                let _unused = self.stats_broadcast_client.send_new_peer(
-                    self.whitelist_peers.len() as u64,
-                    self.greylist_peers.len() as u64,
-                    self.blacklist_peers.len() as u64,
-                    self.non_squad_peers.len() as u64,
-                );
-            }
+            self.update_peer_stats();
             return return_type;
         }
 
@@ -337,20 +332,23 @@ impl PeerStore {
             new_record.last_grey_list_reason = entry.last_grey_list_reason.clone();
 
             *entry = new_record;
-            // self.whitelist_peers.insert(peer_id, PeerStoreRecord::new(peer_info));
             return AddPeerStatus::Existing;
         }
 
         self.whitelist_peers
             .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
+        self.update_peer_stats();
+        debug!(target: LOG_TARGET, "Peer NewPeer: {}", peer_id);
+        AddPeerStatus::NewPeer
+    }
+
+    fn update_peer_stats(&self) {
         let _unused = self.stats_broadcast_client.send_new_peer(
             self.whitelist_peers.len() as u64,
             self.greylist_peers.len() as u64,
             self.blacklist_peers.len() as u64,
             self.non_squad_peers.len() as u64,
         );
-        debug!(target: LOG_TARGET, "Peer NewPeer: {}", peer_id);
-        AddPeerStatus::NewPeer
     }
 
     pub fn clear_grey_list(&mut self) {
@@ -366,12 +364,7 @@ impl PeerStore {
                 self.whitelist_peers.insert(peer_id.clone(), record.clone());
             }
         }
-        let _unused = self.stats_broadcast_client.send_new_peer(
-            self.whitelist_peers.len() as u64,
-            self.greylist_peers.len() as u64,
-            self.blacklist_peers.len() as u64,
-            self.non_squad_peers.len() as u64,
-        );
+        self.update_peer_stats();
     }
 
     pub fn clear_black_list(&mut self) {
@@ -381,12 +374,7 @@ impl PeerStore {
             record.num_grey_listings = 0;
             self.whitelist_peers.insert(peer_id, record);
         }
-        let _unused = self.stats_broadcast_client.send_new_peer(
-            self.whitelist_peers.len() as u64,
-            self.greylist_peers.len() as u64,
-            self.blacklist_peers.len() as u64,
-            self.non_squad_peers.len() as u64,
-        );
+        self.update_peer_stats();
     }
 
     pub fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
@@ -397,12 +385,7 @@ impl PeerStore {
                 record.last_grey_list_reason = Some(reason.clone());
                 record.num_grey_listings += 1;
                 self.greylist_peers.insert(peer_id.to_base58(), record);
-                let _unused = self.stats_broadcast_client.send_new_peer(
-                    self.whitelist_peers.len() as u64,
-                    self.greylist_peers.len() as u64,
-                    self.blacklist_peers.len() as u64,
-                    self.non_squad_peers.len() as u64,
-                );
+                self.update_peer_stats();
             }
         }
     }
@@ -419,12 +402,7 @@ impl PeerStore {
         if let Some(record) = record {
             warn!(target: LOG_TARGET, "Blacklisting peer {} because of: {}", peer, reason);
             self.blacklist_peers.insert(peer.to_base58(), record);
-            let _unused = self.stats_broadcast_client.send_new_peer(
-                self.whitelist_peers.len() as u64,
-                self.greylist_peers.len() as u64,
-                self.blacklist_peers.len() as u64,
-                self.non_squad_peers.len() as u64,
-            );
+            self.update_peer_stats();
         }
     }
 

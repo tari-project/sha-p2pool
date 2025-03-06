@@ -75,6 +75,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         node_config.p2p_service.peer_exchange_interval = Duration::from_secs(1);
         node_config.p2p_service.meta_data_exchange_interval = Duration::from_secs(1);
         node_config.network_silence_delay = 0;
+        node_config.diagnostic_mode_timer = 10;
         // Each spawned p2pool node will use different ports
         node_config.p2p_port = get_port(18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
         node_config.grpc_port = get_port(18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
@@ -171,6 +172,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         user_agent: None,
         peer_publish_interval: Some(node_config.p2p_service.peer_info_publish_interval.as_secs()),
         debug_print_chain: true,
+        diagnostic_mode: true,
         max_connections: None,
         randomx_disabled: false,
         sha3x_disabled: false,
@@ -379,6 +381,10 @@ pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
         args_vec.push("--debug-print-chain".to_string());
     }
 
+    if args.diagnostic_mode {
+        args_vec.push("--diagnostic-mode".to_string());
+    }
+
     if let Some(max_connections) = args.max_connections {
         args_vec.push(format!("--max-connections={}", max_connections));
     }
@@ -487,8 +493,12 @@ pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, p
             )
             .into());
         }
-        if counter % 10 == 0 {
-            debug!(target: LOG_TARGET, "{}: waiting for '{}' to show peer connected", counter, connections_url);
+        if counter % 50 == 0 {
+            debug!(
+                target: LOG_TARGET,
+                "Iteration {}: waiting {:.2?} for '{}' to show peer connected",
+                counter, start.elapsed(), connections_url
+            );
         }
         counter += 1;
 

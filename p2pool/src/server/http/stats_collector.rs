@@ -1,10 +1,11 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, time::Duration};
 
+use chrono::{DateTime, Local, LocalResult, TimeZone};
 use human_format::Formatter;
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use log::{debug, error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
@@ -14,6 +15,15 @@ use tokio::{
     sync::{broadcast::Receiver, oneshot},
     time::MissedTickBehavior,
 };
+
+#[derive(Clone)]
+pub struct PeerStats {
+    pub peer_is_a_seed_peer: bool,
+    pub peer_id: PeerId,
+    pub public_addresses: Vec<Multiaddr>,
+    pub number_received: u64,
+    pub timestamp: EpochTime,
+}
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats_collector";
 pub(crate) struct StatsCollector {
@@ -47,10 +57,17 @@ pub(crate) struct StatsCollector {
     established_incoming: u32,
     established_outgoing: u32,
     last_gossip_message: EpochTime,
+    diagnostic_mode: Option<(Duration, PeerId)>,
+    peer_stats: HashMap<String, PeerStats>,
+    local_peer_addresses: Vec<Multiaddr>,
 }
 
 impl StatsCollector {
-    pub(crate) fn new(shutdown_signal: ShutdownSignal, stats_broadcast_receiver: Receiver<StatData>) -> Self {
+    pub(crate) fn new(
+        shutdown_signal: ShutdownSignal,
+        stats_broadcast_receiver: Receiver<StatData>,
+        diagnostic_mode: Option<(Duration, PeerId)>,
+    ) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         Self {
             shutdown_signal,
@@ -83,6 +100,9 @@ impl StatsCollector {
             established_incoming: 0,
             established_outgoing: 0,
             last_gossip_message: EpochTime::now(),
+            diagnostic_mode,
+            peer_stats: HashMap::new(),
+            local_peer_addresses: Vec::new(),
         }
     }
 
@@ -92,6 +112,7 @@ impl StatsCollector {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
             StatData::InfoChanged {
@@ -143,6 +164,45 @@ impl StatsCollector {
                 self.total_black_list = total_black_list;
                 self.total_non_squad_peers = total_non_squad;
             },
+            StatData::PeerStats {
+                peer_is_a_seed_peer,
+                peer_id,
+                public_addresses,
+                number_received,
+                timestamp,
+            } => {
+                if let Some(current_entry) = self.peer_stats.get(&peer_id.to_base58()) {
+                    self.peer_stats.insert(peer_id.to_base58(), PeerStats {
+                        peer_is_a_seed_peer,
+                        peer_id,
+                        public_addresses,
+                        number_received: if number_received > 0 {
+                            number_received
+                        } else {
+                            current_entry.number_received
+                        },
+                        timestamp: if number_received > 0 {
+                            timestamp
+                        } else {
+                            current_entry.timestamp
+                        },
+                    });
+                } else {
+                    self.peer_stats.insert(peer_id.to_base58(), PeerStats {
+                        peer_is_a_seed_peer,
+                        peer_id,
+                        public_addresses,
+                        number_received,
+                        timestamp,
+                    });
+                }
+            },
+            StatData::LocalPeerAddresses {
+                local_peer_addresses,
+                timestamp: _,
+            } => {
+                self.local_peer_addresses = local_peer_addresses;
+            },
             StatData::TargetDifficultyChanged {
                 target_difficulty,
                 pow_algo,
@@ -185,9 +245,16 @@ impl StatsCollector {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(&mut self) -> Result<(), anyhow::Error> {
         let mut stats_report_timer = tokio::time::interval(tokio::time::Duration::from_secs(10));
         stats_report_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let (mut diagnostic_report_timer, peer_id) = if let Some((interval, peer_id)) = self.diagnostic_mode {
+            (tokio::time::interval(interval), Some(peer_id))
+        } else {
+            (tokio::time::interval(tokio::time::Duration::from_secs(u64::MAX)), None)
+        };
+        diagnostic_report_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -197,36 +264,73 @@ impl StatsCollector {
                 _ = stats_report_timer.tick() => {
                     let formatter = Formatter::new();
 
-                    info!(target: LOG_TARGET,
+                    info!(
+                        target: LOG_TARGET,
                         "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(tot/gr/bl/non) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                         humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64()
                         ).unwrap_or_default())),
                         env!("CARGO_PKG_VERSION"),
                         self.last_squad.as_deref().unwrap_or("Not set"),
-                            self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
-                            self.randomx_chain_height,
-                            self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
-                            self.sha3x_chain_height,
-                            formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
-                            formatter.format(self.randomx_network_difficulty.as_u64() as f64),
-                            formatter.format(self.sha_target_difficulty.as_u64() as f64),
-                            formatter.format(self.sha_network_difficulty.as_u64() as f64),
-                            self.miner_rx_accepted,
-                            self.miner_sha_accepted,
-                            self.pool_rx_accepted,
-                            self.pool_sha_accepted,
-                            self.total_peers,
-                            self.total_grey_list,
-                            self.total_black_list,
-                            self.total_non_squad_peers,
-                            self.established_incoming,
-                            self.established_outgoing,
-                            humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
-                                self.last_gossip_message.as_u64()
-                            ).unwrap_or_default())),
-                        );
-                    },
+                        self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
+                        self.randomx_chain_height,
+                        self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
+                        self.sha3x_chain_height,
+                        formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
+                        formatter.format(self.randomx_network_difficulty.as_u64() as f64),
+                        formatter.format(self.sha_target_difficulty.as_u64() as f64),
+                        formatter.format(self.sha_network_difficulty.as_u64() as f64),
+                        self.miner_rx_accepted,
+                        self.miner_sha_accepted,
+                        self.pool_rx_accepted,
+                        self.pool_sha_accepted,
+                        self.total_peers,
+                        self.total_grey_list,
+                        self.total_black_list,
+                        self.total_non_squad_peers,
+                        self.established_incoming,
+                        self.established_outgoing,
+                        humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
+                            self.last_gossip_message.as_u64()
+                        ).unwrap_or_default())),
+                    );
+                },
+                _ = diagnostic_report_timer.tick() => {
+                    if let Some(peer_id) = peer_id {
+                        let mut peer_stats: Vec<PeerStats> = self.peer_stats.values().cloned().collect();
+                        peer_stats.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+                        if let Ok(mut file) = File::create("peer_connectivity_stats.csv") {
+                            let _unused = writeln!(
+                                file,
+                                "PeerId: {}, Addresses: {}\n",
+                                peer_id.to_base58(),
+                                self.local_peer_addresses.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(",")
+                            );
+                            let _unused = writeln!(
+                                file,
+                                "peer_id,peer_is_a_seed_peer,number_received,timestamp,public_addresses"
+                            );
+                            for stats in &peer_stats {
+                                let timestamp_i64 = i64::try_from(stats.timestamp.as_u64()).unwrap_or(i64::MAX);
+                                let local_time: LocalResult<DateTime<Local>> = Local.timestamp_opt(timestamp_i64, 0);
+                                let formatted_time = match local_time {
+                                    LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
+                                    _ => "Invalid timestamp".to_string(),
+                                };
+                                let _unused = writeln!(
+                                    file,
+                                    "{},{},{},{},{}",
+                                    stats.peer_id.to_base58(),
+                                    stats.peer_is_a_seed_peer,
+                                    stats.number_received,
+                                    formatted_time,
+                                    stats.public_addresses.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(",")
+                                );
+                            }
+                            let _unused = file.flush();
+                        }
+                    }
+                }
                 res = self.request_rx.recv() => {
                     match res {
                         Some(StatsRequest::GetStats(pow, tx)) => {
@@ -330,6 +434,17 @@ pub(crate) enum StatData {
         total_non_squad: u64,
         timestamp: EpochTime,
     },
+    PeerStats {
+        peer_is_a_seed_peer: bool,
+        peer_id: PeerId,
+        public_addresses: Vec<Multiaddr>,
+        number_received: u64,
+        timestamp: EpochTime,
+    },
+    LocalPeerAddresses {
+        local_peer_addresses: Vec<Multiaddr>,
+        timestamp: EpochTime,
+    },
     LibP2PStats {
         pending_incoming: u32,
         pending_outgoing: u32,
@@ -354,6 +469,8 @@ impl StatData {
             StatData::NetworkDifficultyChanged { timestamp, .. } => *timestamp,
             StatData::LibP2PStats { timestamp, .. } => *timestamp,
             StatData::GossipsubMessageReceived { timestamp } => *timestamp,
+            StatData::PeerStats { timestamp, .. } => *timestamp,
+            StatData::LocalPeerAddresses { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -458,6 +575,29 @@ impl StatsBroadcastClient {
             total_grey_list,
             total_black_list,
             total_non_squad,
+            timestamp: EpochTime::now(),
+        })
+    }
+
+    pub fn update_local_peer_addresses(&self, public_addresses: Vec<Multiaddr>) -> Result<(), anyhow::Error> {
+        self.broadcast(StatData::LocalPeerAddresses {
+            local_peer_addresses: public_addresses,
+            timestamp: EpochTime::now(),
+        })
+    }
+
+    pub fn send_peer_stats(
+        &self,
+        peer_is_a_seed_peer: bool,
+        peer_id: PeerId,
+        public_addresses: Vec<Multiaddr>,
+        number_received: u64,
+    ) -> Result<(), anyhow::Error> {
+        self.broadcast(StatData::PeerStats {
+            peer_is_a_seed_peer,
+            peer_id,
+            public_addresses,
+            number_received,
             timestamp: EpochTime::now(),
         })
     }
