@@ -299,17 +299,18 @@ impl StatsCollector {
                     if let Some(peer_id) = peer_id {
                         let mut peer_stats: Vec<PeerStats> = self.peer_stats.values().cloned().collect();
                         peer_stats.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-                        if let Ok(mut file) = File::create("peer_connectivity_stats.csv") {
-                            let _unused = writeln!(
+                        let stats_file = "peer_connectivity_stats.csv";
+                        let result = File::create(stats_file).and_then(|mut file| {
+                            writeln!(
                                 file,
                                 "PeerId: {}, Addresses: {}\n",
                                 peer_id.to_base58(),
                                 self.local_peer_addresses.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(",")
-                            );
-                            let _unused = writeln!(
+                            )?;
+                            writeln!(
                                 file,
                                 "peer_id,peer_is_a_seed_peer,number_received,timestamp,public_addresses"
-                            );
+                            )?;
                             for stats in &peer_stats {
                                 let timestamp_i64 = i64::try_from(stats.timestamp.as_u64()).unwrap_or(i64::MAX);
                                 let local_time: LocalResult<DateTime<Local>> = Local.timestamp_opt(timestamp_i64, 0);
@@ -317,7 +318,7 @@ impl StatsCollector {
                                     LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
                                     _ => "Invalid timestamp".to_string(),
                                 };
-                                let _unused = writeln!(
+                                writeln!(
                                     file,
                                     "{},{},{},{},{}",
                                     stats.peer_id.to_base58(),
@@ -325,9 +326,13 @@ impl StatsCollector {
                                     stats.number_received,
                                     formatted_time,
                                     stats.public_addresses.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(",")
-                                );
+                                )?;
                             }
                             let _unused = file.flush();
+                            Ok(())
+                        });
+                        if let Err(e) = result {
+                            error!(target: LOG_TARGET, "Failed to write diagnostic report ({}): {}", stats_file, e);
                         }
                     }
                 }
