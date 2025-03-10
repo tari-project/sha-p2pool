@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use bitflags::bitflags;
 use blake2::Blake2b;
 use digest::consts::U32;
 use lazy_static::lazy_static;
@@ -55,7 +56,7 @@ pub struct P2Block {
     // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
-    pub verified: bool,
+    pub verified: VerifiedStatus,
     total_pow: AccumulatedDifficulty,
 }
 
@@ -76,7 +77,7 @@ impl Default for P2Block {
             target_difficulty: Difficulty::min(),
             uncles: Vec::new(),
             miner_coinbase_extra: vec![],
-            verified: false,
+            verified: VerifiedStatus::new(),
             total_pow: AccumulatedDifficulty::default(),
         }
     }
@@ -264,6 +265,81 @@ impl P2BlockBuilder {
             self.block.hash = self.block.generate_hash();
         }
         Ok(Arc::new(self.block))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct VerifiedStatus(u8);
+
+bitflags! {
+    impl VerifiedStatus: u8 {
+        /// has parents
+        const PARENTS = 0b00000001;
+        /// correct target difficulty
+        const TARGET_DIFFICULTY = 0b00000010;
+        /// DIFFICULTY
+        const DIFFICULTY = 0b00000100;
+        /// shares correct
+        const CORRECT_SHARES = 0b00001000;
+        /// median timestamp
+        const MEDIAN_TIMESTAMP = 0b00010000;
+    }
+}
+
+impl VerifiedStatus {
+    pub fn is_verified(&self) -> bool {
+        self.contains(VerifiedStatus::PARENTS) &&
+            self.contains(VerifiedStatus::TARGET_DIFFICULTY) &&
+            self.contains(VerifiedStatus::DIFFICULTY) &&
+            self.contains(VerifiedStatus::MEDIAN_TIMESTAMP) &&
+            self.contains(VerifiedStatus::CORRECT_SHARES)
+    }
+
+    pub fn new() -> Self {
+        let mut status = VerifiedStatus(0);
+        status.set_median_timestamp();
+        status.set_correct_shares();
+        status
+    }
+
+    pub fn set_has_parents(&mut self) {
+        self.insert(VerifiedStatus::PARENTS);
+    }
+
+    pub fn set_target_difficulty_verified(&mut self) {
+        self.insert(VerifiedStatus::TARGET_DIFFICULTY);
+    }
+
+    pub fn set_difficulty_verified(&mut self) {
+        self.insert(VerifiedStatus::DIFFICULTY);
+    }
+
+    pub fn set_median_timestamp(&mut self) {
+        self.insert(VerifiedStatus::MEDIAN_TIMESTAMP);
+    }
+
+    pub fn set_correct_shares(&mut self) {
+        self.insert(VerifiedStatus::CORRECT_SHARES);
+    }
+
+    pub fn has_parents(self) -> bool {
+        self.contains(VerifiedStatus::PARENTS)
+    }
+
+    pub fn has_target_difficulty_verified(self) -> bool {
+        self.contains(VerifiedStatus::TARGET_DIFFICULTY)
+    }
+
+    pub fn has_difficulty_verified(self) -> bool {
+        self.contains(VerifiedStatus::DIFFICULTY)
+    }
+
+    pub fn has_median_timestamp(self) -> bool {
+        self.contains(VerifiedStatus::MEDIAN_TIMESTAMP)
+    }
+
+    pub fn has_correct_shares(self) -> bool {
+        self.contains(VerifiedStatus::CORRECT_SHARES)
     }
 }
 

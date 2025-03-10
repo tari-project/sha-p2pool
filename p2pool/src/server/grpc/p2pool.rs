@@ -134,7 +134,7 @@ where S: ShareChain
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: Arc<P2Block>) -> Result<(), Status> {
+    pub async fn submit_share_chain_block(&self, block: P2Block) -> Result<(), Status> {
         let pow_algo = block.original_header.pow.pow_algo;
         match pow_algo {
             PowAlgorithm::RandomX => {
@@ -154,13 +154,14 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
+        let hash_string = block.original_header.hash().to_hex();
         match share_chain.submit_block(block.clone()).await {
             Ok(new_tip) => {
                 if new_tip.new_tip.is_some() {
                     let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                    let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(block.clone())];
+                    let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(Arc::new(block))];
                     let mut uncles = share_chain
-                        .get_blocks(&block.uncles)
+                        .get_blocks(&new_blocks[0].uncles)
                         .await
                         .into_iter()
                         .map(Arc::<P2Block>::unwrap_or_clone)
@@ -172,7 +173,7 @@ where S: ShareChain
                         .broadcast_block(notify)
                         .map_err(|error| Status::internal(error.to_string()));
                     if res.is_ok() {
-                        info!(target: LOG_TARGET, "Broadcast new block: {:?}", block.hash.to_hex());
+                        info!(target: LOG_TARGET, "Broadcast new block: {:?}", hash_string);
                     }
                     return res;
                 } else {
@@ -587,11 +588,10 @@ where S: ShareChain
             }
 
             debug!(target: LOG_TARGET, "Trace - submitting to share chain: {}", timer.elapsed().as_millis());
-            let p2pool_block = Arc::new(p2pool_block);
             // Don't error if we can't submit it.
-            match self.submit_share_chain_block(p2pool_block.clone()).await {
+            let pow_type = p2pool_block.original_header.pow.pow_algo.to_string();
+            match self.submit_share_chain_block(p2pool_block).await {
                 Ok(_) => {
-                    let pow_type = p2pool_block.original_header.pow.pow_algo.to_string();
                     info!(target: LOG_TARGET, "🔗 Block submitted to {} share chain!", pow_type);
                 },
                 Err(error) => {

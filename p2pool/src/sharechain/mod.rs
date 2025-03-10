@@ -88,10 +88,10 @@ impl BlockValidationParams {
 pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError>;
+    async fn submit_block(&self, block: P2Block) -> Result<ChainAddResult, ShareChainError>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<ChainAddResult, ShareChainError>;
+    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, ShareChainError>;

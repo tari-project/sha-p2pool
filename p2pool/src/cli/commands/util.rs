@@ -198,6 +198,7 @@ pub async fn server(
         coinbase_extras_sha3x.clone(),
         stats_broadcast_client.clone(),
         squad.clone(),
+        None,
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
@@ -207,6 +208,7 @@ pub async fn server(
         coinbase_extras_random_x.clone(),
         stats_broadcast_client.clone(),
         squad.clone(),
+        None,
     )?;
     Server::new(
         config,

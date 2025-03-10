@@ -3242,6 +3242,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "integration_tests"
+version = "0.22.1"
+dependencies = [
+ "cucumber",
+ "indexmap 1.9.3",
+ "libp2p",
+ "log",
+ "minotari_app_grpc",
+ "minotari_app_utilities",
+ "minotari_node",
+ "minotari_node_grpc_client",
+ "rand",
+ "reqwest",
+ "serde_json",
+ "sha_p2pool",
+ "tari_common",
+ "tari_common_types",
+ "tari_comms",
+ "tari_comms_dht",
+ "tari_core",
+ "tari_crypto",
+ "tari_p2p",
+ "tari_shutdown",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic 0.12.3",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6619,6 +6648,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "bincode",
+ "bitflags 2.8.0",
  "blake2",
  "chrono",
  "clap 4.5.28",
@@ -7364,35 +7394,6 @@ dependencies = [
  "borsh",
  "digest",
  "tari_crypto",
-]
-
-[[package]]
-name = "tari_integration_tests"
-version = "0.22.1"
-dependencies = [
- "cucumber",
- "indexmap 1.9.3",
- "libp2p",
- "log",
- "minotari_app_grpc",
- "minotari_app_utilities",
- "minotari_node",
- "minotari_node_grpc_client",
- "rand",
- "reqwest",
- "serde_json",
- "sha_p2pool",
- "tari_common",
- "tari_common_types",
- "tari_comms",
- "tari_comms_dht",
- "tari_core",
- "tari_crypto",
- "tari_p2p",
- "tari_shutdown",
- "thiserror 1.0.69",
- "tokio",
- "tonic 0.12.3",
 ]
 
 [[package]]

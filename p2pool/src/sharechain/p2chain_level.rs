@@ -31,7 +31,10 @@ use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
 use tari_utilities::epoch_time::EpochTime;
 
 use super::lmdb_block_storage::BlockCache;
-use crate::sharechain::{error::ShareChainError, p2block::P2Block};
+use crate::sharechain::{
+    error::ShareChainError,
+    p2block::{P2Block, VerifiedStatus},
+};
 
 #[derive(Clone)]
 pub struct P2BlockHeader {
@@ -41,7 +44,7 @@ pub struct P2BlockHeader {
     pub timestamp: EpochTime,
     pub target_difficulty: Difficulty,
     pub total_pow: AccumulatedDifficulty,
-    pub verified: bool,
+    pub verified: VerifiedStatus,
     pub uncles: Vec<(u64, FixedHash)>,
     pub wallet_address_base58: String,
     pub coinbase_extra: Vec<u8>,
@@ -115,7 +118,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
 
     pub fn is_verified(&self, hash: &FixedHash) -> bool {
         let lock = self.block_headers.read().expect("could not lock");
-        lock.get(hash).map(|b| b.verified).unwrap_or(false)
+        lock.get(hash).map(|b| b.verified.is_verified()).unwrap_or(false)
     }
 
     pub fn height(&self) -> u64 {

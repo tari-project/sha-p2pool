@@ -21,6 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
+    cmp,
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Display, Formatter},
@@ -31,16 +32,30 @@ use std::{
 use itertools::Itertools;
 use log::*;
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, PowAlgorithm};
+use tari_core::proof_of_work::{
+    lwma_diff::LinearWeightedMovingAverage,
+    randomx_difficulty,
+    sha3x_difficulty,
+    AccumulatedDifficulty,
+    Difficulty,
+    DifficultyAdjustment,
+    PowAlgorithm,
+};
 use tari_utilities::hex::Hex;
 
-use super::{lmdb_block_storage::BlockCache, p2chain_level::P2BlockHeader};
+use super::{
+    lmdb_block_storage::BlockCache,
+    p2chain_level::P2BlockHeader,
+    BlockValidationParams,
+    MAIN_REWARD_SHARE,
+    UNCLE_REWARD_SHARE,
+};
 use crate::{
     server::PROTOCOL_VERSION,
     sharechain::{
-        error::ShareChainError,
+        error::{ShareChainError, ValidationError},
         in_memory::MAX_UNCLE_AGE,
-        p2block::P2Block,
+        p2block::{P2Block, VerifiedStatus},
         p2chain_level::P2ChainLevel,
         DIFFICULTY_ADJUSTMENT_WINDOW,
     },
@@ -142,10 +157,24 @@ pub struct P2Chain<T: BlockCache> {
     share_window: u64,
     current_tip: u64,
     pub lwma: LinearWeightedMovingAverage,
+    minimum_randomx_target_difficulty: u64,
+    minimum_sha3_target_difficulty: u64,
+    bypass_checks: VerifiedStatus,
+    params: Option<Arc<BlockValidationParams>>,
 }
 
 impl<T: BlockCache> P2Chain<T> {
-    pub fn new_empty(algo: PowAlgorithm, total_size: u64, share_window: u64, block_time: u64, block_cache: T) -> Self {
+    pub fn new_empty(
+        algo: PowAlgorithm,
+        total_size: u64,
+        share_window: u64,
+        block_time: u64,
+        block_cache: T,
+        minimum_randomx_target_difficulty: u64,
+        minimum_sha3_target_difficulty: u64,
+        bypass_checks: VerifiedStatus,
+        params: Option<Arc<BlockValidationParams>>,
+    ) -> Self {
         let levels = HashMap::new();
         let lwma =
             LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, block_time).expect("Failed to create LWMA");
@@ -159,6 +188,10 @@ impl<T: BlockCache> P2Chain<T> {
             share_window,
             current_tip: 0,
             lwma,
+            minimum_randomx_target_difficulty,
+            minimum_sha3_target_difficulty,
+            bypass_checks,
+            params,
         }
     }
 
@@ -170,8 +203,22 @@ impl<T: BlockCache> P2Chain<T> {
         from_block_cache: T,
         new_block_cache: T,
         squad: &str,
+        minimum_randomx_target_difficulty: u64,
+        minimum_sha3_target_difficulty: u64,
+        bypass_checks: VerifiedStatus,
+        params: Option<Arc<BlockValidationParams>>,
     ) -> Result<Self, ShareChainError> {
-        let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
+        let mut new_chain = Self::new_empty(
+            algo,
+            total_size,
+            share_window,
+            block_time,
+            new_block_cache,
+            minimum_randomx_target_difficulty,
+            minimum_sha3_target_difficulty,
+            bypass_checks,
+            params,
+        );
         for block in from_block_cache.all_blocks()? {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
@@ -357,7 +404,7 @@ impl<T: BlockCache> P2Chain<T> {
             new_tip.set_new_tip(hash, new_block_height);
             return Ok((new_tip, Vec::new()));
         }
-        if !block.verified {
+        if !block.verified.is_verified() {
             return Ok((new_tip, Vec::new()));
         }
 
@@ -405,7 +452,7 @@ impl<T: BlockCache> P2Chain<T> {
                     current_counting_block.height.saturating_sub(1),
                     &current_counting_block.prev_hash,
                 ) {
-                    if !parent.verified {
+                    if !parent.verified.is_verified() {
                         all_blocks_verified = false;
                         // so this block is unverified, we cannot count it but lets see if it just misses some blocks so
                         // we can ask for them
@@ -480,7 +527,7 @@ impl<T: BlockCache> P2Chain<T> {
                 }
 
                 let mut current_block = block;
-                let mut counter = 0;
+                let mut counter = 1;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                     counter += 1;
                     let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
@@ -567,12 +614,40 @@ impl<T: BlockCache> P2Chain<T> {
         if self.is_verified(&hash, height)? {
             return Ok(());
         }
-        let verified = true;
+
         let level = self
             .level_at_height(height)
             .ok_or(ShareChainError::BlockLevelNotFound)?;
         let block = level.get(&hash).ok_or(ShareChainError::BlockNotFound)?;
+        let mut verified = block.verified;
 
+        if self.verify_pow_and_parents(block.clone())? {
+            verified.set_has_parents();
+        }
+
+        if self.verify_difficulty(block.clone())? {
+            verified.set_difficulty_verified();
+        }
+
+        if self.verify_target_difficulty(block.clone())? {
+            verified.set_target_difficulty_verified();
+        }
+
+        // lets update verification status
+        let mut actual_block = block.deref().clone();
+        actual_block.verified = verified;
+        let level = self
+            .level_at_height(height)
+            .ok_or(ShareChainError::BlockLevelNotFound)?;
+        level.add_block(Arc::new(actual_block))?;
+
+        Ok(())
+    }
+
+    pub fn verify_pow_and_parents(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+        if block.verified.has_parents() || self.bypass_checks.has_parents() {
+            return Ok(true);
+        }
         // lets check the total accumulated difficulty
         let mut total_work = AccumulatedDifficulty::from_u128(u128::from(block.target_difficulty().as_u64()))
             .expect("Difficulty will always fit into accumulated difficulty");
@@ -586,39 +661,114 @@ impl<T: BlockCache> P2Chain<T> {
         }
 
         // special edge case for start, there is no parent
-        if height == 0 {
-            if block.total_pow().as_u128() != total_work.as_u128() {
-                return Err(ShareChainError::BlockTotalWorkMismatch);
+        if block.height != 0 {
+            let parent = self
+                .get_block_at_height(block.height.saturating_sub(1), &block.prev_hash)
+                .ok_or(ShareChainError::BlockNotFound)?;
+            total_work = AccumulatedDifficulty::from_u128(total_work.as_u128() + parent.total_pow().as_u128())
+                .map_err(|_| ShareChainError::DifficultyOverflow)?;
+        }
+
+        if block.total_pow() != total_work {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    pub fn verify_difficulty(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+        if block.verified.has_difficulty_verified() || self.bypass_checks.has_difficulty_verified() {
+            return Ok(true);
+        }
+        // validate PoW
+        let pow_algo = block.original_header.pow.pow_algo;
+        let curr_difficulty = match pow_algo {
+            PowAlgorithm::RandomX => {
+                let random_x_params = self
+                    .params
+                    .clone()
+                    .ok_or(ValidationError::MissingBlockValidationParams)?;
+                randomx_difficulty(
+                    &block.original_header,
+                    random_x_params.random_x_factory(),
+                    random_x_params.genesis_block_hash(),
+                    random_x_params.consensus_manager(),
+                )
+                .map_err(ValidationError::RandomXDifficulty)?
+            },
+            PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?,
+        };
+        if curr_difficulty < block.target_difficulty() && !self.bypass_checks.has_difficulty_verified() {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", pow_algo, block.target_difficulty(), curr_difficulty);
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    pub fn verify_target_difficulty(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+        if block.verified.has_target_difficulty_verified() || self.bypass_checks.has_target_difficulty_verified() {
+            return Ok(true);
+        }
+        match self.get_target_difficulty_for_block(&block) {
+            Some(difficulty) => {
+                if difficulty != block.target_difficulty() {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}", block.original_header.pow.pow_algo, block.target_difficulty(), difficulty);
+                    return Ok(false);
+                }
+            },
+            None => {
+                return Ok(false);
+            },
+        }
+
+        Ok(true)
+    }
+
+    pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
+        let tip_header_hash = self
+            .get_tip()
+            .map(|level| level.block_header_in_main_chain())
+            .flatten()
+            .map(|header| header.hash)
+            .unwrap_or(FixedHash::default());
+        if block.prev_hash == tip_header_hash {
+            // easy this builds on the tip
+            let min = match block.original_header.pow.pow_algo {
+                PowAlgorithm::RandomX => Difficulty::from_u64(self.minimum_randomx_target_difficulty).unwrap(),
+                PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
+            };
+
+            let difficulty = self.lwma.get_difficulty().unwrap_or(Difficulty::min());
+            return Some(cmp::max(min, difficulty));
+        }
+        // ok this does not build on the tip, this means we need to calculate what it is
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
+            .expect("Failed to create LWMA");
+        lwma.add_front(block.timestamp, block.target_difficulty());
+        let mut current_block = match self.level_at_height(block.height.saturating_sub(1)) {
+            Some(level) => match level.get_header(&block.prev_hash) {
+                Some(block) => block.clone(),
+                None => return None,
+            },
+            None => return None,
+        };
+        while !lwma.is_full() {
+            if self.level_at_height(current_block.height.saturating_sub(1)).is_none() {
+                return None;
             }
-            let mut actual_block = block.deref().clone();
-            // lets replace this
-            actual_block.verified = verified;
-            let level = self
-                .level_at_height(height)
-                .ok_or(ShareChainError::BlockLevelNotFound)?;
-            level.add_block(Arc::new(actual_block))?;
-            return Ok(());
+            let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
+            // safety check
+            let nextblock = parent_level.get_header(&current_block.prev_hash);
+            if nextblock.is_none() {
+                return None;
+            }
+            current_block = nextblock.unwrap().clone();
+            lwma.add_front(current_block.timestamp, current_block.target_difficulty);
+            if current_block.height == 0 {
+                // edge case we are at the start of the chain
+                break;
+            }
         }
-
-        let parent = self
-            .get_block_at_height(block.height.saturating_sub(1), &block.prev_hash)
-            .ok_or(ShareChainError::BlockNotFound)?;
-
-        if block.total_pow().as_u128() != parent.total_pow().as_u128() + total_work.as_u128() {
-            return Err(ShareChainError::BlockTotalWorkMismatch);
-        }
-
-        if verified {
-            let mut actual_block = block.deref().clone();
-            // lets replace this
-            actual_block.verified = verified;
-            let level = self
-                .level_at_height(height)
-                .ok_or(ShareChainError::BlockLevelNotFound)?;
-            level.add_block(Arc::new(actual_block))?;
-        }
-
-        Ok(())
+        Some(lwma.get_difficulty().unwrap_or(Difficulty::min()))
     }
 
     fn add_block_inner(&mut self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
@@ -686,22 +836,105 @@ impl<T: BlockCache> P2Chain<T> {
         usize::try_from(current_chain_length).expect("32 bit systems not supported")
     }
 
+    pub async fn get_calculate_and_cache_hashmap_of_shares(
+        &mut self,
+    ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
+        fn update_insert(
+            miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
+            miner: String,
+            new_share: u64,
+            coinbase_extra: Vec<u8>,
+        ) {
+            match miner_shares.get_mut(&miner) {
+                Some((v, extra)) => {
+                    *v += new_share;
+                    *extra = coinbase_extra;
+                },
+                None => {
+                    miner_shares.insert(miner, (new_share, coinbase_extra));
+                },
+            }
+        }
+        let mut miners_to_shares = HashMap::new();
+        let tip_level = match self.get_tip() {
+            Some(tip_level) => tip_level,
+            None => return Ok(miners_to_shares),
+        };
+
+        // we want to count 1 short,as the final share will be for this node
+        let stop_height = tip_level.height().saturating_sub(self.share_window - 1);
+        let tip_hash = tip_level.chain_block();
+        let mut cur_block = tip_level
+            .get_header(&tip_level.chain_block())
+            .ok_or(ShareChainError::BlockNotFound)?;
+        update_insert(
+            &mut miners_to_shares,
+            cur_block.wallet_address_base58,
+            MAIN_REWARD_SHARE,
+            cur_block.coinbase_extra.clone(),
+        );
+        for uncle in &cur_block.uncles {
+            let uncle_block = self
+                .level_at_height(uncle.0)
+                .ok_or(ShareChainError::UncleBlockNotFound)?
+                .get_header(&uncle.1)
+                .ok_or(ShareChainError::UncleBlockNotFound)?;
+            update_insert(
+                &mut miners_to_shares,
+                uncle_block.wallet_address_base58,
+                UNCLE_REWARD_SHARE,
+                uncle_block.coinbase_extra.clone(),
+            );
+        }
+        while cur_block.height > stop_height {
+            cur_block = self
+                .level_at_height(cur_block.height.saturating_sub(1))
+                .ok_or(ShareChainError::BlockNotFound)?
+                .get_header(&cur_block.prev_hash)
+                .ok_or(ShareChainError::BlockNotFound)?;
+            update_insert(
+                &mut miners_to_shares,
+                cur_block.wallet_address_base58,
+                MAIN_REWARD_SHARE,
+                cur_block.coinbase_extra.clone(),
+            );
+            for uncle in &cur_block.uncles {
+                let uncle_block = self
+                    .level_at_height(uncle.0)
+                    .ok_or(ShareChainError::UncleBlockNotFound)?
+                    .get_header(&uncle.1)
+                    .ok_or(ShareChainError::UncleBlockNotFound)?;
+                update_insert(
+                    &mut miners_to_shares,
+                    uncle_block.wallet_address_base58,
+                    UNCLE_REWARD_SHARE,
+                    uncle_block.coinbase_extra.clone(),
+                );
+            }
+        }
+        self.cached_shares = Some(CachedShares {
+            at_hash: tip_hash,
+            shares: miners_to_shares.clone(),
+        });
+        Ok(miners_to_shares)
+    }
+
     #[cfg(test)]
     fn assert_share_window_verified(&self) {
         let tip = self.get_tip().unwrap();
         let mut current_block = tip.get_block_in_main_chain().unwrap().clone();
-        if !current_block.verified {
+        if !current_block.verified.is_verified() {
             panic!("Tip block is not verified");
         }
         let mut counter = 1;
         while let Some(parent) = self.get_parent_block(&current_block) {
-            if !parent.verified {
+            if !parent.verified.is_verified() {
                 panic!("Parent block is not verified");
             }
             current_block = parent.clone();
             for uncle in &parent.uncles {
                 if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
-                    if !uncle_block.verified {
+                    if !uncle_block.verified.is_verified() {
                         panic!("Uncle block is not verified");
                     }
                 }
@@ -736,9 +969,25 @@ mod test {
         p2block::P2BlockBuilder,
     };
 
+    fn create_chain() -> P2Chain<LmdbBlockStorage> {
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            10,
+            5,
+            10,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None
+        )
+    }
+
     #[test]
     fn test_only_keeps_size() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
         let mut prev_block = None;
         for i in 0..2100 {
@@ -766,7 +1015,7 @@ mod test {
 
     #[test]
     fn get_tips() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -794,7 +1043,7 @@ mod test {
     fn test_does_not_set_tip_unless_full_chain() {
         // we have a window of 5, meaing that we need 5 valid blocks
         // if we dont start at 0, we need a chain of at least 6 blocks
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -831,7 +1080,7 @@ mod test {
         // the whole chain must be verified
         chain.assert_share_window_verified();
         // first block should not be verified
-        assert!(!chain.get_chain_block_at_height(1).unwrap().verified);
+        assert!(!chain.get_chain_block_at_height(1).unwrap().verified.has_parents());
     }
 
     #[test]
@@ -840,7 +1089,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -883,7 +1132,19 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 10, 10, LmdbBlockStorage::new_from_temp_dir());
+
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            20,
+            10,
+            10,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -924,7 +1185,7 @@ mod test {
         // to test this properly we need 6 blocks in the chain, and not use 0 as zero will always be valid and counter
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -991,7 +1252,7 @@ mod test {
 
     #[test]
     fn get_parent() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1025,7 +1286,7 @@ mod test {
 
     #[test]
     fn test_dont_set_tip_on_single_high_height() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1106,7 +1367,7 @@ mod test {
 
     #[test]
     fn add_blocks_to_chain_happy_path() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1137,7 +1398,7 @@ mod test {
 
     #[test]
     fn add_blocks_to_chain_small_reorg() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1233,7 +1494,19 @@ mod test {
     #[test]
     fn add_blocks_to_chain_super_large_reorg() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            10,
+            5,
+            20,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None,
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1294,7 +1567,19 @@ mod test {
     #[test]
     fn add_blocks_missing_block() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            50,
+            25,
+            20,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None,
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1333,7 +1618,19 @@ mod test {
     #[test]
     fn reorg_with_missing_uncle() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 50, 25, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            50,
+            25,
+            20,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None,
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1419,7 +1716,7 @@ mod test {
     #[test]
     fn add_blocks_to_chain_super_large_reorg_only_window() {
         // this test will verify that we reorg to a completely new chain
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1483,7 +1780,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1512,7 +1809,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly_with_uncles() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1564,7 +1861,7 @@ mod test {
 
     #[test]
     fn calculate_total_difficulty_correctly_with_wrapping_blocks() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1616,7 +1913,7 @@ mod test {
 
     #[test]
     fn reorg_with_uncles() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
@@ -1724,7 +2021,19 @@ mod test {
 
     #[test]
     fn rerog_less_than_share_window() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            20,
+            15,
+            20,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None,
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1786,7 +2095,19 @@ mod test {
 
     #[test]
     fn rests_levels_after_reorg() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 20, 15, 20, LmdbBlockStorage::new_from_temp_dir());
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        let mut chain = P2Chain::new_empty(
+            PowAlgorithm::Sha3x,
+            20,
+            15,
+            20,
+            LmdbBlockStorage::new_from_temp_dir(),
+            1,
+            1,
+            bypass_checks,None,
+        );
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1844,7 +2165,7 @@ mod test {
 
     #[test]
     fn difficulty_go_up() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1883,7 +2204,7 @@ mod test {
     }
     #[test]
     fn difficulty_go_down() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let mut prev_block = None;
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
@@ -1926,7 +2247,7 @@ mod test {
         // This test adds a block to the tip, and then adds second block,
         // but has an uncle that is not in the chain. This test checks that
         // the tip is not set to the new block, because the uncle is missing.
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
 
         let prev_block = None;
 
@@ -1959,7 +2280,7 @@ mod test {
 
     #[test]
     fn test_only_reorg_to_chain_if_it_is_verified() {
-        let mut chain = P2Chain::new_empty(PowAlgorithm::Sha3x, 10, 5, 10, LmdbBlockStorage::new_from_temp_dir());
+        let mut chain = create_chain();
         let prev_block = None;
 
         let block = P2BlockBuilder::new_from_block(prev_block.as_ref())

@@ -71,4 +71,6 @@ pub enum ValidationError {
     RandomXDifficulty(#[from] MergeMineError),
     #[error("Block achieved difficulty is below the target")]
     DifficultyTarget,
+    #[error("Block timestamp is too far in the future")]
+    FutureTimestamp,
 }
