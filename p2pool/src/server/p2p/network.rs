@@ -406,12 +406,6 @@ where S: ShareChain
         *self.swarm.local_peer_id()
     }
 
-    pub fn local_peer_addresses(&self) -> Vec<Multiaddr> {
-        let mut addresses: Vec<Multiaddr> = self.swarm.external_addresses().cloned().collect();
-        addresses.append(&mut self.swarm.listeners().cloned().collect());
-        addresses
-    }
-
     async fn create_peer_info(&mut self, public_addresses: Vec<Multiaddr>) -> Result<PeerInfo, Error> {
         let share_chain_sha3x = self.share_chain_sha3x.clone();
         let share_chain_random_x = self.share_chain_random_x.clone();
@@ -1097,15 +1091,6 @@ where S: ShareChain
                     return;
                 }
 
-                // Update peer stats
-                let peer_is_a_seed_peer = self.network_peer_store.read().await.is_seed_peer(&peer_id);
-                let _unused = self.stats_broadcast_client.send_peer_stats(
-                    peer_is_a_seed_peer,
-                    peer_id,
-                    response.info.public_addresses(),
-                    num_peers_added,
-                );
-
                 // if we are a seed peer, end here
                 if self.config.is_seed_peer {
                     debug!(
@@ -1129,7 +1114,7 @@ where S: ShareChain
                 }
 
                 // Once we have peer info from the seed peers, disconnect from them.
-                if peer_is_a_seed_peer {
+                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
                     info!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Disconnecting from seed peer {}", peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                 }

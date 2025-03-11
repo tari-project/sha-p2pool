@@ -181,15 +181,7 @@ pub async fn server(
 
     let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
     let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-    let diagnostic_mode = if args.diagnostic_mode {
-        Some((
-            Duration::from_secs(config.diagnostic_mode_timer),
-            *swarm.local_peer_id(),
-        ))
-    } else {
-        None
-    };
-    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx, diagnostic_mode);
+    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
 
     if let Some(path) = args.export_libp2p_info.clone() {
         let libp2p_info = LibP2pInfo {

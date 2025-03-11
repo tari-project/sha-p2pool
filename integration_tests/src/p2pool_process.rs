@@ -75,7 +75,6 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         node_config.p2p_service.peer_exchange_interval = Duration::from_secs(1);
         node_config.p2p_service.meta_data_exchange_interval = Duration::from_secs(1);
         node_config.network_silence_delay = 0;
-        node_config.diagnostic_mode_timer = 10;
         // Each spawned p2pool node will use different ports
         node_config.p2p_port = get_port(18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
         node_config.grpc_port = get_port(18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
