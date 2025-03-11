@@ -124,10 +124,6 @@ pub struct StartArgs {
     #[arg(long)]
     pub debug_print_chain: bool,
 
-    /// If set, basic connectivity statistics about seeds and normal peers will be collected and printed to a csv file.
-    #[arg(long, short, alias = "diag")]
-    pub diagnostic_mode: bool,
-
     #[arg(long)]
     pub max_connections: Option<u32>,
 

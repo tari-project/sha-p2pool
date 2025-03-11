@@ -171,7 +171,6 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         user_agent: None,
         peer_publish_interval: Some(node_config.p2p_service.peer_info_publish_interval.as_secs()),
         debug_print_chain: true,
-        diagnostic_mode: true,
         max_connections: None,
         randomx_disabled: false,
         sha3x_disabled: false,
@@ -378,10 +377,6 @@ pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
 
     if args.debug_print_chain {
         args_vec.push("--debug-print-chain".to_string());
-    }
-
-    if args.diagnostic_mode {
-        args_vec.push("--diagnostic-mode".to_string());
     }
 
     if let Some(max_connections) = args.max_connections {
