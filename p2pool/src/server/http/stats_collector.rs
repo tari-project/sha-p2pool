@@ -26,10 +26,10 @@ pub(crate) struct StatsCollector {
     local_peer_id: Option<PeerId>,
     miner_rx_accepted: u64,
     miner_sha_accepted: u64,
-    // miner_rejected: u64,
+    miner_rejected: u64,
     pool_rx_accepted: u64,
     pool_sha_accepted: u64,
-    // pool_rejected: u64,
+    pool_rejected: u64,
     sha_network_difficulty: Difficulty,
     sha_target_difficulty: Difficulty,
     randomx_network_difficulty: Difficulty,
@@ -62,10 +62,10 @@ impl StatsCollector {
             first_stat_received: None,
             miner_rx_accepted: 0,
             miner_sha_accepted: 0,
-            // miner_rejected: 0,
+            miner_rejected: 0,
             pool_rx_accepted: 0,
             pool_sha_accepted: 0,
-            // pool_rejected: 0,
+            pool_rejected: 0,
             sha3x_chain_height: 0,
             sha3x_chain_length: 0,
             randomx_chain_height: 0,
@@ -116,6 +116,13 @@ impl StatsCollector {
                 PowAlgorithm::RandomX => {
                     self.pool_rx_accepted += 1;
                 },
+            },
+            StatData::MinerBlockRejected{  .. } => {
+                    self.miner_rejected +=1;
+
+            },
+            StatData::PoolBlockRejected {  .. } => {
+                self.pool_rejected += 1;
             },
             StatData::ChainChanged {
                 algo, height, length, ..
@@ -238,7 +245,7 @@ impl StatsCollector {
                                 PowAlgorithm::Sha3x => {
                                     let _  = tx.send(GetStatsResponse {
                                         height: self.sha3x_chain_height,
-                                        last_block_time: EpochTime::now(),
+                                        last_block_time: ,
                                         num_my_shares: 0,
                                         total_shares: 0,
                                     }).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending stats response: {:?}", e));
@@ -246,7 +253,7 @@ impl StatsCollector {
                                 PowAlgorithm::RandomX => {
                                     let _ = tx.send(GetStatsResponse {
                                         height: self.randomx_chain_height,
-                                        last_block_time: EpochTime::now(),
+                                        last_block_time: ,
                                         num_my_shares: 0,
                                         total_shares: 0,
                                     }).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending stats response: {:?}", e));
@@ -320,6 +327,14 @@ pub(crate) enum StatData {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
+    MinerBlockRejected {
+        pow_algo: PowAlgorithm,
+        timestamp: EpochTime,
+    },
+    PoolBlockRejected {
+        pow_algo: PowAlgorithm,
+        timestamp: EpochTime,
+    },
     ChainChanged {
         algo: PowAlgorithm,
         height: u64,
@@ -351,6 +366,8 @@ impl StatData {
             StatData::InfoChanged { timestamp, .. } => *timestamp,
             StatData::MinerBlockAccepted { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
+            StatData::MinerBlockRejected { timestamp, .. } => *timestamp,
+            StatData::PoolBlockRejected { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
             StatData::NewPeer { timestamp, .. } => *timestamp,
             StatData::TargetDifficultyChanged { timestamp, .. } => *timestamp,
@@ -415,7 +432,7 @@ impl StatsBroadcastClient {
     }
 
     pub fn send_pool_block_accepted(&self, pow_algo: PowAlgorithm) -> Result<(), anyhow::Error> {
-        let data = StatData::PoolBlockAccepted {
+        let data = StatData::MinerBlockAccepted {
             pow_algo,
             timestamp: EpochTime::now(),
         };

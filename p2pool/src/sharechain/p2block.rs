@@ -51,8 +51,6 @@ pub struct P2Block {
     pub miner_wallet_address: TariAddress,
     pub sent_to_main_chain: bool,
     target_difficulty: Difficulty,
-    // list of uncles blocks confirmed by this block
-    // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
     pub verified: bool,
