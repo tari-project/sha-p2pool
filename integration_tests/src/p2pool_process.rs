@@ -487,8 +487,12 @@ pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, p
             )
             .into());
         }
-        if counter % 10 == 0 {
-            debug!(target: LOG_TARGET, "{}: waiting for '{}' to show peer connected", counter, connections_url);
+        if counter % 50 == 0 {
+            debug!(
+                target: LOG_TARGET,
+                "Iteration {}: waiting {:.2?} for '{}' to show peer connected",
+                counter, start.elapsed(), connections_url
+            );
         }
         counter += 1;
 

@@ -5,17 +5,34 @@
 Feature: Sync p2pool nodes
 
   @critical
-  Scenario: New node sync with peers
+  Scenario: New node sync with peers on startup
     Given I have a base node BASE_NODE_A
     And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
     And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
     And I add 10 blocks to p2pool node NODE_A
     And p2pool node NODE_A stats is at height 10
-    # Add new node, it syncs
+    # Add new nodes, they sync
     And I have a p2pool node NODE_B in squad DOLPHINS connected to base node BASE_NODE_A
-    And p2pool node NODE_A stats shows connected to peer NODE_B
-    And p2pool node NODE_B stats is at height 10
+    And I have a p2pool node NODE_C in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_D in squad DOLPHINS connected to base node BASE_NODE_A
+    And p2pool node NODE_D stats shows connected to peer NODE_A
+    And p2pool node NODE_D stats shows connected to peer NODE_B
+    And p2pool node NODE_D stats shows connected to peer NODE_C
+    And p2pool node NODE_D stats is at height 10
     Then I wait 1 seconds and stop
+
+@critical
+  Scenario: Node will load up blocks from storage on startup
+    Given I have a base node BASE_NODE_A
+    And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I add 10 blocks to p2pool node NODE_A
+    And p2pool node NODE_A stats is at height 10
+    # Stop the node
+    And I stop p2pool node NODE_A
+    # Start-up node again, it loads blocks from storage
+    And I re-start p2pool node NODE_A
+    And p2pool node NODE_A stats is at height 10
 
   @critical
   Scenario: New node can be offline and then sync with peers

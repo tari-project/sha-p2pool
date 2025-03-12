@@ -129,6 +129,7 @@ pub struct StartArgs {
 
     #[arg(long, default_value_t = false)]
     pub randomx_disabled: bool,
+
     #[arg(long, default_value_t = false)]
     pub sha3x_disabled: bool,
 

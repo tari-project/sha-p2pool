@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
 use human_format::Formatter;
 use libp2p::PeerId;
@@ -92,6 +92,7 @@ impl StatsCollector {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
             StatData::InfoChanged {
@@ -185,6 +186,7 @@ impl StatsCollector {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn run(&mut self) -> Result<(), anyhow::Error> {
         let mut stats_report_timer = tokio::time::interval(tokio::time::Duration::from_secs(10));
         stats_report_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -197,36 +199,37 @@ impl StatsCollector {
                 _ = stats_report_timer.tick() => {
                     let formatter = Formatter::new();
 
-                    info!(target: LOG_TARGET,
+                    info!(
+                        target: LOG_TARGET,
                         "========= Uptime: {}. v{}, Sqd: {}, Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(tot/gr/bl/non) {}/{}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                         humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64()
                         ).unwrap_or_default())),
                         env!("CARGO_PKG_VERSION"),
                         self.last_squad.as_deref().unwrap_or("Not set"),
-                            self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
-                            self.randomx_chain_height,
-                            self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
-                            self.sha3x_chain_height,
-                            formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
-                            formatter.format(self.randomx_network_difficulty.as_u64() as f64),
-                            formatter.format(self.sha_target_difficulty.as_u64() as f64),
-                            formatter.format(self.sha_network_difficulty.as_u64() as f64),
-                            self.miner_rx_accepted,
-                            self.miner_sha_accepted,
-                            self.pool_rx_accepted,
-                            self.pool_sha_accepted,
-                            self.total_peers,
-                            self.total_grey_list,
-                            self.total_black_list,
-                            self.total_non_squad_peers,
-                            self.established_incoming,
-                            self.established_outgoing,
-                            humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
-                                self.last_gossip_message.as_u64()
-                            ).unwrap_or_default())),
-                        );
-                    },
+                        self.randomx_chain_height.saturating_sub(self.randomx_chain_length),
+                        self.randomx_chain_height,
+                        self.sha3x_chain_height.saturating_sub(self.sha3x_chain_length),
+                        self.sha3x_chain_height,
+                        formatter.format(self.randomx_target_difficulty.as_u64() as f64 ),
+                        formatter.format(self.randomx_network_difficulty.as_u64() as f64),
+                        formatter.format(self.sha_target_difficulty.as_u64() as f64),
+                        formatter.format(self.sha_network_difficulty.as_u64() as f64),
+                        self.miner_rx_accepted,
+                        self.miner_sha_accepted,
+                        self.pool_rx_accepted,
+                        self.pool_sha_accepted,
+                        self.total_peers,
+                        self.total_grey_list,
+                        self.total_black_list,
+                        self.total_non_squad_peers,
+                        self.established_incoming,
+                        self.established_outgoing,
+                        humantime::format_duration(Duration::from_secs(EpochTime::now().as_u64().checked_sub(
+                            self.last_gossip_message.as_u64()
+                        ).unwrap_or_default())),
+                    );
+                },
                 res = self.request_rx.recv() => {
                     match res {
                         Some(StatsRequest::GetStats(pow, tx)) => {
