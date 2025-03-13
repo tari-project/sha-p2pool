@@ -13,12 +13,13 @@ use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::{Shutdown, ShutdownSignal};
 
 use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
     server::{
         config,
+        diagnostics::{DiagnosticsBroadcastClient, DiagnosticsCollector, DiagnosticsReceiverClient},
         grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
         p2p,
@@ -39,7 +40,8 @@ where S: ShareChain
     p2pool_grpc_service: Option<ShaP2PoolServer<ShaP2PoolGrpc<S>>>,
     http_server: Option<Arc<HttpServer>>,
     stats_collector: Option<StatsCollector>,
-    shutdown_signal: ShutdownSignal,
+    diagnostics_collector: Option<DiagnosticsCollector>,
+    shutdown: Shutdown,
     are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
 }
@@ -53,7 +55,10 @@ where S: ShareChain
         share_chain_random_x: S,
         stats_collector: StatsCollector,
         stats_broadcast_client: StatsBroadcastClient,
-        shutdown_signal: ShutdownSignal,
+        diagnostics_collector: Option<DiagnosticsCollector>,
+        diagnostics_broadcast_client: Option<DiagnosticsBroadcastClient>,
+        diagnostics_receiver_client: Option<DiagnosticsReceiverClient>,
+        shutdown: Shutdown,
         swarm: Swarm<ServerNetworkBehaviour>,
         squad: String,
     ) -> Result<Self, Error> {
@@ -66,10 +71,12 @@ where S: ShareChain
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
-            shutdown_signal.clone(),
+            shutdown.clone(),
             are_we_synced_with_randomx_p2pool.clone(),
             are_we_synced_with_sha3x_p2pool.clone(),
             stats_broadcast_client.clone(),
+            diagnostics_broadcast_client,
+            diagnostics_receiver_client,
             config.share_window,
             swarm,
             squad.clone(),
@@ -84,7 +91,7 @@ where S: ShareChain
         let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
         if !config.p2p_service.is_seed_peer {
             let base_node_grpc_service =
-                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone()).await?;
+                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown.to_signal().clone()).await?;
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
 
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
@@ -111,7 +118,7 @@ where S: ShareChain
                 stats_client,
                 config.http_server.port,
                 query_client,
-                shutdown_signal.clone(),
+                shutdown.to_signal().clone(),
             )))
         } else {
             None
@@ -124,7 +131,8 @@ where S: ShareChain
             p2pool_grpc_service: p2pool_server,
             http_server,
             stats_collector: Some(stats_collector),
-            shutdown_signal,
+            diagnostics_collector,
+            shutdown,
             are_we_synced_with_randomx_p2pool,
             are_we_synced_with_sha3x_p2pool,
         })
@@ -171,7 +179,7 @@ where S: ShareChain
             let base_node_grpc_service = self.base_node_grpc_service.clone().unwrap();
             let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();
             let grpc_port = self.config.grpc_port;
-            let shutdown_signal = self.shutdown_signal.clone();
+            let shutdown_signal = self.shutdown.to_signal().clone();
             tokio::spawn(async move {
                 if let Err(error) =
                     Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port, shutdown_signal).await
@@ -190,6 +198,17 @@ where S: ShareChain
                 }
 
                 info!(target: LOG_TARGET, "Stats collector stopped!");
+            });
+        }
+
+        let diagnostics_server = self.diagnostics_collector.take();
+        if let Some(mut server) = diagnostics_server {
+            tokio::spawn(async move {
+                if let Err(err) = server.run().await {
+                    error!(target: LOG_TARGET, "Diagnostics collector encountered an error: {:?}", err);
+                }
+
+                info!(target: LOG_TARGET, "Diagnostics collector stopped!");
             });
         }
 

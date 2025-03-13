@@ -23,7 +23,7 @@ use tari_core::{
     consensus::ConsensusManager,
     proof_of_work::{randomx_factory::RandomXFactory, PowAlgorithm},
 };
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 use tari_utilities::hex::Hex;
 use tokio::sync::RwLock;
 
@@ -31,6 +31,7 @@ use crate::{
     cli::args::{Cli, StartArgs},
     server::{
         self as main_server,
+        diagnostics::{DiagnosticsBroadcastClient, DiagnosticsCollector},
         http::stats_collector::{StatsBroadcastClient, StatsCollector},
         server::Server,
     },
@@ -43,7 +44,7 @@ const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 pub async fn server(
     cli: Arc<Cli>,
     args: &StartArgs,
-    shutdown_signal: ShutdownSignal,
+    shutdown: Shutdown,
     enable_logging: bool,
 ) -> anyhow::Result<Server<InMemoryShareChain>> {
     if enable_logging {
@@ -181,7 +182,17 @@ pub async fn server(
 
     let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
     let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-    let stats_collector = StatsCollector::new(shutdown_signal.clone(), stats_rx);
+    let stats_collector = StatsCollector::new(shutdown.to_signal().clone(), stats_rx);
+
+    let (diagnostics_collector, diagnostics_broadcast_client, diagnostics_receiver_client) = if args.diagnostic_mode {
+        let (diagnostics_tx, diagnostics_rx) = tokio::sync::broadcast::channel(1000);
+        let broadcast_client = DiagnosticsBroadcastClient::new(diagnostics_tx);
+        let collector = DiagnosticsCollector::new(shutdown.to_signal().clone(), diagnostics_rx);
+        let receiver_client = collector.create_receiver_client();
+        (Some(collector), Some(broadcast_client), Some(receiver_client))
+    } else {
+        (None, None, None)
+    };
 
     if let Some(path) = args.export_libp2p_info.clone() {
         let libp2p_info = LibP2pInfo {
@@ -217,7 +228,10 @@ pub async fn server(
         share_chain_random_x,
         stats_collector,
         stats_broadcast_client,
-        shutdown_signal,
+        diagnostics_collector,
+        diagnostics_broadcast_client,
+        diagnostics_receiver_client,
+        shutdown,
         swarm,
         squad,
     )
