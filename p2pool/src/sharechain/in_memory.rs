@@ -1274,7 +1274,7 @@ pub mod test {
         let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
         for i in 0..5 {
             let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
-            timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+            timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
             let mut block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
@@ -1294,7 +1294,7 @@ pub mod test {
 
         // lets add a bad target difficulty block
         let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
-        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
         let block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
             .with_timestamp(timestamp)
             .with_height(5)
