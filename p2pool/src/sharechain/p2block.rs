@@ -296,10 +296,7 @@ impl VerifiedStatus {
     }
 
     pub fn new() -> Self {
-        let mut status = VerifiedStatus(0);
-        status.set_median_timestamp();
-        status.set_correct_shares();
-        status
+        VerifiedStatus(0)
     }
 
     pub fn set_has_parents(&mut self) {

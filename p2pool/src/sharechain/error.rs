@@ -73,4 +73,6 @@ pub enum ValidationError {
     DifficultyTarget,
     #[error("Block timestamp is too far in the future")]
     FutureTimestamp,
+    #[error("Block median timestamp is too far in the past")]
+    MedianTimestamp,
 }

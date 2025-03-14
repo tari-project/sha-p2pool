@@ -41,13 +41,14 @@ use tari_core::proof_of_work::{
     DifficultyAdjustment,
     PowAlgorithm,
 };
-use tari_utilities::hex::Hex;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use super::{
     lmdb_block_storage::BlockCache,
     p2chain_level::P2BlockHeader,
     BlockValidationParams,
     MAIN_REWARD_SHARE,
+    MEDIAN_TIMESTAMP_WINDOW,
     UNCLE_REWARD_SHARE,
 };
 use crate::{
@@ -300,9 +301,7 @@ impl<T: BlockCache> P2Chain<T> {
             .get_block_at_height(new_height, &hash)
             .ok_or(ShareChainError::BlockNotFound)?
             .clone();
-        // edge case for first block
-        // if the tip is none and we added a block at height 0, it might return it here as a tip, so we need to check if
-        // the newly added block == 0
+
         self.lwma.add_back(block.timestamp, block.target_difficulty());
         let level = self
             .level_at_height(new_height)
@@ -565,7 +564,6 @@ impl<T: BlockCache> P2Chain<T> {
                         }
 
                         current_block = nextblock.unwrap().clone();
-
                         self.lwma
                             .add_front(current_block.timestamp, current_block.target_difficulty);
                     } else {
@@ -632,6 +630,21 @@ impl<T: BlockCache> P2Chain<T> {
         if self.verify_target_difficulty(block.clone())? {
             verified.set_target_difficulty_verified();
         }
+
+        if self.verify_median_timestamp_for_block(block.clone())? {
+            verified.set_median_timestamp();
+        }
+
+       // if self.verify_shares_for_block(block.clone())? {
+            verified.set_correct_shares();
+       // }
+
+        dbg!(verified.has_difficulty_verified());
+        dbg!(verified.has_target_difficulty_verified());
+        dbg!(verified.has_parents());
+        dbg!(verified.has_median_timestamp());
+        dbg!(verified.has_correct_shares());
+        dbg!(verified.is_verified());
 
         // lets update verification status
         let mut actual_block = block.deref().clone();
@@ -723,6 +736,107 @@ impl<T: BlockCache> P2Chain<T> {
         Ok(true)
     }
 
+    pub fn verify_median_timestamp_for_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+        if block.verified.has_median_timestamp() || self.bypass_checks.has_median_timestamp() || block.height == 0 {
+            return Ok(true);
+        }
+        let mut current_block = match self.level_at_height(block.height.saturating_sub(1)) {
+            Some(level) => match level.get_header(&block.prev_hash) {
+                Some(block) => block.clone(),
+                None => return Ok(false),
+            },
+            None => return Ok(false),
+        };
+        let mut timestamps = Vec::with_capacity(MEDIAN_TIMESTAMP_WINDOW);
+        timestamps.push(current_block.timestamp);
+        while timestamps.len() < MEDIAN_TIMESTAMP_WINDOW {
+            if current_block.height == 0 {
+                break;
+            }
+            let parent_level = match self.level_at_height(current_block.height.saturating_sub(1)) {
+                Some(level) => level,
+                None => return Ok(false),
+            };
+            current_block = match parent_level.get_header(&current_block.prev_hash) {
+                Some(block) => block,
+                None => return Ok(false),
+            };
+            timestamps.push(current_block.timestamp);
+
+        }
+
+        timestamps.sort();
+        let mid_index = timestamps.len() / 2;
+        let median_timestamp = if timestamps.len() % 2 == 0 {
+            // To compute this mean, we use `u128` to avoid overflow with the internal `u64` typing
+            // Note that the final cast back to `u64` will never truncate since each summand is bounded by `u64`
+            // To make the linter happy, we use `u64::MAX` in the impossible case that the cast fails
+            EpochTime::from(
+                u64::try_from(
+                    (u128::from(timestamps[mid_index - 1].as_u64()) + u128::from(timestamps[mid_index].as_u64())) / 2,
+                )
+                    .unwrap_or(u64::MAX),
+            )
+        } else {
+            timestamps[mid_index]
+        };
+        if block.timestamp > median_timestamp {
+            Ok(true)
+        } else {
+            Err(ShareChainError::ValidationError(ValidationError::MedianTimestamp))
+        }
+    }
+
+    pub fn verify_shares_for_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+        if block.verified.has_correct_shares() || self.bypass_checks.has_correct_shares() || block.height == 0 {
+            return Ok(true);
+        }
+
+        let mut miners_shares = if let Some(shares) =  &self.cached_shares{
+             if block.prev_hash == shares.at_hash {
+                shares.shares.clone()
+            } else{
+                 self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
+             }
+        } else{
+            self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
+        };
+
+        // lets add the new tip block to the hashmap
+        miners_shares.insert(
+            block.miner_wallet_address.to_base58(),
+            (MAIN_REWARD_SHARE, block.miner_coinbase_extra.clone()),
+        );
+            for uncle in &block.uncles {
+                let uncle_level = match self.level_at_height(uncle.0) {
+                    Some(level) => level,
+                    None => return Ok(false),
+                };
+                let uncle_block = match uncle_level.get(&uncle.1){
+                    Some(block) => block.clone(),
+                    None => return Ok(false),
+                };
+                miners_shares.insert(
+                    uncle_block.miner_wallet_address.to_base58(),
+                    (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+                );
+            }
+
+        let mut res = vec![];
+
+        for (key, (shares, extra)) in miners_shares {
+            // find coinbase extra for wallet address
+            res.push(crate::sharechain::NewBlockCoinbase {
+                address: key,
+                value: shares,
+                stealth_payment: false,
+                revealed_value_proof: true,
+                coinbase_extra: extra,
+            });
+        }
+Ok(true)
+    }
+
     pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
         let tip_header_hash = self
             .get_tip()
@@ -738,12 +852,12 @@ impl<T: BlockCache> P2Chain<T> {
             };
 
             let difficulty = self.lwma.get_difficulty().unwrap_or(Difficulty::min());
+
             return Some(cmp::max(min, difficulty));
         }
         // ok this does not build on the tip, this means we need to calculate what it is
         let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
             .expect("Failed to create LWMA");
-        lwma.add_front(block.timestamp, block.target_difficulty());
         let mut current_block = match self.level_at_height(block.height.saturating_sub(1)) {
             Some(level) => match level.get_header(&block.prev_hash) {
                 Some(block) => block.clone(),
@@ -751,6 +865,7 @@ impl<T: BlockCache> P2Chain<T> {
             },
             None => return None,
         };
+        lwma.add_front(current_block.timestamp, current_block.target_difficulty);
         while !lwma.is_full() {
             if self.level_at_height(current_block.height.saturating_sub(1)).is_none() {
                 return None;
@@ -836,8 +951,8 @@ impl<T: BlockCache> P2Chain<T> {
         usize::try_from(current_chain_length).expect("32 bit systems not supported")
     }
 
-    pub async fn get_calculate_and_cache_hashmap_of_shares(
-        &mut self,
+    pub fn get_calculate_and_cache_hashmap_of_shares(
+        &self, calculating_height: u64
     ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
@@ -856,16 +971,16 @@ impl<T: BlockCache> P2Chain<T> {
             }
         }
         let mut miners_to_shares = HashMap::new();
-        let tip_level = match self.get_tip() {
-            Some(tip_level) => tip_level,
+        let start_level = match self.level_at_height(calculating_height) {
+            Some(level) => level,
             None => return Ok(miners_to_shares),
         };
 
         // we want to count 1 short,as the final share will be for this node
-        let stop_height = tip_level.height().saturating_sub(self.share_window - 1);
-        let tip_hash = tip_level.chain_block();
-        let mut cur_block = tip_level
-            .get_header(&tip_level.chain_block())
+        let stop_height = start_level.height().saturating_sub(self.share_window - 1);
+        // let tip_hash = start_level.chain_block();
+        let mut cur_block = start_level
+            .get_header(&start_level.chain_block())
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
@@ -912,10 +1027,10 @@ impl<T: BlockCache> P2Chain<T> {
                 );
             }
         }
-        self.cached_shares = Some(CachedShares {
-            at_hash: tip_hash,
-            shares: miners_to_shares.clone(),
-        });
+        // self.cached_shares = Some(CachedShares {
+        //     at_hash: tip_hash,
+        //     shares: miners_to_shares.clone(),
+        // });
         Ok(miners_to_shares)
     }
 
@@ -973,6 +1088,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             10,
@@ -981,7 +1097,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None
+            bypass_checks,
+            None,
         )
     }
 
@@ -1080,7 +1197,10 @@ mod test {
         // the whole chain must be verified
         chain.assert_share_window_verified();
         // first block should not be verified
-        assert!(!chain.get_chain_block_at_height(1).unwrap().verified.has_parents());
+        let level = chain.level_at_height(1).unwrap();
+        assert!(chain.get_chain_block_at_height(1).is_none());
+        assert_eq!(level.chain_block(), FixedHash::zero());
+        assert!(!level.all_blocks()[0].verified.has_parents());
     }
 
     #[test]
@@ -1135,6 +1255,7 @@ mod test {
 
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             20,
@@ -1143,7 +1264,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
@@ -1497,6 +1619,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             10,
@@ -1505,7 +1628,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None,
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
@@ -1570,6 +1694,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             50,
@@ -1578,7 +1703,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None,
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
@@ -1621,6 +1747,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             50,
@@ -1629,7 +1756,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None,
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
@@ -2024,6 +2152,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             20,
@@ -2032,7 +2161,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None,
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
@@ -2098,6 +2228,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             20,
@@ -2106,7 +2237,8 @@ mod test {
             LmdbBlockStorage::new_from_temp_dir(),
             1,
             1,
-            bypass_checks,None,
+            bypass_checks,
+            None,
         );
 
         let mut prev_block = None;
