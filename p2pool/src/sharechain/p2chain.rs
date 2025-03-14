@@ -172,7 +172,8 @@ impl<T: BlockCache> P2Chain<T> {
         squad: &str,
     ) -> Result<Self, ShareChainError> {
         let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
-        for block in from_block_cache.all_blocks()? {
+
+        for (i, block) in from_block_cache.all_blocks()?.into_iter().enumerate() {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
                 continue;
@@ -181,7 +182,10 @@ impl<T: BlockCache> P2Chain<T> {
                 warn!(target: LOG_TARGET, "Block squad mismatch, skipping block");
                 continue;
             }
-            info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
+            debug!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
+            if i % 250 == 0 {
+                info!(target: LOG_TARGET, "Loading block {} into chain", i);
+            }
             let _unused = new_chain.add_block_to_chain(block).inspect_err(|e| {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
             });
