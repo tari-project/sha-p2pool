@@ -2,21 +2,24 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{cmp, collections::HashMap, fs, sync::Arc};
-use crate::sharechain::p2chain::CachedShares;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
-use tari_core::proof_of_work::{
-    randomx_difficulty,
-    sha3x_difficulty,
-    AccumulatedDifficulty,
-    Difficulty,
-    DifficultyAdjustment,
-    PowAlgorithm,
+use tari_core::{
+    proof_of_work::{
+        randomx_difficulty,
+        sha3x_difficulty,
+        AccumulatedDifficulty,
+        Difficulty,
+        DifficultyAdjustment,
+        PowAlgorithm,
+    },
+    PrunedOutputMmr,
 };
+use tari_mmr::pruned_hashset::PrunedHashSet;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -32,7 +35,7 @@ use crate::{
     sharechain::{
         error::{ShareChainError, ValidationError},
         p2block::{P2Block, P2BlockBuilder, VerifiedStatus},
-        p2chain::{ChainAddResult, P2Chain},
+        p2chain::{CachedShares, ChainAddResult, P2Chain},
         BlockValidationParams,
         ShareChain,
     },
@@ -271,6 +274,26 @@ impl InMemoryShareChain {
             return Err(ValidationError::FutureTimestamp);
         }
 
+        let mut block_output_mmr = PrunedOutputMmr::new(PrunedHashSet::default());
+        for coinbase in &block.coinbases {
+            block_output_mmr
+                .push(coinbase.hash().to_vec())
+                .map_err(|_| ValidationError::InvalidOutputs)?;
+        }
+        block_output_mmr
+            .push(block.other_output_hash.to_vec())
+            .map_err(|_| ValidationError::InvalidOutputs)?;
+        let output_hash = FixedHash::try_from(
+            block_output_mmr
+                .get_merkle_root()
+                .map_err(|_| ValidationError::InvalidOutputs)?,
+        )
+        .map_err(|_| ValidationError::InvalidOutputs)?;
+        if block.original_header.output_mr == output_hash {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Tari block header output mmr does not match block outputs", self.pow_algo);
+            return Err(ValidationError::OutputMismatch);
+        }
+
         match p2_chain.get_target_difficulty_for_block(block) {
             Some(difficulty) => {
                 if difficulty != block.target_difficulty() && !self.bypass_checks.has_target_difficulty_verified() {
@@ -352,15 +375,15 @@ impl InMemoryShareChain {
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
     ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
-        let tip = match p2_chain.get_tip(){
+        let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
-            None=> return Ok(HashMap::new())
+            None => return Ok(HashMap::new()),
         };
         let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height())?;
         p2_chain.cached_shares = Some(CachedShares {
-                at_hash: tip.chain_block(),
-                shares: shares.clone(),
-            });
+            at_hash: tip.chain_block(),
+            shares: shares.clone(),
+        });
         Ok(shares)
     }
 
@@ -1377,7 +1400,7 @@ pub mod test {
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build()
                 .unwrap()))
-                .clone();
+            .clone();
             lwma.add_back(block.timestamp, block.target_difficulty());
             mine_block(&mut block, target_diff);
             prev_block = Some(block.clone());
@@ -1396,7 +1419,7 @@ pub mod test {
             .with_miner_coinbase_extra(static_coinbase_extra.clone())
             .build()
             .unwrap()))
-            .clone();
+        .clone();
 
         mine_block(&mut block, target_diff);
         assert!(share_chain.submit_block(block.clone()).await.is_err());

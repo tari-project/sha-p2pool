@@ -6676,6 +6676,7 @@ dependencies = [
  "tari_common_types",
  "tari_core",
  "tari_crypto",
+ "tari_mmr",
  "tari_script",
  "tari_shutdown",
  "tari_utilities",

@@ -75,4 +75,8 @@ pub enum ValidationError {
     FutureTimestamp,
     #[error("Block median timestamp is too far in the past")]
     MedianTimestamp,
+    #[error("Tari block header does not match P2Block outputs")]
+    OutputMismatch,
+    #[error("Invalid block outputs")]
+    InvalidOutputs,
 }

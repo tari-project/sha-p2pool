@@ -635,9 +635,9 @@ impl<T: BlockCache> P2Chain<T> {
             verified.set_median_timestamp();
         }
 
-       // if self.verify_shares_for_block(block.clone())? {
-            verified.set_correct_shares();
-       // }
+        // if self.verify_shares_for_block(block.clone())? {
+        verified.set_correct_shares();
+        //}
 
         dbg!(verified.has_difficulty_verified());
         dbg!(verified.has_target_difficulty_verified());
@@ -762,7 +762,6 @@ impl<T: BlockCache> P2Chain<T> {
                 None => return Ok(false),
             };
             timestamps.push(current_block.timestamp);
-
         }
 
         timestamps.sort();
@@ -775,7 +774,7 @@ impl<T: BlockCache> P2Chain<T> {
                 u64::try_from(
                     (u128::from(timestamps[mid_index - 1].as_u64()) + u128::from(timestamps[mid_index].as_u64())) / 2,
                 )
-                    .unwrap_or(u64::MAX),
+                .unwrap_or(u64::MAX),
             )
         } else {
             timestamps[mid_index]
@@ -792,13 +791,13 @@ impl<T: BlockCache> P2Chain<T> {
             return Ok(true);
         }
 
-        let mut miners_shares = if let Some(shares) =  &self.cached_shares{
-             if block.prev_hash == shares.at_hash {
+        let mut miners_shares = if let Some(shares) = &self.cached_shares {
+            if block.prev_hash == shares.at_hash {
                 shares.shares.clone()
-            } else{
-                 self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
-             }
-        } else{
+            } else {
+                self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
+            }
+        } else {
             self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
         };
 
@@ -807,20 +806,20 @@ impl<T: BlockCache> P2Chain<T> {
             block.miner_wallet_address.to_base58(),
             (MAIN_REWARD_SHARE, block.miner_coinbase_extra.clone()),
         );
-            for uncle in &block.uncles {
-                let uncle_level = match self.level_at_height(uncle.0) {
-                    Some(level) => level,
-                    None => return Ok(false),
-                };
-                let uncle_block = match uncle_level.get(&uncle.1){
-                    Some(block) => block.clone(),
-                    None => return Ok(false),
-                };
-                miners_shares.insert(
-                    uncle_block.miner_wallet_address.to_base58(),
-                    (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
-                );
-            }
+        for uncle in &block.uncles {
+            let uncle_level = match self.level_at_height(uncle.0) {
+                Some(level) => level,
+                None => return Ok(false),
+            };
+            let uncle_block = match uncle_level.get(&uncle.1) {
+                Some(block) => block.clone(),
+                None => return Ok(false),
+            };
+            miners_shares.insert(
+                uncle_block.miner_wallet_address.to_base58(),
+                (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+            );
+        }
 
         let mut res = vec![];
 
@@ -834,7 +833,7 @@ impl<T: BlockCache> P2Chain<T> {
                 coinbase_extra: extra,
             });
         }
-Ok(true)
+        Ok(true)
     }
 
     pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
@@ -952,7 +951,8 @@ Ok(true)
     }
 
     pub fn get_calculate_and_cache_hashmap_of_shares(
-        &self, calculating_height: u64
+        &self,
+        calculating_height: u64,
     ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,

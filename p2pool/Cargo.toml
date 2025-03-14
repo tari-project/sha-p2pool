@@ -60,6 +60,7 @@ tari_core = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79
 tari_crypto = "0.22.0"
 tari_script = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
 tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e7bedd19854c17e5d9809deb652e61d" }
 tari_utilities = { version = "0.8", features = ["borsh"] }
 thiserror = "1.0"
 tokio = { version = "1.41.0", features = ["full"] }
