@@ -24,7 +24,11 @@ tari_crypto = "0.22.0"
 # From tari sha-p2pool project
 sha_p2pool = { path = "../p2pool" }
 # Other dependencies
-cucumber = { version = "0.20.0", features = ["default", "libtest", "output-junit"] }
+cucumber = { version = "0.20.0", features = [
+    "default",
+    "libtest",
+    "output-junit",
+] }
 indexmap = "1.9.1"
 libp2p = { version = "0.54.1", features = [
     "dns",
@@ -59,5 +63,4 @@ tokio = { version = "1.41.0", features = ["full"] }
 
 [[test]]
 name = "cucumber" # this should be the same as the filename of your test target
-harness = false # allows Cucumber to print output instead of libtest
-
+harness = false   # allows Cucumber to print output instead of libtest
