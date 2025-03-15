@@ -13,7 +13,7 @@ use log::{error, info};
 use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_server::ShaP2PoolServer};
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
-use tari_shutdown::{Shutdown, ShutdownSignal};
+use tari_shutdown::Shutdown;
 
 use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
 use crate::{
@@ -91,7 +91,7 @@ where S: ShareChain
         let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
         if !config.p2p_service.is_seed_peer {
             let base_node_grpc_service =
-                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown.to_signal().clone()).await?;
+                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown.clone()).await?;
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
 
             let p2pool_grpc_service = ShaP2PoolGrpc::new(
@@ -118,7 +118,7 @@ where S: ShareChain
                 stats_client,
                 config.http_server.port,
                 query_client,
-                shutdown.to_signal().clone(),
+                shutdown.clone(),
             )))
         } else {
             None
@@ -142,10 +142,11 @@ where S: ShareChain
         base_node_service: BaseNodeServer<TariBaseNodeGrpc>,
         p2pool_service: ShaP2PoolServer<ShaP2PoolGrpc<S>>,
         grpc_port: u16,
-        shutdown_signal: ShutdownSignal,
+        shutdown: Shutdown,
     ) -> Result<(), Error> {
         info!(target: LOG_TARGET, "Starting gRPC server on port {}!", &grpc_port);
 
+        let shutdown_signal = shutdown.to_signal();
         tonic::transport::Server::builder()
             .add_service(base_node_service)
             .add_service(p2pool_service)
@@ -179,10 +180,10 @@ where S: ShareChain
             let base_node_grpc_service = self.base_node_grpc_service.clone().unwrap();
             let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();
             let grpc_port = self.config.grpc_port;
-            let shutdown_signal = self.shutdown.to_signal().clone();
+            let shutdown = self.shutdown.clone();
             tokio::spawn(async move {
                 if let Err(error) =
-                    Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port, shutdown_signal).await
+                    Self::start_grpc(base_node_grpc_service, p2pool_grpc_service, grpc_port, shutdown).await
                 {
                     error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
                 }

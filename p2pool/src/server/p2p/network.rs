@@ -41,7 +41,7 @@ use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, to_writer_pretty};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
@@ -140,6 +140,7 @@ pub struct Config {
     pub num_sync_tips_to_keep: usize,
     pub max_missing_blocks_sync_depth: usize,
     pub diagnostic_mode: bool,
+    pub diagnostic_mode_file_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -170,6 +171,7 @@ impl Default for Config {
             num_sync_tips_to_keep: 10,
             max_missing_blocks_sync_depth: 8,
             diagnostic_mode: false,
+            diagnostic_mode_file_path: None,
         }
     }
 }
@@ -1080,6 +1082,7 @@ where S: ShareChain
                 //     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 // }
                 let mut num_peers_added = 0;
+                let num_peers_received = response.best_peers.len();
                 for mut peer in response.best_peers {
                     debug!(
                         target: LOG_TARGET,
@@ -1105,9 +1108,9 @@ where S: ShareChain
                     return;
                 }
 
-                // Update peer stats
+                // Update peer diagnostics
                 if let Some(client) = &self.diagnostics_broadcast_client {
-                    let _unused = client.send_peer_response(peer_id, num_peers_added);
+                    let _unused = client.send_peer_response(peer_id, num_peers_received);
                 }
 
                 // if we are a seed peer, end here
@@ -1412,8 +1415,14 @@ where S: ShareChain
                     target: LOG_TARGET,
                     "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
                 );
+                if let Some(client) = &self.diagnostics_broadcast_client {
+                    let _unused = client.send_peer_connected(peer_id);
+                }
                 // if num_established == NonZeroU32::new(1).expect("Can't fail") {
                 self.initiate_direct_peer_exchange(&peer_id).await;
+                if let Some(client) = &self.diagnostics_broadcast_client {
+                    let _unused = client.send_new_peer_request(peer_id);
+                }
                 // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 // }
             },
@@ -2542,11 +2551,8 @@ where S: ShareChain
                             continue;
                         }
                         if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
-                            match self.dial_seed_peers().await {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
-                                },
+                            if let Err(e) = self.dial_seed_peers().await {
+                                warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
                             }
                          }
 
@@ -2695,8 +2701,10 @@ where S: ShareChain
         }
     }
 
-    async fn get_connected_peer_records(&self) -> (Vec<PeerStoreRecord>, Vec<PeerStoreRecord>, Vec<PeerStoreRecord>) {
-        let connected_peers = self.swarm.connected_peers().copied().collect::<Vec<_>>();
+    async fn get_connected_peer_records(
+        &self,
+        connected_peers: &[PeerId],
+    ) -> (Vec<PeerStoreRecord>, Vec<PeerStoreRecord>, Vec<PeerStoreRecord>) {
         let network_peer_store = self.network_peer_store.read().await;
         // All connected peers
         let connected_peer_records: Vec<_> = connected_peers
@@ -2736,19 +2744,16 @@ where S: ShareChain
         (seeds, peers, relays)
     }
 
-    /// Main loop of the service that drives the events and libp2p swarm forward.
+    /// Main loop of the diagnostic service that drives the events and libp2p swarm forward.
     #[allow(clippy::too_many_lines)]
     async fn main_loop_diagnostic_mode(&mut self) -> Result<(), Error> {
         #[derive(Debug)]
         enum DiagnosticState {
             ConnectToSeedPeers,
-            InitiateSeedPeersDownload,
             WaitForSeedPeersDownload,
-            ConnectToPeers,
-            InitiatePeersDownload,
-            WaitForPeersDownload,
+            ConnectToPrivatePeers,
+            WaitForPrivatePeersDownload,
             ConnectToRelayPeers,
-            InitiateRelayPeersDownload,
             WaitForRelayPeersDownload,
             Done,
         }
@@ -2779,7 +2784,8 @@ where S: ShareChain
             .clone()
             .ok_or_else(|| anyhow_error("Diagnostics receiver client not available in diagnostic mode"))?;
         let mut diagnostic_state = DiagnosticState::ConnectToSeedPeers;
-        let mut uptime = Instant::now();
+        let mut start = Instant::now();
+        let uptime = Instant::now();
         let mut processed_peers = Vec::new();
         loop {
             select! {
@@ -2791,7 +2797,7 @@ where S: ShareChain
                 _ = diagnostic_mode_interval.tick() => {
                     match diagnostic_state {
                         DiagnosticState::ConnectToSeedPeers => {
-                            info!(target: LOG_TARGET, "[Diagnostics] Dialing seed peers...");
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
                             let seed_peers = self.parse_seed_peers().await?;
                             let mut number_dialed = 0;
                             for (peer, addr) in &seed_peers {
@@ -2825,9 +2831,9 @@ where S: ShareChain
                             }
 
                             if number_dialed > 0 {
-                                diagnostic_state = DiagnosticState::InitiateSeedPeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
+                                diagnostic_state = DiagnosticState::WaitForSeedPeersDownload;
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} failed, no seed peers could be dialed, exiting.",
@@ -2838,192 +2844,66 @@ where S: ShareChain
                                 // Nothing here
                             }
                         },
-                        DiagnosticState::InitiateSeedPeersDownload => {
-                            let (seeds, _peers, _relays) = self.get_connected_peer_records().await;
-                            for peer in &seeds {
-                                self.initiate_direct_peer_exchange(&peer.peer_id).await;
-                                let _unused = diagnostics_broadcast_client.send_new_seed_peer_request(peer.peer_id);
+                        DiagnosticState::WaitForSeedPeersDownload => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
+                            if let Ok(connected_peers) = diagnostics_receiver_client.get_connected_peers().await {
+                                let (seeds, _privates, _relays) = self.get_connected_peer_records(&connected_peers).await;
+                                if seeds.is_empty() {
+                                    if start.elapsed() > Duration::from_secs(30) {
+                                        warn!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} failed, no seed peers connected",
+                                            diagnostic_state
+                                        );
+                                        diagnostic_state = DiagnosticState::Done;
+                                    } else {
+                                        debug!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} waiting for seed peers to connect...",
+                                            diagnostic_state
+                                        );
+                                        continue;
+                                    }
+                                }
                             }
 
-                            if !seeds.is_empty() {
-                                diagnostic_state = DiagnosticState::WaitForSeedPeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} failed, no seed peers connected, exiting.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::Done;
-                            } else {
-                                // Nothing here
-                            }
-                        },
-                        DiagnosticState::WaitForSeedPeersDownload => {
                             let (mut seen_all, mut seen_some) = (true, false);
                             if let Ok(seeds_data) = diagnostics_receiver_client.get_seed_peer_diagnostic_info().await {
                                 seeds_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_none() {
+                                    if data.response_time.is_none() {
                                         seen_all = false;
                                     }
                                 });
                                 seeds_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_some() {
+                                    if data.response_time.is_some() {
                                         seen_some = true;
                                     }
                                 });
                             }
 
                             if seen_all {
-                                diagnostic_state = DiagnosticState::ConnectToPeers;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) && seen_some {
+                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) && seen_some {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} sporadic, not all seed peers responded.",
                                     diagnostic_state
                                 );
-                                diagnostic_state = DiagnosticState::ConnectToPeers;
-                            } else {
+                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
+                            } else if start.elapsed() > Duration::from_secs(60) {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} failed, no seed peers responded, exiting.",
                                     diagnostic_state
                                 );
                                 diagnostic_state = DiagnosticState::Done;
-                            }
-                        }
-                        DiagnosticState::ConnectToPeers => {
-                            let network_peer_store = self.network_peer_store.read().await;
-                            let other_peers = network_peer_store.get_known_peers();
-                            let mut other_peers = other_peers.iter().collect_vec();
-                            // Retain only peers that have not been processed
-                            other_peers.retain(|p| !processed_peers.contains(p));
-                            let other_peer_records: Vec<_> = other_peers
-                                .iter()
-                                .filter_map(|peer| network_peer_store.get(peer).cloned())
-                                .collect();
-                            // Retain only peers that have no public addresses
-                            let peer_records = other_peer_records
-                                .iter()
-                                .filter(|p| p.peer_info.public_addresses().is_empty())
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            // Select 5 random peers
-                            let peer_records = peer_records.choose_multiple(&mut thread_rng(), 5).collect_vec();
-
-                            let mut number_dialed = 0;
-                            for record in &peer_records {
-                                let dial_opts = DialOpts::peer_id(record.peer_id).addresses(
-                                    record.peer_info.public_addresses().clone()
-                                ).extend_addresses_through_behaviour().build();
-                                let timer = Instant::now();
-                                match self.swarm.dial(dial_opts) {
-                                    Ok(_) => {
-                                        let _unused = diagnostics_broadcast_client.send_new_peer(
-                                            record.peer_id,
-                                            timer.elapsed(),
-                                            true,
-                                        );
-                                        debug!(
-                                            target: LOG_TARGET,
-                                            "[Diagnostics] Successfully dialed peer '{:?}'",
-                                            record.peer_id
-                                        );
-                                        number_dialed += 1;
-                                    },
-                                    Err(e) => {
-                                        let _unused = diagnostics_broadcast_client.send_new_peer(
-                                            record.peer_id,
-                                            timer.elapsed(),
-                                            false,
-                                        );
-                                        warn!(target: LOG_TARGET, "[Diagnostics] Failed to dial peer: {e:?}");
-                                    },
-                                };
-                                processed_peers.push(record.peer_id);
-                            }
-
-                            if number_dialed > 0 {
-                                diagnostic_state = DiagnosticState::InitiatePeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} failed, no non-public peers could be dialed.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
                             } else {
                                 // Nothing here
-                            }
-                        },
-                        DiagnosticState::InitiatePeersDownload => {
-                            let mut initiated = 0;
-                            if let Ok(peers_data) = diagnostics_receiver_client.get_peer_diagnostic_info().await {
-                                let chosen_peers = peers_data
-                                    .iter()
-                                    .filter(|(_peer, data)| data.connected_at.is_some())
-                                    .map(|(_peer, data)| data.peer_id)
-                                    .collect::<Vec<_>>();
-                                let (_seeds, connected_peers, _relays) = self.get_connected_peer_records().await;
-                                for peer in &chosen_peers {
-                                    if connected_peers.iter().map(|p| p.peer_id).contains(peer) {
-                                        self.initiate_direct_peer_exchange(peer).await;
-                                        let _unused = diagnostics_broadcast_client.send_new_peer_request(*peer);
-                                        initiated += 1;
-                                    }
-                                }
-                            }
-                            if initiated > 0{
-                                diagnostic_state = DiagnosticState::WaitForPeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} failed, no non-public peers connected.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
-                            } else {
-                                // Nothing here
-                            }
-                        },
-                        DiagnosticState::WaitForPeersDownload => {
-                            let (mut seen_all, mut seen_some) = (true, false);
-                            if let Ok(peers_data) = diagnostics_receiver_client.get_peer_diagnostic_info().await {
-                                peers_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_none() {
-                                        seen_all = false;
-                                    }
-                                });
-                                peers_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_some() {
-                                        seen_some = true;
-                                    }
-                                });
-                            }
-
-                            if seen_all {
-                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) && seen_some {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} sporadic, not all peers responded.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
-                            } else {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} failed, no peers responded.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::Done;
                             }
                         }
                         DiagnosticState::ConnectToRelayPeers => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
                             let network_peer_store = self.network_peer_store.read().await;
                             let other_peers = network_peer_store.get_known_peers();
                             let mut other_peers = other_peers.iter().collect_vec();
@@ -3075,12 +2955,136 @@ where S: ShareChain
                             }
 
                             if number_dialed > 0 {
-                                diagnostic_state = DiagnosticState::InitiateRelayPeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
+                                diagnostic_state = DiagnosticState::WaitForRelayPeersDownload;
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} failed, no public peers could be dialed. Exiting.",
+                                    diagnostic_state
+                                );
+                                diagnostic_state = DiagnosticState::ConnectToPrivatePeers;
+                            } else {
+                                // Nothing here
+                            }
+                        },
+                        DiagnosticState::WaitForRelayPeersDownload => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
+                            if let Ok(connected_peers) = diagnostics_receiver_client.get_connected_peers().await {
+                                let (_seeds, _privates, relays) = self.get_connected_peer_records(&connected_peers).await;
+                                if relays.is_empty() {
+                                    if start.elapsed() > Duration::from_secs(30) {
+                                        warn!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} failed, no relay peers connected",
+                                            diagnostic_state
+                                        );
+                                        diagnostic_state = DiagnosticState::ConnectToPrivatePeers;
+                                    } else {
+                                        debug!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} waiting for relay peers to connect...",
+                                            diagnostic_state
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            let (mut seen_all, mut seen_some) = (true, false);
+                            if let Ok(relays_data) = diagnostics_receiver_client.get_relay_peer_diagnostic_info().await {
+                                relays_data.iter().for_each(|(_peer, data)| {
+                                    if data.response_time.is_none() {
+                                        seen_all = false;
+                                    }
+                                });
+                                relays_data.iter().for_each(|(_peer, data)| {
+                                    if data.response_time.is_some() {
+                                        seen_some = true;
+                                    }
+                                });
+                            }
+
+                            if seen_all {
+                                diagnostic_state = DiagnosticState::ConnectToPrivatePeers;
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) && seen_some {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "[Diagnostics] {:?} sporadic, not all peers responded.",
+                                    diagnostic_state
+                                );
+                                diagnostic_state = DiagnosticState::ConnectToPrivatePeers;
+                            } else if start.elapsed() > Duration::from_secs(60) {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "[Diagnostics] {:?} failed, no peers responded.",
+                                    diagnostic_state
+                                );
+                                diagnostic_state = DiagnosticState::ConnectToPrivatePeers;
+                            } else {
+                                // Nothing here
+                            }
+                        }
+                        DiagnosticState::ConnectToPrivatePeers => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
+                            let network_peer_store = self.network_peer_store.read().await;
+                            let other_peers = network_peer_store.get_known_peers();
+                            let mut other_peers = other_peers.iter().collect_vec();
+                            // Retain only peers that have not been processed
+                            other_peers.retain(|p| !processed_peers.contains(p));
+                            let other_peer_records: Vec<_> = other_peers
+                                .iter()
+                                .filter_map(|peer| network_peer_store.get(peer).cloned())
+                                .collect();
+                            // Retain only peers that have no public addresses
+                            let peer_records = other_peer_records
+                                .iter()
+                                .filter(|p| p.peer_info.public_addresses().is_empty())
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            // Select 5 random peers
+                            let peer_records = peer_records.choose_multiple(&mut thread_rng(), 5).collect_vec();
+
+                            let mut number_dialed = 0;
+                            for record in &peer_records {
+                                let dial_opts = DialOpts::peer_id(record.peer_id).addresses(
+                                    record.peer_info.public_addresses().clone()
+                                ).extend_addresses_through_behaviour().build();
+                                let timer = Instant::now();
+                                match self.swarm.dial(dial_opts) {
+                                    Ok(_) => {
+                                        let _unused = diagnostics_broadcast_client.send_new_private_peer(
+                                            record.peer_id,
+                                            timer.elapsed(),
+                                            true,
+                                        );
+                                        debug!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] Successfully dialed peer '{:?}'",
+                                            record.peer_id
+                                        );
+                                        number_dialed += 1;
+                                    },
+                                    Err(e) => {
+                                        let _unused = diagnostics_broadcast_client.send_new_private_peer(
+                                            record.peer_id,
+                                            timer.elapsed(),
+                                            false,
+                                        );
+                                        warn!(target: LOG_TARGET, "[Diagnostics] Failed to dial peer: {e:?}");
+                                    },
+                                };
+                                processed_peers.push(record.peer_id);
+                            }
+
+                            if number_dialed > 0 {
+                                diagnostic_state = DiagnosticState::WaitForPrivatePeersDownload;
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "[Diagnostics] {:?} failed, no non-public peers could be dialed.",
                                     diagnostic_state
                                 );
                                 diagnostic_state = DiagnosticState::Done;
@@ -3088,47 +3092,38 @@ where S: ShareChain
                                 // Nothing here
                             }
                         },
-                        DiagnosticState::InitiateRelayPeersDownload => {
-                            let mut initiated = 0;
-                            if let Ok(relays_data) = diagnostics_receiver_client.get_relay_peer_diagnostic_info().await {
-                                let chosen_relays = relays_data
-                                    .iter()
-                                    .filter(|(_peer, data)| data.connected_at.is_some())
-                                    .map(|(_peer, data)| data.peer_id)
-                                    .collect::<Vec<_>>();
-                                let (_seeds, _peers, connected_relays) = self.get_connected_peer_records().await;
-                                for peer in &chosen_relays {
-                                    if connected_relays.iter().map(|p| p.peer_id).contains(peer) {
-                                        self.initiate_direct_peer_exchange(peer).await;
-                                        let _unused = diagnostics_broadcast_client.send_new_relay_peer_request(*peer);
-                                        initiated += 1;
+                        DiagnosticState::WaitForPrivatePeersDownload => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
+                            if let Ok(connected_peers) = diagnostics_receiver_client.get_connected_peers().await {
+                                let (_seeds, privates, _relays) = self.get_connected_peer_records(&connected_peers).await;
+                                if privates.is_empty() {
+                                    if start.elapsed() > Duration::from_secs(30) {
+                                        warn!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} failed, no private peers connected",
+                                            diagnostic_state
+                                        );
+                                        diagnostic_state = DiagnosticState::Done;
+                                    } else {
+                                        debug!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] {:?} waiting for private peers to connect...",
+                                            diagnostic_state
+                                        );
+                                        continue;
                                     }
                                 }
                             }
-                            if initiated > 0{
-                                diagnostic_state = DiagnosticState::WaitForRelayPeersDownload;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "[Diagnostics] {:?} failed, no public peers connected.",
-                                    diagnostic_state
-                                );
-                                diagnostic_state = DiagnosticState::ConnectToRelayPeers;
-                            } else {
-                                // Nothing here
-                            }
-                        },
-                        DiagnosticState::WaitForRelayPeersDownload => {
+
                             let (mut seen_all, mut seen_some) = (true, false);
-                            if let Ok(relays_data) = diagnostics_receiver_client.get_relay_peer_diagnostic_info().await {
-                                relays_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_none() {
+                            if let Ok(peers_data) = diagnostics_receiver_client.get_private_peer_diagnostic_info().await {
+                                peers_data.iter().for_each(|(_peer, data)| {
+                                    if data.response_time.is_none() {
                                         seen_all = false;
                                     }
                                 });
-                                relays_data.iter().for_each(|(_peer, data)| {
-                                    if data.number_of_peers.is_some() {
+                                peers_data.iter().for_each(|(_peer, data)| {
+                                    if data.response_time.is_some() {
                                         seen_some = true;
                                     }
                                 });
@@ -3136,49 +3131,120 @@ where S: ShareChain
 
                             if seen_all {
                                 diagnostic_state = DiagnosticState::Done;
-                                uptime = Instant::now();
-                            } else if uptime.elapsed() > Duration::from_secs(60) && seen_some {
+                                start = Instant::now();
+                            } else if start.elapsed() > Duration::from_secs(60) && seen_some {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} sporadic, not all peers responded.",
                                     diagnostic_state
                                 );
                                 diagnostic_state = DiagnosticState::Done;
-                            } else {
+                            } else if start.elapsed() > Duration::from_secs(60) {
                                 warn!(
                                     target: LOG_TARGET,
                                     "[Diagnostics] {:?} failed, no peers responded.",
                                     diagnostic_state
                                 );
                                 diagnostic_state = DiagnosticState::Done;
+                            } else {
+                                // Nothing here
                             }
                         }
                         DiagnosticState::Done => {
+                            info!(target: LOG_TARGET, "[Diagnostics] {:?}... ({:.2?})", diagnostic_state, uptime.elapsed());
                             // Print diagnostics to json file
-                            let seeds_data = diagnostics_receiver_client
+                            let mut seeds_data = diagnostics_receiver_client
                                 .get_seed_peer_diagnostic_info()
                                 .await
-                                .unwrap_or_default().values().cloned()
+                                .unwrap_or_default()
+                                .values()
+                                .cloned()
                                 .collect::<Vec<DiagnosticPeerInfo>>();
-                            let peers_data = diagnostics_receiver_client
-                                .get_peer_diagnostic_info()
+                            seeds_data.sort_by(|a, b| b.number_of_peers.cmp(&a.number_of_peers));
+                            seeds_data = seeds_data.into_iter().take(5).collect::<Vec<_>>();
+
+                            let mut private_peers_data = diagnostics_receiver_client
+                                .get_private_peer_diagnostic_info()
                                 .await
-                                .unwrap_or_default().values().cloned()
+                                .unwrap_or_default()
+                                .values()
+                                .cloned()
                                 .collect::<Vec<DiagnosticPeerInfo>>();
-                            let relays_data = diagnostics_receiver_client
+                            private_peers_data.sort_by(|a, b| b.number_of_peers.cmp(&a.number_of_peers));
+                            private_peers_data = private_peers_data.into_iter().take(5).collect::<Vec<_>>();
+
+                            let mut relays_data = diagnostics_receiver_client
                                 .get_relay_peer_diagnostic_info()
                                 .await
-                                .unwrap_or_default().values().cloned()
+                                .unwrap_or_default()
+                                .values()
+                                .cloned()
                                 .collect::<Vec<DiagnosticPeerInfo>>();
-                            let diagnostics = json!({
-                                "seeds": seeds_data,
-                                "peers": peers_data,
-                                "relays": relays_data,
-                            });
+                            relays_data.sort_by(|a, b| b.number_of_peers.cmp(&a.number_of_peers));
+                            relays_data = relays_data.into_iter().take(5).collect::<Vec<_>>();
 
-                            let file_path =  PathBuf::from("./diagnostic_results.json");
-                            let mut file = File::create(file_path.clone())?;
-                            write!(file, "{}", diagnostics)?;
+                            let diagnostics_data = [
+                                ("seeds", json!({ "seeds": seeds_data })),
+                                ("privates", json!({ "privates": private_peers_data })),
+                                ("relays", json!({ "relays": relays_data }))
+                            ];
+                            let local_node = ("local_node", json!(
+                                {"local_node":
+                                    {
+                                        "peer_id": self.swarm.local_peer_id(),
+                                        "public_addresses": self.swarm.external_addresses().collect::<Vec<_>>(),
+                                    }
+                                })
+                            );
+                            let summary = ("summary", json!(
+                                {
+                                    "summary": {
+                                        "Connect to each DNS seeds":
+                                            seeds_data.iter().any(|peer| peer.dial_succeeded),
+                                        "Download peers from the DNS seeds":
+                                            seeds_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
+                                        "Connect to 5 of private peers":
+                                            private_peers_data.iter().any(|peer| peer.dial_succeeded),
+                                        "Download peers from private seeds":
+                                            private_peers_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
+                                        "Connect to 5 of relay peers":
+                                            relays_data.iter().any(|peer| peer.dial_succeeded),
+                                        "Download peers from relay seeds":
+                                            relays_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0)
+                                    }
+                                })
+                            );
+
+                            let file_path = self.config.diagnostic_mode_file_path.clone().unwrap_or_default().join(
+                                "./diagnostic_results.json"
+                            );
+                            if let Ok(file) = File::create(file_path.clone()) {
+                                if let Err(e) = to_writer_pretty(&file, &local_node.1) {
+                                    warn!(
+                                        target: LOG_TARGET,
+                                        "[Diagnostics] Failed to write {} diagnostics to file: {e}",
+                                        local_node.0
+                                    );
+                                }
+                                let _unused = writeln!(&file);
+                                if let Err(e) = to_writer_pretty(&file, &summary.1) {
+                                    warn!(
+                                        target: LOG_TARGET,
+                                        "[Diagnostics] Failed to write {} diagnostics to file: {e}",
+                                        summary.0
+                                    );
+                                }
+                                let _unused = writeln!(&file);
+                                for (data_name, diagnostics) in &diagnostics_data {
+                                    if let Err(e) = to_writer_pretty(&file, diagnostics) {
+                                        warn!(
+                                            target: LOG_TARGET,
+                                            "[Diagnostics] Failed to write {data_name} diagnostics to file: {e}",
+                                        );
+                                    }
+                                    let _unused = writeln!(&file);
+                                }
+                            }
                             info!(target: LOG_TARGET, "Diagnostics written to file: {}", file_path.display());
 
                             // Send shutdown signal
@@ -3190,7 +3256,7 @@ where S: ShareChain
                     let timer = Instant::now();
                     match req {
                         Some(P2pServiceQuery::GetChain {..}) =>
-                            warn!(target: LOG_TARGET, "[Diagnostics] ignoring 'P2pServiceQuery::GetChain'"),
+                        debug!(target: LOG_TARGET, "[Diagnostics] ignoring 'P2pServiceQuery::GetChain'"),
                         Some(req) => self.handle_query(req).await,
                         None =>
                             warn!(
@@ -3203,22 +3269,25 @@ where S: ShareChain
                     }
                 },
                 _inner_req = self.inner_request_rx.recv() => {
-                    warn!(target: LOG_TARGET, "[Diagnostics] Ignoring inner request");
+                    debug!(target: LOG_TARGET, "[Diagnostics] Ignoring inner request");
                 }
                 _blocks = self.client_broadcast_block_rx.recv() => {
-                    warn!(target: LOG_TARGET, "[Diagnostics] Ignoring broadcast blocks");
+                    debug!(target: LOG_TARGET, "[Diagnostics] Ignoring broadcast blocks");
                 },
                 event = self.swarm.select_next_some() => {
                     let timer = Instant::now();
                     match event {
                         SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::MetaDataExchange(_) ) => {
-                            warn!(target: LOG_TARGET, "[Diagnostics] Ignoring MetaDataExchange events");
+                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring MetaDataExchange events");
                         },
                         SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::ShareChainSync(_)) => {
-                            warn!(target: LOG_TARGET, "[Diagnostics] Ignoring ShareChainSync events");
+                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring ShareChainSync events");
                         },
                         SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::CatchUpSync(_)) => {
-                            warn!(target: LOG_TARGET, "[Diagnostics] Ignoring CatchUpSync events");
+                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring CatchUpSync events");
+                        },
+                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Gossipsub(_)) => {
+                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring Gossipsub events");
                         },
                         _ => self.handle_event(event).await,
                     }
@@ -3417,8 +3486,15 @@ where S: ShareChain
 
     pub async fn dial_seed_peers(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "Dialing seed peers...");
-        let seed_peers = self.parse_seed_peers().await?;
-        self.join_seed_peers(seed_peers).await;
+        match self.parse_seed_peers().await {
+            Ok(seed_peers) => {
+                self.join_seed_peers(seed_peers).await;
+            },
+            Err(e) => {
+                warn!(target: LOG_TARGET, "Failed to parse seed peers: {e:?}");
+                return Err(e);
+            },
+        }
         Ok(())
     }
 
@@ -3450,12 +3526,21 @@ where S: ShareChain
         self.subscribe_to_topics().await;
 
         if self.config.diagnostic_mode {
-            debug!(target: LOG_TARGET, "Starting diagnostic loop");
-            self.main_loop_diagnostic_mode().await?;
+            debug!(target: LOG_TARGET, "Starting main loop diagnostic mode");
+            if let Err(e) = self.main_loop_diagnostic_mode().await {
+                warn!(target: LOG_TARGET, "Diagnostic loop failed: {e:?}");
+                return Err(e);
+            }
         } else {
-            self.dial_seed_peers().await?;
-            debug!(target: LOG_TARGET, "Starting main loop");
-            self.main_loop().await?;
+            if let Err(e) = self.dial_seed_peers().await {
+                warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
+                return Err(e);
+            }
+            debug!(target: LOG_TARGET, "Starting main loop normal mode");
+            if let Err(e) = self.main_loop().await {
+                warn!(target: LOG_TARGET, "Main loop failed: {e:?}");
+                return Err(e);
+            }
         }
         info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())

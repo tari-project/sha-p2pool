@@ -8,6 +8,7 @@ Feature: Sync p2pool nodes
   Scenario: New node sync with peers on startup
     Given I have a base node BASE_NODE_A
     And I have a p2pool seed node SEED in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool seed node SEED2 in squad DOLPHINS connected to base node BASE_NODE_A
     And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
     And I add 10 blocks to p2pool node NODE_A
     And p2pool node NODE_A stats is at height 10
@@ -110,3 +111,34 @@ Feature: Sync p2pool nodes
     And p2pool node NODE_B1 stats is at height 5
     And p2pool node NODE_B2 stats is at height 5
     Then I wait 1 seconds and stop
+
+@critical
+  Scenario: I run a diagnostic node to learn about the network connections
+    Given I have a base node BASE_NODE_A
+    # We have 3 seed nodes
+    And I have a p2pool seed node SEED_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool seed node SEED_B in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool seed node SEED_C in squad DOLPHINS connected to base node BASE_NODE_A
+    # We have 10 normal nodes
+    And I have a p2pool node NODE_A in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_B in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_C in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_D in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_E in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_F in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_G in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_H in squad DOLPHINS connected to base node BASE_NODE_A
+    And I have a p2pool node NODE_I in squad DOLPHINS connected to base node BASE_NODE_A
+    # The network is well connected
+    And p2pool node NODE_A stats shows connected to peer NODE_B
+    And p2pool node NODE_B stats shows connected to peer NODE_C
+    And p2pool node NODE_C stats shows connected to peer NODE_D
+    And p2pool node NODE_D stats shows connected to peer NODE_E
+    And p2pool node NODE_E stats shows connected to peer NODE_F
+    And p2pool node NODE_F stats shows connected to peer NODE_G
+    And p2pool node NODE_G stats shows connected to peer NODE_H
+    And p2pool node NODE_H stats shows connected to peer NODE_I
+    And p2pool node NODE_I stats shows connected to peer NODE_A
+    # We start a diagnostic node to learn about the network
+    And I have a p2pool diagnostic node DIAGNOSTIC in squad DOLPHINS connected to base node BASE_NODE_A
+    Then I wait 120 seconds and stop

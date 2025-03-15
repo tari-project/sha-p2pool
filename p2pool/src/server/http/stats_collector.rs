@@ -8,7 +8,7 @@ use libp2p::PeerId;
 use log::{debug, error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 use tari_utilities::epoch_time::EpochTime;
 use tokio::{
     sync::{broadcast::Receiver, oneshot},
@@ -17,7 +17,7 @@ use tokio::{
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats_collector";
 pub(crate) struct StatsCollector {
-    shutdown_signal: ShutdownSignal,
+    shutdown: Shutdown,
     stats_broadcast_receiver: tokio::sync::broadcast::Receiver<StatData>,
     request_tx: tokio::sync::mpsc::Sender<StatsRequest>,
     request_rx: tokio::sync::mpsc::Receiver<StatsRequest>,
@@ -50,10 +50,10 @@ pub(crate) struct StatsCollector {
 }
 
 impl StatsCollector {
-    pub(crate) fn new(shutdown_signal: ShutdownSignal, stats_broadcast_receiver: Receiver<StatData>) -> Self {
+    pub(crate) fn new(shutdown: Shutdown, stats_broadcast_receiver: Receiver<StatData>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         Self {
-            shutdown_signal,
+            shutdown,
             stats_broadcast_receiver,
             request_rx: rx,
             request_tx: tx,
@@ -191,9 +191,10 @@ impl StatsCollector {
         let mut stats_report_timer = tokio::time::interval(tokio::time::Duration::from_secs(10));
         stats_report_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut shutdown_signal = self.shutdown.to_signal();
         loop {
             tokio::select! {
-                _ = self.shutdown_signal.wait() => {
+                _ = shutdown_signal.wait() => {
                     break;
                 },
                 _ = stats_report_timer.tick() => {

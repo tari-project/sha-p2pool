@@ -159,6 +159,9 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         .filter(|(_, process)| process.is_seed_node && process.squad == squad)
         .map(|(_, value)| format!("/ip4/127.0.0.1/tcp/{}/p2p/{}", value.p2p_port, value.node_id))
         .collect::<Vec<String>>();
+    for seed_peer in &seed_peers {
+        debug!(target: LOG_TARGET, "'{}' has seed peer: '{}'", p2pool_name, seed_peer);
+    }
 
     let args = StartArgs {
         base_dir: Some(temp_dir_path.clone()),
@@ -183,7 +186,8 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         user_agent: None,
         peer_publish_interval: Some(node_config.p2p_service.peer_info_publish_interval.as_secs()),
         debug_print_chain: false,
-        diagnostic_mode,
+        diagnostic_mode: node_config.p2p_service.diagnostic_mode,
+        diagnostic_mode_file_path: None,
         max_connections: None,
         randomx_disabled: !node_config.p2p_service.randomx_enabled,
         sha3x_disabled: !node_config.p2p_service.sha3x_enabled,
@@ -191,6 +195,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         share_window: Some(100),
         export_libp2p_info: Some(temp_dir_path.join(LIBP2P_INFO_FILE).clone()),
         network_silence_delay: {
+            // Note: Any value above u16::MAX will be set to u16::MAX
             let bytes = node_config.network_silence_delay.to_le_bytes();
             Some(u16::from_le_bytes([bytes[0], bytes[1]]))
         },
@@ -310,6 +315,7 @@ pub async fn restart_node(world: &mut TariWorld, p2pool_name: String) -> TestRes
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
     let mut args_vec = Vec::new();
 
@@ -400,6 +406,13 @@ pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
 
     if args.diagnostic_mode {
         args_vec.push("--diagnostic-mode".to_string());
+    }
+
+    if args.diagnostic_mode_file_path.is_some() {
+        args_vec.push(format!(
+            "--diagnostic-mode-file-path={}",
+            args.diagnostic_mode_file_path.unwrap().display()
+        ));
     }
 
     if let Some(max_connections) = args.max_connections {

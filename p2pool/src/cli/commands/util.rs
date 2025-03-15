@@ -107,7 +107,11 @@ pub async fn server(
         seed_peers.push(default_seed_peer);
     }
     if let Some(cli_seed_peers) = args.seed_peers.clone() {
-        seed_peers.extend(cli_seed_peers.iter().cloned());
+        let cli_seed_peers: Vec<String> = cli_seed_peers
+            .iter()
+            .flat_map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>())
+            .collect();
+        seed_peers.extend(cli_seed_peers);
     }
     config_builder.with_seed_peers(seed_peers);
 
@@ -155,7 +159,14 @@ pub async fn server(
     config_builder.with_base_node_address(args.base_node_address.clone());
 
     config_builder.with_block_cache_file(env::current_dir()?.join("block_cache"));
+
+    config_builder.with_diagnostic_mode(args.diagnostic_mode);
+    if let Some(path) = &args.diagnostic_mode_file_path {
+        config_builder.with_diagnostic_mode_file_path(path.clone());
+    }
+
     let config = config_builder.build();
+
     let randomx_factory = RandomXFactory::new(1);
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
     let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
@@ -182,12 +193,12 @@ pub async fn server(
 
     let (stats_tx, stats_rx) = tokio::sync::broadcast::channel(1000);
     let stats_broadcast_client = StatsBroadcastClient::new(stats_tx);
-    let stats_collector = StatsCollector::new(shutdown.to_signal().clone(), stats_rx);
+    let stats_collector = StatsCollector::new(shutdown.clone(), stats_rx);
 
     let (diagnostics_collector, diagnostics_broadcast_client, diagnostics_receiver_client) = if args.diagnostic_mode {
         let (diagnostics_tx, diagnostics_rx) = tokio::sync::broadcast::channel(1000);
         let broadcast_client = DiagnosticsBroadcastClient::new(diagnostics_tx);
-        let collector = DiagnosticsCollector::new(shutdown.to_signal().clone(), diagnostics_rx);
+        let collector = DiagnosticsCollector::new(shutdown.clone(), diagnostics_rx);
         let receiver_client = collector.create_receiver_client();
         (Some(collector), Some(broadcast_client), Some(receiver_client))
     } else {

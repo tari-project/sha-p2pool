@@ -141,6 +141,11 @@ loggers:
      appenders:
        - p2p
      additive: false
+  tari::p2pool::diagnostics_collector:
+     level: debug
+     appenders:
+       - p2p
+     additive: false
   tari::p2pool::message_logging:
      level: debug
      appenders:

@@ -128,6 +128,10 @@ pub struct StartArgs {
     #[arg(long, short, alias = "diag")]
     pub diagnostic_mode: bool,
 
+    /// An optional location for the diagnostic output file, only relevant when diagnostic mode is set.
+    #[arg(long, short, alias = "diag")]
+    pub diagnostic_mode_file_path: Option<PathBuf>,
+
     #[arg(long)]
     pub max_connections: Option<u32>,
 
@@ -253,8 +257,7 @@ pub async fn run_with_cli(command: &Commands, cli_ref: Arc<Cli>, cli_shutdown: S
             commands::handle_generate_identity().await?;
         },
         Commands::ListSquads { args, list_squad_args } => {
-            commands::handle_list_squads(cli_ref.clone(), args, list_squad_args, cli_shutdown.to_signal().clone())
-                .await?;
+            commands::handle_list_squads(cli_ref.clone(), args, list_squad_args, cli_shutdown.clone()).await?;
         },
     }
 

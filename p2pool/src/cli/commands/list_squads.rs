@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 
 use crate::cli::args::{Cli, ListSquadArgs, StartArgs};
 
@@ -11,7 +11,7 @@ pub async fn handle_list_squads(
     _cli: Arc<Cli>,
     _args: &StartArgs,
     _list_squad_args: &ListSquadArgs,
-    _cli_shutdown_signal: ShutdownSignal,
+    _cli_shutdown: Shutdown,
 ) -> anyhow::Result<()> {
     // start server asynchronously
     // let cli_ref = cli.clone();

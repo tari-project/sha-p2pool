@@ -3,7 +3,7 @@
 
 use axum::{routing::get, Router};
 use log::info;
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 use thiserror::Error;
 use tokio::{io, sync::mpsc::Sender};
 
@@ -40,7 +40,7 @@ pub struct HttpServer {
     stats_client: StatsClient,
     port: u16,
     p2p_service_client: Sender<P2pServiceQuery>,
-    shutdown_signal: ShutdownSignal,
+    shutdown: Shutdown,
 }
 
 #[derive(Clone)]
@@ -54,13 +54,13 @@ impl HttpServer {
         stats_client: StatsClient,
         port: u16,
         p2p_service_client: Sender<P2pServiceQuery>,
-        shutdown_signal: ShutdownSignal,
+        shutdown: Shutdown,
     ) -> Self {
         Self {
             stats_client,
             port,
             p2p_service_client,
-            shutdown_signal,
+            shutdown,
         }
     }
 
@@ -87,8 +87,9 @@ impl HttpServer {
             .await
             .map_err(Error::IO)?;
         info!(target: LOG_TARGET, "Starting Stats HTTP server at http://127.0.0.1:{}", self.port);
+        let shutdown_signal = self.shutdown.to_signal();
         axum::serve(listener, router)
-            .with_graceful_shutdown(self.shutdown_signal.clone())
+            .with_graceful_shutdown(shutdown_signal)
             .await
             .map_err(Error::IO)?;
         info!(target: LOG_TARGET, "Stats HTTP server stopped!");
