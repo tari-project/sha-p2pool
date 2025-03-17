@@ -88,13 +88,14 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
             node_config.network_silence_delay = 0;
         }
         // Each spawned p2pool node will use different ports
-        node_config.p2p_port = get_port(18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
-        node_config.grpc_port = get_port(18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
+        node_config.p2p_port = get_port(world, 18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
+        node_config.grpc_port =
+            get_port(world, 18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
         if is_seed_node {
             node_config.http_server.enabled = false;
         } else {
             node_config.http_server.port =
-                get_port(19000..19499, Duration::from_secs(20)).ok_or("http_server_port no free port")?;
+                get_port(world, 19000..19499, Duration::from_secs(20)).ok_or("http_server_port no free port")?;
             node_config.http_server.enabled = true;
         }
         // The format for this addrress can be either "/ip4/127.0.0.1/tcp/{}" or "/ip4/127.0.0.1/udp/{}/quic-v1"
