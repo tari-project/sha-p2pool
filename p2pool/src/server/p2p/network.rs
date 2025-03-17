@@ -3265,43 +3265,15 @@ where S: ShareChain
                         },
                     }
                 },
-                req = self.query_rx.recv() => {
-                    let timer = Instant::now();
-                    match req {
-                        Some(P2pServiceQuery::GetChain {..}) =>
-                        debug!(target: LOG_TARGET, "[Diagnostics] ignoring 'P2pServiceQuery::GetChain'"),
-                        Some(req) => self.handle_query(req).await,
-                        None =>
-                            warn!(
-                                target: LOG_TARGET,
-                                "[Diagnostics] Failed to receive query from channel. Sender dropped?"
-                            ),
-                    }
-                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
-                        warn!(target: LOG_TARGET, "[Diagnostics] Query handling took too long: {:?}", timer.elapsed());
-                    }
-                },
-                _inner_req = self.inner_request_rx.recv() => {
-                    debug!(target: LOG_TARGET, "[Diagnostics] Ignoring inner request");
-                }
-                _blocks = self.client_broadcast_block_rx.recv() => {
-                    debug!(target: LOG_TARGET, "[Diagnostics] Ignoring broadcast blocks");
-                },
                 event = self.swarm.select_next_some() => {
                     let timer = Instant::now();
                     match event {
-                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::MetaDataExchange(_) ) => {
-                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring MetaDataExchange events");
-                        },
-                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::ShareChainSync(_)) => {
-                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring ShareChainSync events");
-                        },
-                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::CatchUpSync(_)) => {
-                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring CatchUpSync events");
-                        },
-                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Gossipsub(_)) => {
-                            debug!(target: LOG_TARGET, "[Diagnostics] Ignoring Gossipsub events");
-                        },
+                        // These events must be ignored in diagnostic mode
+                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::MetaDataExchange(_) ) |
+                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::ShareChainSync(_)) |
+                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::CatchUpSync(_)) |
+                        SwarmEvent::Behaviour(ServerNetworkBehaviourEvent::Gossipsub(_)) => {},
+                        // Other events must be handled
                         _ => self.handle_event(event).await,
                     }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -3499,15 +3471,10 @@ where S: ShareChain
 
     pub async fn dial_seed_peers(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "Dialing seed peers...");
-        match self.parse_seed_peers().await {
-            Ok(seed_peers) => {
-                self.join_seed_peers(seed_peers).await;
-            },
-            Err(e) => {
-                warn!(target: LOG_TARGET, "Failed to parse seed peers: {e:?}");
-                return Err(e);
-            },
-        }
+        let seed_peers = self.parse_seed_peers().await.inspect_err(|e| {
+            warn!(target: LOG_TARGET, "Failed to parse seed peers: {e:?}");
+        })?;
+        self.join_seed_peers(seed_peers).await;
         Ok(())
     }
 
