@@ -123,7 +123,7 @@ jobs:
       - name: rustup show
         run: rustup show
       - name: cargo check
-        run: cargo check --release --all-targets --workspace --exclude tari_integration_tests --locked
+        run: cargo check --release --all-targets --workspace --exclude integration_tests --locked
 
   licenses:
     name: file licenses
