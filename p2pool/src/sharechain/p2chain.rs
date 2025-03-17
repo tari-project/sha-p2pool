@@ -31,8 +31,7 @@ use std::{
 
 use itertools::Itertools;
 use log::*;
-use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::FixedHash;
+use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::proof_of_work::{
     lwma_diff::LinearWeightedMovingAverage,
     randomx_difficulty,
@@ -42,8 +41,7 @@ use tari_core::proof_of_work::{
     DifficultyAdjustment,
     PowAlgorithm,
 };
-use tari_crypto::compressed_key::CompressedKey;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 use tari_script::Opcode;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
@@ -51,6 +49,7 @@ use super::{
     lmdb_block_storage::BlockCache,
     p2chain_level::P2BlockHeader,
     BlockValidationParams,
+    MinerShare,
     MAIN_REWARD_SHARE,
     MEDIAN_TIMESTAMP_WINDOW,
     UNCLE_REWARD_SHARE,
@@ -149,7 +148,7 @@ impl Display for ChainAddResult {
 
 pub struct CachedShares {
     pub at_hash: FixedHash,
-    pub shares: HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>,
+    pub shares: HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
 }
 
 pub struct P2Chain<T: BlockCache> {
@@ -783,6 +782,10 @@ impl<T: BlockCache> P2Chain<T> {
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     pub fn verify_shares_for_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_correct_shares() || self.bypass_checks.has_correct_shares() || block.height == 0 {
             return Ok(true);
@@ -799,11 +802,12 @@ impl<T: BlockCache> P2Chain<T> {
         };
 
         // lets add the new tip block to the hashmap
-        miners_shares.insert(
-            block.miner_wallet_address.public_spend_key().clone(),
-            (block.miner_wallet_address.clone(),
-            MAIN_REWARD_SHARE, block.miner_coinbase_extra.clone()),
-        );
+        let miner_share = MinerShare {
+            miner: block.miner_wallet_address.clone(),
+            share_count: MAIN_REWARD_SHARE,
+            coinbase_extra: block.miner_coinbase_extra.clone(),
+        };
+        miners_shares.insert(block.miner_wallet_address.public_spend_key().clone(), miner_share);
         for uncle in &block.uncles {
             let uncle_level = match self.level_at_height(uncle.0) {
                 Some(level) => level,
@@ -813,10 +817,12 @@ impl<T: BlockCache> P2Chain<T> {
                 Some(block) => block.clone(),
                 None => return Ok(false),
             };
-            miners_shares.insert( uncle_block.miner_wallet_address.public_spend_key().clone(),
-                (uncle_block.miner_wallet_address.clone(),
-                UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
-            );
+            let miner_share = MinerShare {
+                miner: uncle_block.miner_wallet_address.clone(),
+                share_count: UNCLE_REWARD_SHARE,
+                coinbase_extra: uncle_block.miner_coinbase_extra.clone(),
+            };
+            miners_shares.insert(uncle_block.miner_wallet_address.public_spend_key().clone(), miner_share);
         }
 
         let mut total_shares = 0u128;
@@ -824,57 +830,54 @@ impl<T: BlockCache> P2Chain<T> {
         let mut prev_coinbase_value = 0u128;
 
         let mut block_reward = 0;
-        for output in &block.coinbases{
+        for output in &block.coinbases {
             block_reward += u128::from(output.minimum_value_promise.as_u64());
         }
 
         for miner in miners_shares.values() {
-            total_shares += u128::from(miner.1);
+            total_shares += u128::from(miner.share_count);
         }
 
-        if block.coinbases.is_empty(){
+        if block.coinbases.is_empty() {
             return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
         }
 
-        for output in &block.coinbases{
+        for output in &block.coinbases {
             let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
-               spend_key
+                spend_key
             } else {
                 return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
             };
-             match miners_shares.get(spend_key){
-                 Some((_address, share, extra)) => {
-                     cur_share_sum += u128::from(*share);
-                     let value = u64::try_from(
-                         (cur_share_sum.saturating_mul(block_reward))
-                             .saturating_div(total_shares) -
-                             prev_coinbase_value,
-                     ).unwrap_or(0);
-                     prev_coinbase_value += u128::from(*share);
-                     let output_value = output.minimum_value_promise.as_u64();
-                     // We do this as it might be the order of output generation is different, and it might be that a few outputs are a few micro tari off due to division as its not always possible to divide exactly
-                     if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
-                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
-                     }
-                     if **extra != *output.features.coinbase_extra {
-                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
-                     }
-                 },
-                 None => return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase)),
-             }
-
+            match miners_shares.get(spend_key) {
+                Some(miner_share) => {
+                    cur_share_sum += u128::from(miner_share.share_count);
+                    let value = u64::try_from(
+                        (cur_share_sum.saturating_mul(block_reward)).saturating_div(total_shares) - prev_coinbase_value,
+                    )
+                    .unwrap_or(0);
+                    prev_coinbase_value += u128::from(miner_share.share_count);
+                    let output_value = output.minimum_value_promise.as_u64();
+                    // We do this as it might be the order of output generation is different, and it might be that a few
+                    // outputs are a few micro tari off due to division as its not always possible to divide exactly
+                    if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
+                        return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                    }
+                    if miner_share.coinbase_extra != *output.features.coinbase_extra {
+                        return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                    }
+                },
+                None => return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase)),
+            }
         }
         Ok(true)
     }
 
-
     pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
         let tip_header_hash = self
             .get_tip()
-            .map(|level| level.block_header_in_main_chain())
-            .flatten()
+            .and_then(|level| level.block_header_in_main_chain())
             .map(|header| header.hash)
-            .unwrap_or(FixedHash::default());
+            .unwrap_or_default();
         if block.prev_hash == tip_header_hash {
             // easy this builds on the tip
             let min = match block.original_header.pow.pow_algo {
@@ -898,16 +901,11 @@ impl<T: BlockCache> P2Chain<T> {
         };
         lwma.add_front(current_block.timestamp, current_block.target_difficulty);
         while !lwma.is_full() {
-            if self.level_at_height(current_block.height.saturating_sub(1)).is_none() {
-                return None;
-            }
+            self.level_at_height(current_block.height.saturating_sub(1))?;
             let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
             // safety check
             let nextblock = parent_level.get_header(&current_block.prev_hash);
-            if nextblock.is_none() {
-                return None;
-            }
-            current_block = nextblock.unwrap().clone();
+            current_block = nextblock?.clone();
             lwma.add_front(current_block.timestamp, current_block.target_difficulty);
             if current_block.height == 0 {
                 // edge case we are at the start of the chain
@@ -982,24 +980,33 @@ impl<T: BlockCache> P2Chain<T> {
         usize::try_from(current_chain_length).expect("32 bit systems not supported")
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
-    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>, ShareChainError> {
+    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         fn update_insert(
-            miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>,
+            miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
             miner: TariAddress,
             new_share: u64,
             coinbase_extra: Vec<u8>,
         ) {
             let spend_key = miner.public_spend_key();
             match miner_shares.get_mut(spend_key) {
-                Some((_address, v, extra)) => {
-                    *v += new_share;
-                    *extra = coinbase_extra;
+                Some(miner_share) => {
+                    miner_share.share_count += new_share;
+                    miner_share.coinbase_extra = coinbase_extra;
                 },
                 None => {
-                    miner_shares.insert(spend_key.clone(), (miner, new_share, coinbase_extra));
+                    let miner_share = MinerShare {
+                        miner: miner.clone(),
+                        share_count: new_share,
+                        coinbase_extra,
+                    };
+                    miner_shares.insert(spend_key.clone(), miner_share);
                 },
             }
         }
@@ -1060,10 +1067,6 @@ impl<T: BlockCache> P2Chain<T> {
                 );
             }
         }
-        // self.cached_shares = Some(CachedShares {
-        //     at_hash: tip_hash,
-        //     shares: miners_to_shares.clone(),
-        // });
         Ok(miners_to_shares)
     }
 

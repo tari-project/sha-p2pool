@@ -25,8 +25,11 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-use tari_common_types::tari_address::TariAddress;
-use tari_common_types::types::{BlockHash, FixedHash};
+
+use tari_common_types::{
+    tari_address::TariAddress,
+    types::{BlockHash, FixedHash},
+};
 use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
 use tari_utilities::epoch_time::EpochTime;
 

@@ -137,3 +137,10 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
 
     async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)>;
 }
+
+#[derive(Debug, Clone)]
+pub struct MinerShare {
+    pub miner: TariAddress,
+    pub share_count: u64,
+    pub coinbase_extra: Vec<u8>,
+}

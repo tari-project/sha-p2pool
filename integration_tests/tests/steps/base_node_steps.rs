@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use cucumber::{given, when};
+use integration_tests::{base_node_process::spawn_base_node, TariWorld};
 use log::*;
-use tari_integration_tests::{base_node_process::spawn_base_node, TariWorld};
 use tokio::time::Duration;
 
 pub const LOG_TARGET: &str = "cucumber::base_node_steps";

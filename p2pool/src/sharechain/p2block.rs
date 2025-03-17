@@ -268,7 +268,7 @@ impl P2BlockBuilder {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
 pub struct VerifiedStatus(u8);
 
 bitflags! {
@@ -287,7 +287,7 @@ bitflags! {
 }
 
 impl VerifiedStatus {
-    pub fn is_verified(&self) -> bool {
+    pub fn is_verified(self) -> bool {
         self.contains(VerifiedStatus::PARENTS) &&
             self.contains(VerifiedStatus::TARGET_DIFFICULTY) &&
             self.contains(VerifiedStatus::DIFFICULTY) &&

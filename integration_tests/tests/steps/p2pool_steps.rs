@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use cucumber::{given, when};
-use log::*;
-use tari_integration_tests::{
+use integration_tests::{
     miner::{mine_and_submit_tari_blocks, verify_block_height},
     p2pool_process::{restart_node, shut_down_node, spawn_p2pool_node_and_wait_for_start, verify_peer_connected},
     TariWorld,
 };
+use log::*;
 use tokio::time::Duration;
 
 pub const LOG_TARGET: &str = "cucumber::p2pool_steps";

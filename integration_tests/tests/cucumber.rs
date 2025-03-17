@@ -12,9 +12,9 @@ use std::{
 };
 
 use cucumber::{event::ScenarioFinished, writer, writer::Verbosity, World as _};
+use integration_tests::{p2pool_process::get_p2pool_exe_path, TariWorld};
 use log::*;
 use tari_common::{configuration::Network, initialize_logging, network_check::set_network_if_choice_valid};
-use tari_integration_tests::{p2pool_process::get_p2pool_exe_path, TariWorld};
 use tokio::runtime::Runtime;
 pub mod steps;
 

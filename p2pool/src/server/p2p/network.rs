@@ -257,7 +257,7 @@ enum InnerRequest {
     PerformCatchUpSync(PerformCatchUpSync),
     AddSyncedBlock {
         algo: PowAlgorithm,
-        block: P2Block,
+        block: Box<P2Block>,
         source_peer: PeerId,
     },
 }
@@ -1936,7 +1936,7 @@ where S: ShareChain
             for b in blocks {
                 let message = InnerRequest::AddSyncedBlock {
                     algo,
-                    block: b,
+                    block: Box::new(b),
                     source_peer: peer,
                 };
                 let _unused = tx.send(message);
@@ -2410,7 +2410,7 @@ where S: ShareChain
                     ),
                 };
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Adding block {}({:x}{:x}{:x}{:x}) to share chain from peer {}", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3], source_peer);
-                match share_chain.add_synced_blocks(vec![block]).await {
+                match share_chain.add_synced_blocks(vec![*block]).await {
                     Ok(result) => {
                         info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, result);
                         let missing_parents = result.into_missing_parents_vec();

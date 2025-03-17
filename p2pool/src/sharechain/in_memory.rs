@@ -19,14 +19,14 @@ use tari_core::{
     },
     PrunedOutputMmr,
 };
-use tari_crypto::compressed_key::CompressedKey;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 use tari_mmr::pruned_hashset::PrunedHashSet;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
     lmdb_block_storage::LmdbBlockStorage,
+    MinerShare,
     MAIN_REWARD_SHARE,
     MIN_RANDOMX_DIFFICULTY,
     MIN_SHA3X_DIFFICULTY,
@@ -83,7 +83,7 @@ impl InMemoryShareChain {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
         }
-        let bypass_checks = bypass_checks.unwrap_or(VerifiedStatus::new());
+        let bypass_checks = bypass_checks.unwrap_or_default();
 
         let data_path = config.block_cache_file.join(pow_algo.to_string());
 
@@ -376,11 +376,15 @@ impl InMemoryShareChain {
     fn get_calculate_and_cache_hashmap_of_tip_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>, ShareChainError> {
+    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
             None => return Ok(HashMap::new()),
         };
+        // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+        // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+        // this is safe
+        #[allow(clippy::mutable_key_type)]
         let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height())?;
         p2_chain.cached_shares = Some(CachedShares {
             at_hash: tip.chain_block(),
@@ -580,6 +584,10 @@ impl ShareChain for InMemoryShareChain {
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     async fn generate_shares_and_get_target_difficulty(
         &self,
         new_tip_block: &P2Block,
@@ -614,9 +622,14 @@ impl ShareChain for InMemoryShareChain {
         };
 
         // lets add the new tip block to the hashmap
-        miners_to_shares.insert(new_tip_block.miner_wallet_address.public_spend_key().clone(),
-            (new_tip_block.miner_wallet_address.clone(),
-            MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
+        let miner_share = MinerShare {
+            miner: new_tip_block.miner_wallet_address.clone(),
+            share_count: MAIN_REWARD_SHARE,
+            coinbase_extra: new_tip_block.miner_coinbase_extra.clone(),
+        };
+        miners_to_shares.insert(
+            new_tip_block.miner_wallet_address.public_spend_key().clone(),
+            miner_share,
         );
         if !solo_mine {
             for uncle in &new_tip_block.uncles {
@@ -625,23 +638,25 @@ impl ShareChain for InMemoryShareChain {
                     .ok_or(ShareChainError::UncleBlockNotFound)?
                     .get(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
-                miners_to_shares.insert(uncle_block.miner_wallet_address.public_spend_key().clone(),
-                    (uncle_block.miner_wallet_address.clone(),
-                    UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
-                );
+                let miner_share = MinerShare {
+                    miner: uncle_block.miner_wallet_address.clone(),
+                    share_count: UNCLE_REWARD_SHARE,
+                    coinbase_extra: uncle_block.miner_coinbase_extra.clone(),
+                };
+                miners_to_shares.insert(uncle_block.miner_wallet_address.public_spend_key().clone(), miner_share);
             }
         }
 
         let mut res = vec![];
 
-        for (_key, (address, shares, extra)) in miners_to_shares {
+        for (_key, miner_share) in miners_to_shares {
             // find coinbase extra for wallet address
             res.push(NewBlockCoinbase {
-                address: address.to_base58(),
-                value: shares,
+                address: miner_share.miner.to_base58(),
+                value: miner_share.share_count,
                 stealth_payment: false,
                 revealed_value_proof: true,
-                coinbase_extra: extra,
+                coinbase_extra: miner_share.coinbase_extra,
             });
         }
 
@@ -932,6 +947,10 @@ pub mod test {
         TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_shares() {
         let share_chain = new_chain();
@@ -962,11 +981,15 @@ pub mod test {
             .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
             .unwrap();
         assert_eq!(shares.len(), 15);
-        for  share in shares {
-            assert_eq!(share.1.1, 5);
+        for share in shares {
+            assert_eq!(share.1.share_count, 5);
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_share_same_participants() {
         let static_coinbase_extra = Vec::new();
@@ -1006,10 +1029,14 @@ pub mod test {
             .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
-            assert_eq!(share.1.1, 15);
+            assert_eq!(share.1.share_count, 15);
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_share_same_participants_with_uncles() {
         let static_coinbase_extra = Vec::new();
@@ -1078,7 +1105,7 @@ pub mod test {
         let mut counter_19 = 0;
         let mut counter_15 = 0;
         for share in shares {
-            match share.1 .1 {
+            match share.1.share_count {
                 19 => counter_19 += 1,
                 15 => counter_15 += 1,
                 _ => panic!("Should be 19 or 15"),
@@ -1477,22 +1504,22 @@ pub mod test {
         let mut lwma =
             LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
 
-            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
-            let address = new_random_address();
-            timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
-                .with_timestamp(timestamp)
-                .with_height(0)
-                .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(target_diff)
-                .unwrap()
-                .with_miner_coinbase_extra(static_coinbase_extra.clone())
-                .build()
-                .unwrap();
-            lwma.add_front(block.timestamp, block.target_difficulty());
-            prev_block = Some(block.clone());
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let address = new_random_address();
+        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+            .with_timestamp(timestamp)
+            .with_height(0)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap();
+        lwma.add_front(block.timestamp, block.target_difficulty());
+        prev_block = Some(block.clone());
 
-            share_chain.submit_block((*block).clone()).await.unwrap();
+        share_chain.submit_block((*block).clone()).await.unwrap();
 
         let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
         let address = new_random_address();
@@ -1510,11 +1537,8 @@ pub mod test {
 
         share_chain.submit_block((*block).clone()).await.unwrap_err();
 
-
-
         let chain = share_chain.p2_chain.read().await;
         // chain tip should not have been updated
         assert_eq!(chain.get_tip().unwrap().height(), 0);
     }
-
 }
