@@ -31,6 +31,7 @@ use std::{
 
 use itertools::Itertools;
 use log::*;
+use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{
     lwma_diff::LinearWeightedMovingAverage,
@@ -41,6 +42,9 @@ use tari_core::proof_of_work::{
     DifficultyAdjustment,
     PowAlgorithm,
 };
+use tari_crypto::compressed_key::CompressedKey;
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_script::Opcode;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use super::{
@@ -145,7 +149,7 @@ impl Display for ChainAddResult {
 
 pub struct CachedShares {
     pub at_hash: FixedHash,
-    pub shares: HashMap<String, (u64, Vec<u8>)>,
+    pub shares: HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>,
 }
 
 pub struct P2Chain<T: BlockCache> {
@@ -635,16 +639,9 @@ impl<T: BlockCache> P2Chain<T> {
             verified.set_median_timestamp();
         }
 
-        // if self.verify_shares_for_block(block.clone())? {
-        verified.set_correct_shares();
-        //}
-
-        dbg!(verified.has_difficulty_verified());
-        dbg!(verified.has_target_difficulty_verified());
-        dbg!(verified.has_parents());
-        dbg!(verified.has_median_timestamp());
-        dbg!(verified.has_correct_shares());
-        dbg!(verified.is_verified());
+        if self.verify_shares_for_block(block.clone())? {
+            verified.set_correct_shares();
+        }
 
         // lets update verification status
         let mut actual_block = block.deref().clone();
@@ -803,8 +800,9 @@ impl<T: BlockCache> P2Chain<T> {
 
         // lets add the new tip block to the hashmap
         miners_shares.insert(
-            block.miner_wallet_address.to_base58(),
-            (MAIN_REWARD_SHARE, block.miner_coinbase_extra.clone()),
+            block.miner_wallet_address.public_spend_key().clone(),
+            (block.miner_wallet_address.clone(),
+            MAIN_REWARD_SHARE, block.miner_coinbase_extra.clone()),
         );
         for uncle in &block.uncles {
             let uncle_level = match self.level_at_height(uncle.0) {
@@ -815,26 +813,60 @@ impl<T: BlockCache> P2Chain<T> {
                 Some(block) => block.clone(),
                 None => return Ok(false),
             };
-            miners_shares.insert(
-                uncle_block.miner_wallet_address.to_base58(),
-                (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+            miners_shares.insert( uncle_block.miner_wallet_address.public_spend_key().clone(),
+                (uncle_block.miner_wallet_address.clone(),
+                UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
             );
         }
 
-        let mut res = vec![];
+        let mut total_shares = 0u128;
+        let mut cur_share_sum = 0u128;
+        let mut prev_coinbase_value = 0u128;
 
-        for (key, (shares, extra)) in miners_shares {
-            // find coinbase extra for wallet address
-            res.push(crate::sharechain::NewBlockCoinbase {
-                address: key,
-                value: shares,
-                stealth_payment: false,
-                revealed_value_proof: true,
-                coinbase_extra: extra,
-            });
+        let mut block_reward = 0;
+        for output in &block.coinbases{
+            block_reward += u128::from(output.minimum_value_promise.as_u64());
+        }
+
+        for miner in miners_shares.values() {
+            total_shares += u128::from(miner.1);
+        }
+
+        if block.coinbases.is_empty(){
+            return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+        }
+
+        for output in &block.coinbases{
+            let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
+               spend_key
+            } else {
+                return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+            };
+             match miners_shares.get(spend_key){
+                 Some((_address, share, extra)) => {
+                     cur_share_sum += u128::from(*share);
+                     let value = u64::try_from(
+                         (cur_share_sum.saturating_mul(block_reward))
+                             .saturating_div(total_shares) -
+                             prev_coinbase_value,
+                     ).unwrap_or(0);
+                     prev_coinbase_value += u128::from(*share);
+                     let output_value = output.minimum_value_promise.as_u64();
+                     // We do this as it might be the order of output generation is different, and it might be that a few outputs are a few micro tari off due to division as its not always possible to divide exactly
+                     if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
+                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                     }
+                     if **extra != *output.features.coinbase_extra {
+                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                     }
+                 },
+                 None => return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase)),
+             }
+
         }
         Ok(true)
     }
+
 
     pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
         let tip_header_hash = self
@@ -953,20 +985,21 @@ impl<T: BlockCache> P2Chain<T> {
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
-    ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
+    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
-            miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
-            miner: String,
+            miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>,
+            miner: TariAddress,
             new_share: u64,
             coinbase_extra: Vec<u8>,
         ) {
-            match miner_shares.get_mut(&miner) {
-                Some((v, extra)) => {
+            let spend_key = miner.public_spend_key();
+            match miner_shares.get_mut(spend_key) {
+                Some((_address, v, extra)) => {
                     *v += new_share;
                     *extra = coinbase_extra;
                 },
                 None => {
-                    miner_shares.insert(miner, (new_share, coinbase_extra));
+                    miner_shares.insert(spend_key.clone(), (miner, new_share, coinbase_extra));
                 },
             }
         }
@@ -984,7 +1017,7 @@ impl<T: BlockCache> P2Chain<T> {
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
-            cur_block.wallet_address_base58,
+            cur_block.wallet_address,
             MAIN_REWARD_SHARE,
             cur_block.coinbase_extra.clone(),
         );
@@ -996,7 +1029,7 @@ impl<T: BlockCache> P2Chain<T> {
                 .ok_or(ShareChainError::UncleBlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
-                uncle_block.wallet_address_base58,
+                uncle_block.wallet_address,
                 UNCLE_REWARD_SHARE,
                 uncle_block.coinbase_extra.clone(),
             );
@@ -1009,7 +1042,7 @@ impl<T: BlockCache> P2Chain<T> {
                 .ok_or(ShareChainError::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
-                cur_block.wallet_address_base58,
+                cur_block.wallet_address,
                 MAIN_REWARD_SHARE,
                 cur_block.coinbase_extra.clone(),
             );
@@ -1021,7 +1054,7 @@ impl<T: BlockCache> P2Chain<T> {
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
                 update_insert(
                     &mut miners_to_shares,
-                    uncle_block.wallet_address_base58,
+                    uncle_block.wallet_address,
                     UNCLE_REWARD_SHARE,
                     uncle_block.coinbase_extra.clone(),
                 );
@@ -1089,6 +1122,7 @@ mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             10,
@@ -1256,6 +1290,7 @@ mod test {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             20,
@@ -1620,6 +1655,7 @@ mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             10,
@@ -1695,6 +1731,7 @@ mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             50,
@@ -1748,6 +1785,7 @@ mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             50,
@@ -2153,6 +2191,7 @@ mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,
             20,
@@ -2224,10 +2263,11 @@ mod test {
     }
 
     #[test]
-    fn rests_levels_after_reorg() {
+    fn resets_levels_after_reorg() {
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_correct_shares();
         bypass_checks.set_median_timestamp();
         let mut chain = P2Chain::new_empty(
             PowAlgorithm::Sha3x,

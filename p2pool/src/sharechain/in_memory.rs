@@ -19,6 +19,8 @@ use tari_core::{
     },
     PrunedOutputMmr,
 };
+use tari_crypto::compressed_key::CompressedKey;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_mmr::pruned_hashset::PrunedHashSet;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -374,7 +376,7 @@ impl InMemoryShareChain {
     fn get_calculate_and_cache_hashmap_of_tip_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-    ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
+    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, (TariAddress, u64, Vec<u8>)>, ShareChainError> {
         let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
             None => return Ok(HashMap::new()),
@@ -612,9 +614,9 @@ impl ShareChain for InMemoryShareChain {
         };
 
         // lets add the new tip block to the hashmap
-        miners_to_shares.insert(
-            new_tip_block.miner_wallet_address.to_base58(),
-            (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
+        miners_to_shares.insert(new_tip_block.miner_wallet_address.public_spend_key().clone(),
+            (new_tip_block.miner_wallet_address.clone(),
+            MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
         );
         if !solo_mine {
             for uncle in &new_tip_block.uncles {
@@ -623,19 +625,19 @@ impl ShareChain for InMemoryShareChain {
                     .ok_or(ShareChainError::UncleBlockNotFound)?
                     .get(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
-                miners_to_shares.insert(
-                    uncle_block.miner_wallet_address.to_base58(),
-                    (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
+                miners_to_shares.insert(uncle_block.miner_wallet_address.public_spend_key().clone(),
+                    (uncle_block.miner_wallet_address.clone(),
+                    UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
                 );
             }
         }
 
         let mut res = vec![];
 
-        for (key, (shares, extra)) in miners_to_shares {
+        for (_key, (address, shares, extra)) in miners_to_shares {
             // find coinbase extra for wallet address
             res.push(NewBlockCoinbase {
-                address: key,
+                address: address.to_base58(),
                 value: shares,
                 stealth_payment: false,
                 revealed_value_proof: true,
@@ -896,6 +898,7 @@ pub mod test {
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,
@@ -959,8 +962,8 @@ pub mod test {
             .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
             .unwrap();
         assert_eq!(shares.len(), 15);
-        for share in shares {
-            assert_eq!(share.1, (5, static_coinbase_extra.clone()))
+        for  share in shares {
+            assert_eq!(share.1.1, 5);
         }
     }
 
@@ -1003,7 +1006,7 @@ pub mod test {
             .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
-            assert_eq!(share.1, (15, static_coinbase_extra.clone()))
+            assert_eq!(share.1.1, 15);
         }
     }
 
@@ -1075,7 +1078,7 @@ pub mod test {
         let mut counter_19 = 0;
         let mut counter_15 = 0;
         for share in shares {
-            match share.1 .0 {
+            match share.1 .1 {
                 19 => counter_19 += 1,
                 15 => counter_15 += 1,
                 _ => panic!("Should be 19 or 15"),
@@ -1187,6 +1190,7 @@ pub mod test {
 
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_difficulty_verified();
+        bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,
@@ -1266,6 +1270,7 @@ pub mod test {
 
         let mut bypass_checks = VerifiedStatus::new();
         bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,
@@ -1357,7 +1362,8 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,
@@ -1428,4 +1434,87 @@ pub mod test {
         // chain tip should not have been updated
         assert_eq!(chain.get_tip().unwrap().height(), 4);
     }
+
+    #[tokio::test]
+    async fn chain_rejects_block_with_bad_shares() {
+        let static_coinbase_extra = Vec::new();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let bypass_checks = VerifiedStatus::new();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
+        );
+
+        let share_chain = InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
+            coinbase_extras,
+            stat_client,
+            config: config.clone(),
+            squad: "NoSquad".to_string(),
+            minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
+            minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
+        };
+
+        let mut timestamp = EpochTime::now();
+        let mut prev_block = None;
+        let mut lwma =
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
+
+            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+            let address = new_random_address();
+            timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+                .with_timestamp(timestamp)
+                .with_height(0)
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_diff)
+                .unwrap()
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
+                .build()
+                .unwrap();
+            lwma.add_front(block.timestamp, block.target_difficulty());
+            prev_block = Some(block.clone());
+
+            share_chain.submit_block((*block).clone()).await.unwrap();
+
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let address = new_random_address();
+        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+            .with_timestamp(timestamp)
+            .with_height(1)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap();
+        lwma.add_front(block.timestamp, block.target_difficulty());
+
+        share_chain.submit_block((*block).clone()).await.unwrap_err();
+
+
+
+        let chain = share_chain.p2_chain.read().await;
+        // chain tip should not have been updated
+        assert_eq!(chain.get_tip().unwrap().height(), 0);
+    }
+
 }

@@ -25,7 +25,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-
+use tari_common_types::tari_address::TariAddress;
 use tari_common_types::types::{BlockHash, FixedHash};
 use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
 use tari_utilities::epoch_time::EpochTime;
@@ -46,7 +46,7 @@ pub struct P2BlockHeader {
     pub total_pow: AccumulatedDifficulty,
     pub verified: VerifiedStatus,
     pub uncles: Vec<(u64, FixedHash)>,
-    pub wallet_address_base58: String,
+    pub wallet_address: TariAddress,
     pub coinbase_extra: Vec<u8>,
 }
 /// A collection of blocks with the same height.
@@ -73,7 +73,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
-            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            wallet_address: block.miner_wallet_address.clone(),
             coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         let mut block_headers = HashMap::new();
@@ -149,7 +149,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
-            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            wallet_address: block.miner_wallet_address.clone(),
             coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         self.block_headers

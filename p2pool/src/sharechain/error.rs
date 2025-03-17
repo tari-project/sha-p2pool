@@ -79,4 +79,6 @@ pub enum ValidationError {
     OutputMismatch,
     #[error("Invalid block outputs")]
     InvalidOutputs,
+    #[error("Invalid coinbase")]
+    InvalidCoinbase,
 }
