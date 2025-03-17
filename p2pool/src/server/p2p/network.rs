@@ -3199,23 +3199,23 @@ where S: ShareChain
                             let summary = ("summary", json!(
                                 {
                                     "summary": {
-                                        "1. Connect to DNS seeds             :":
+                                        "1. Connect to DNS seeds             _":
                                             seeds_data.iter().any(|peer| peer.dial_succeeded),
-                                        "2. Download peers from DNS seeds    :":
+                                        "2. Download peers from DNS seeds    _":
                                             seeds_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
-                                        "3. Number of DNS seeds responded    :":
+                                        "3. Number of DNS seeds responded    _":
                                             seeds_data.iter().filter(|peer| peer.response_time.is_some()).count(),
-                                        "4. Connect to relay peers           :":
+                                        "4. Connect to relay peers           _":
                                             relays_data.iter().any(|peer| peer.dial_succeeded),
-                                        "5. Download peers from relay peers  :":
+                                        "5. Download peers from relay peers  _":
                                             relays_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
-                                        "6. Number of relay peers responded  :":
+                                        "6. Number of relay peers responded  _":
                                             relays_data.iter().filter(|peer| peer.response_time.is_some()).count(),
-                                        "7. Connect to private peers         :":
+                                        "7. Connect to private peers         _":
                                             private_peers_data.iter().any(|peer| peer.dial_succeeded),
-                                        "8. Download peers from private peers:":
+                                        "8. Download peers from private peers_":
                                             private_peers_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
-                                        "9. Number of private peers responded:":
+                                        "9. Number of private peers responded_":
                                             private_peers_data.iter().filter(|peer| peer.response_time.is_some()).count(),
                                     }
                                 })

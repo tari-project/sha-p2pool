@@ -117,7 +117,7 @@ async fn restart_p2pool_node(world: &mut TariWorld, p2pool_name: String) {
 
 #[given(expr = "I wait up to {int} seconds for p2pool diagnostic node {} to create a diagnostic file")]
 #[when(expr = "I wait up to {int} seconds for p2pool diagnostic node {} to create a diagnostic file")]
-async fn verify_p2pool_diagnostic_file(world: &mut TariWorld, p2pool_name: String, seconds: u64) {
+async fn verify_p2pool_diagnostic_file(world: &mut TariWorld, seconds: u64, p2pool_name: String) {
     if let Err(err) = verify_diagnostic_file_created(world, p2pool_name, seconds).await {
         let msg = format!("verify_p2pool_diagnostic_file: {}", err);
         error!(target: LOG_TARGET, "{}", msg);
