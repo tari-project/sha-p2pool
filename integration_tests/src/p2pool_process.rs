@@ -467,6 +467,26 @@ pub fn get_p2pool_exe_path() -> PathBuf {
     }
 }
 
+pub async fn verify_diagnostic_file_created(
+    world: &mut TariWorld,
+    p2pool_name: String,
+    seconds: u64,
+) -> TestResult<()> {
+    debug!(target: LOG_TARGET, "verify '{}' creates a diagnostic file", p2pool_name);
+
+    let p2pool_process = world.get_p2pool_node(&p2pool_name)?;
+    let diagnostic_file_path = p2pool_process.temp_dir_path.join("diagnostic_results.json");
+    let start = Instant::now();
+    while !diagnostic_file_path.exists() && start.elapsed() < Duration::from_secs(seconds) {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    if !diagnostic_file_path.exists() {
+        return Err(format!("Diagnostic file not found at: '{}'", diagnostic_file_path.display()).into());
+    }
+
+    Ok(())
+}
+
 pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, peer_name: String) -> TestResult<()> {
     debug!(target: LOG_TARGET, "verify '{}' is connected to peer '{}'", p2pool_name, peer_name);
     let start = Instant::now();

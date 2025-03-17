@@ -3185,8 +3185,8 @@ where S: ShareChain
 
                             let diagnostics_data = [
                                 ("seeds", json!({ "seeds": seeds_data })),
-                                ("privates", json!({ "privates": private_peers_data })),
-                                ("relays", json!({ "relays": relays_data }))
+                                ("relays", json!({ "relays": relays_data })),
+                                ("private peers", json!({ "private peers": private_peers_data })),
                             ];
                             let local_node = ("local_node", json!(
                                 {"local_node":
@@ -3199,18 +3199,24 @@ where S: ShareChain
                             let summary = ("summary", json!(
                                 {
                                     "summary": {
-                                        "Connect to each DNS seeds":
+                                        "1. Connect to DNS seeds             :":
                                             seeds_data.iter().any(|peer| peer.dial_succeeded),
-                                        "Download peers from the DNS seeds":
+                                        "2. Download peers from DNS seeds    :":
                                             seeds_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
-                                        "Connect to 5 of private peers":
-                                            private_peers_data.iter().any(|peer| peer.dial_succeeded),
-                                        "Download peers from private seeds":
-                                            private_peers_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
-                                        "Connect to 5 of relay peers":
+                                        "3. Number of DNS seeds responded    :":
+                                            seeds_data.iter().filter(|peer| peer.response_time.is_some()).count(),
+                                        "4. Connect to relay peers           :":
                                             relays_data.iter().any(|peer| peer.dial_succeeded),
-                                        "Download peers from relay seeds":
-                                            relays_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0)
+                                        "5. Download peers from relay peers  :":
+                                            relays_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
+                                        "6. Number of relay peers responded  :":
+                                            relays_data.iter().filter(|peer| peer.response_time.is_some()).count(),
+                                        "7. Connect to private peers         :":
+                                            private_peers_data.iter().any(|peer| peer.dial_succeeded),
+                                        "8. Download peers from private peers:":
+                                            private_peers_data.iter().any(|peer| peer.number_of_peers.unwrap_or(0) > 0),
+                                        "9. Number of private peers responded:":
+                                            private_peers_data.iter().filter(|peer| peer.response_time.is_some()).count(),
                                     }
                                 })
                             );
@@ -3244,6 +3250,13 @@ where S: ShareChain
                                     }
                                     let _unused = writeln!(&file);
                                 }
+                            }
+                            else {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "[Diagnostics] Failed to create diagnostics file at path: {:?}",
+                                    file_path
+                                );
                             }
                             info!(target: LOG_TARGET, "Diagnostics written to file: {}", file_path.display());
 

@@ -141,4 +141,5 @@ Feature: Sync p2pool nodes
     And p2pool node NODE_I stats shows connected to peer NODE_A
     # We start a diagnostic node to learn about the network
     And I have a p2pool diagnostic node DIAGNOSTIC in squad DOLPHINS connected to base node BASE_NODE_A
-    Then I wait 120 seconds and stop
+    And I wait up to 120 seconds for p2pool diagnostic node DIAGNOSTIC to create a diagnostic file
+    Then I wait 1 seconds and stop
