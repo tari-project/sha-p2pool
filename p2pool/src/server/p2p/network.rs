@@ -79,7 +79,7 @@ use crate::{
         PROTOCOL_VERSION,
     },
     sharechain::{
-        p2block::{P2Block, CURRENT_CHAIN_ID},
+        p2block::{P2Block, VerifiedStatus, CURRENT_CHAIN_ID},
         ShareChain,
     },
 };
@@ -257,7 +257,7 @@ enum InnerRequest {
     PerformCatchUpSync(PerformCatchUpSync),
     AddSyncedBlock {
         algo: PowAlgorithm,
-        block: Arc<P2Block>,
+        block: Box<P2Block>,
         source_peer: PeerId,
     },
 }
@@ -639,10 +639,10 @@ where S: ShareChain
 
                             let mut blocks: Vec<P2Block> = payload.new_blocks.to_vec();
                             for block in &mut blocks {
-                                block.verified = false;
+                                block.verified = VerifiedStatus::new();
                             }
-                            let blocks: Vec<_> = blocks.into_iter().map(Arc::new).collect();
-                            match share_chain.add_synced_blocks(&blocks).await {
+                            let blocks: Vec<_> = blocks.into_iter().collect();
+                            match share_chain.add_synced_blocks(blocks).await {
                                 Ok(new_tip) => {
                                     info!(target: LOG_TARGET, "[{:?}]New tip notify blocks added to share chain: {}", algo, new_tip);
                                     let missing_parents = new_tip.into_missing_parents_vec();
@@ -1187,13 +1187,13 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
+        let blocks: Vec<_> = response.into_blocks().into_iter().collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
         let max_sync_depth = self.config.max_missing_blocks_sync_depth;
         tokio::spawn(async move {
-            match share_chain.add_synced_blocks(&blocks).await {
+            match share_chain.add_synced_blocks(blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
                     let missing_parents = new_tip.into_missing_parents_vec();
@@ -1891,7 +1891,7 @@ where S: ShareChain
         let their_tip_hash = *response.tip_hash();
         let their_height = response.tip_height();
         let their_pow = response.achieved_pow();
-        let mut blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
+        let mut blocks: Vec<_> = response.into_blocks().into_iter().collect();
         if blocks.is_empty() {
             warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} sent 0 blocks for catch up sync", peer);
             let _res = self.swarm.disconnect_peer_id(peer);
@@ -1913,14 +1913,30 @@ where S: ShareChain
         };
 
         tokio::spawn(async move {
+            let feedback_string = blocks
+                .iter()
+                .map(|a| {
+                    format!(
+                        "{}({:x}{:x}{:x}{:x})",
+                        a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3]
+                    )
+                })
+                .collect::<Vec<String>>();
+            // Check if we have recieved their tip
+            let mut must_continue_sync = true;
+            if blocks.iter().any(|b| b.hash == their_tip_hash) {
+                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {}", algo, peer);
+                must_continue_sync = false;
+            }
+
             blocks.sort_by(|a, b| a.height.cmp(&b.height));
             let last_block_from_them = blocks.last().map(|b| (b.height, b.hash));
             // let mut new_tip = ChainAddResult::default();
             // let mut blocks_added = Vec::new();
-            for b in &blocks {
+            for b in blocks {
                 let message = InnerRequest::AddSyncedBlock {
                     algo,
-                    block: b.clone(),
+                    block: Box::new(b),
                     source_peer: peer,
                 };
                 let _unused = tx.send(message);
@@ -1946,7 +1962,7 @@ where S: ShareChain
                 }
             }
 
-            info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
+            info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, feedback_string);
             // info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, new_tip);
             // let missing_parents = new_tip.into_missing_parents_vec();
             // if !missing_parents.is_empty() {
@@ -1962,13 +1978,9 @@ where S: ShareChain
 
             // info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
             let our_pow = share_chain.get_total_chain_pow().await;
-            let mut must_continue_sync = their_pow > our_pow.as_u128();
+            must_continue_sync = must_continue_sync && (their_pow > our_pow.as_u128());
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
-            // Check if we have recieved their tip
-            if blocks.iter().any(|b| b.hash == their_tip_hash) {
-                info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {}", algo, peer);
-                must_continue_sync = false;
-            }
+
             let mut peer_store_write_lock = network_peer_store.write().await;
             let num_catchups = peer_store_write_lock.num_catch_ups(&peer);
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] num catchups: {:?}", algo, num_catchups);
@@ -2398,7 +2410,7 @@ where S: ShareChain
                     ),
                 };
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Adding block {}({:x}{:x}{:x}{:x}) to share chain from peer {}", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3], source_peer);
-                match share_chain.add_synced_blocks(&[block]).await {
+                match share_chain.add_synced_blocks(vec![*block]).await {
                     Ok(result) => {
                         info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, result);
                         let missing_parents = result.into_missing_parents_vec();
@@ -2722,7 +2734,7 @@ where S: ShareChain
                     &b.hash.to_hex()[0..8],
                     &b.height,
                     &b.hash.to_hex()[0..8],
-                    if b.verified { "" } else { "UNVERIFIED " },
+                    if b.verified.is_verified() { "" } else { "UNVERIFIED " },
                     formatter.format(b.target_difficulty().as_u64() as f64),
                     &b.miner_wallet_address.to_base58()[0..6],
                     &b.miner_wallet_address.to_base58()[84..]

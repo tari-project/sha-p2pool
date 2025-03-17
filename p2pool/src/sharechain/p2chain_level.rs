@@ -26,12 +26,18 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use tari_common_types::types::{BlockHash, FixedHash};
+use tari_common_types::{
+    tari_address::TariAddress,
+    types::{BlockHash, FixedHash},
+};
 use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
 use tari_utilities::epoch_time::EpochTime;
 
 use super::lmdb_block_storage::BlockCache;
-use crate::sharechain::{error::ShareChainError, p2block::P2Block};
+use crate::sharechain::{
+    error::ShareChainError,
+    p2block::{P2Block, VerifiedStatus},
+};
 
 #[derive(Clone)]
 pub struct P2BlockHeader {
@@ -41,9 +47,9 @@ pub struct P2BlockHeader {
     pub timestamp: EpochTime,
     pub target_difficulty: Difficulty,
     pub total_pow: AccumulatedDifficulty,
-    pub verified: bool,
+    pub verified: VerifiedStatus,
     pub uncles: Vec<(u64, FixedHash)>,
-    pub wallet_address_base58: String,
+    pub wallet_address: TariAddress,
     pub coinbase_extra: Vec<u8>,
 }
 /// A collection of blocks with the same height.
@@ -70,7 +76,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
-            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            wallet_address: block.miner_wallet_address.clone(),
             coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         let mut block_headers = HashMap::new();
@@ -115,7 +121,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
 
     pub fn is_verified(&self, hash: &FixedHash) -> bool {
         let lock = self.block_headers.read().expect("could not lock");
-        lock.get(hash).map(|b| b.verified).unwrap_or(false)
+        lock.get(hash).map(|b| b.verified.is_verified()).unwrap_or(false)
     }
 
     pub fn height(&self) -> u64 {
@@ -146,7 +152,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             target_difficulty: block.target_difficulty(),
             total_pow: block.total_pow(),
             verified: block.verified,
-            wallet_address_base58: block.miner_wallet_address.to_base58(),
+            wallet_address: block.miner_wallet_address.clone(),
             coinbase_extra: block.miner_coinbase_extra.clone(),
         };
         self.block_headers

@@ -8,19 +8,25 @@ use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
-use tari_core::proof_of_work::{
-    randomx_difficulty,
-    sha3x_difficulty,
-    AccumulatedDifficulty,
-    Difficulty,
-    DifficultyAdjustment,
-    PowAlgorithm,
+use tari_core::{
+    proof_of_work::{
+        randomx_difficulty,
+        sha3x_difficulty,
+        AccumulatedDifficulty,
+        Difficulty,
+        DifficultyAdjustment,
+        PowAlgorithm,
+    },
+    PrunedOutputMmr,
 };
+use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
+use tari_mmr::pruned_hashset::PrunedHashSet;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
     lmdb_block_storage::LmdbBlockStorage,
+    MinerShare,
     MAIN_REWARD_SHARE,
     MIN_RANDOMX_DIFFICULTY,
     MIN_SHA3X_DIFFICULTY,
@@ -30,7 +36,7 @@ use crate::{
     server::{http::stats_collector::StatsBroadcastClient, Config, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
-        p2block::{P2Block, P2BlockBuilder},
+        p2block::{P2Block, P2BlockBuilder, VerifiedStatus},
         p2chain::{CachedShares, ChainAddResult, P2Chain},
         BlockValidationParams,
         ShareChain,
@@ -42,6 +48,8 @@ const LOG_TARGET: &str = "tari::p2pool::sharechain::in_memory";
 pub const UNCLE_LIMIT: usize = 3;
 // The relative age of an uncle, e.g. if the block is height 10, accept uncles heights 7, 8 and 9, then MAX_UNCLE_AGE=3
 pub const MAX_UNCLE_AGE: u64 = 3;
+// The max allowed future date for a block in seconds
+pub const MAX_FUTURE_BLOCK_TIME: u64 = 540;
 
 // The height when uncles can start being added to the chain. This is to prevent chains with many uncles at
 // height 0, which the pool will create while waiting to sync to the chain.
@@ -58,6 +66,7 @@ pub(crate) struct InMemoryShareChain {
     squad: String,
     minimum_randomx_target_difficulty: u64,
     minimum_sha3_target_difficulty: u64,
+    bypass_checks: VerifiedStatus,
 }
 
 #[allow(dead_code)]
@@ -69,10 +78,12 @@ impl InMemoryShareChain {
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stat_client: StatsBroadcastClient,
         squad: String,
+        bypass_checks: Option<VerifiedStatus>,
     ) -> Result<Self, ShareChainError> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
         }
+        let bypass_checks = bypass_checks.unwrap_or_default();
 
         let data_path = config.block_cache_file.join(pow_algo.to_string());
 
@@ -104,6 +115,12 @@ impl InMemoryShareChain {
                 old,
                 new,
                 &squad,
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
+                config
+                    .minimum_randomx_target_difficulty
+                    .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                bypass_checks,
+                block_validation_params.clone(),
             ) {
                 Ok(p) => {
                     let _unused =
@@ -126,6 +143,12 @@ impl InMemoryShareChain {
                 config.share_window,
                 config.block_time,
                 block_cache,
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
+                config
+                    .minimum_randomx_target_difficulty
+                    .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                bypass_checks,
+                block_validation_params.clone(),
             ));
         }
 
@@ -142,6 +165,7 @@ impl InMemoryShareChain {
             minimum_randomx_target_difficulty: config
                 .minimum_randomx_target_difficulty
                 .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+            bypass_checks,
         };
         debug!(
             target: LOG_TARGET,
@@ -207,7 +231,7 @@ impl InMemoryShareChain {
             },
             PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?,
         };
-        if curr_difficulty < block.target_difficulty() {
+        if curr_difficulty < block.target_difficulty() && !self.bypass_checks.has_difficulty_verified() {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty(), curr_difficulty);
             return Err(ValidationError::DifficultyTarget);
         }
@@ -216,7 +240,11 @@ impl InMemoryShareChain {
     }
 
     /// Validating a new block.
-    async fn validate_block(&self, block: &P2Block) -> Result<(), ValidationError> {
+    async fn validate_block(
+        &self,
+        p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
+        block: &mut P2Block,
+    ) -> Result<(), ValidationError> {
         if block.uncles.len() > UNCLE_LIMIT {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too many uncles! {:?}", self.pow_algo, block.uncles.len());
             return Err(ValidationError::TooManyUncles);
@@ -238,6 +266,49 @@ impl InMemoryShareChain {
                 return Err(ValidationError::UnclesOnSameHeightOrHigher);
             }
         }
+
+        if block.timestamp >
+            EpochTime::now()
+                .checked_add(MAX_FUTURE_BLOCK_TIME.into())
+                .unwrap_or(EpochTime::now())
+        {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Block timestamp is too far in the future! {:?}", self.pow_algo, block.timestamp);
+            return Err(ValidationError::FutureTimestamp);
+        }
+
+        let mut block_output_mmr = PrunedOutputMmr::new(PrunedHashSet::default());
+        for coinbase in &block.coinbases {
+            block_output_mmr
+                .push(coinbase.hash().to_vec())
+                .map_err(|_| ValidationError::InvalidOutputs)?;
+        }
+        block_output_mmr
+            .push(block.other_output_hash.to_vec())
+            .map_err(|_| ValidationError::InvalidOutputs)?;
+        let output_hash = FixedHash::try_from(
+            block_output_mmr
+                .get_merkle_root()
+                .map_err(|_| ValidationError::InvalidOutputs)?,
+        )
+        .map_err(|_| ValidationError::InvalidOutputs)?;
+        if block.original_header.output_mr == output_hash {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ Tari block header output mmr does not match block outputs", self.pow_algo);
+            return Err(ValidationError::OutputMismatch);
+        }
+
+        match p2_chain.get_target_difficulty_for_block(block) {
+            Some(difficulty) => {
+                if difficulty != block.target_difficulty() && !self.bypass_checks.has_target_difficulty_verified() {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty(), difficulty);
+                    return Err(ValidationError::DifficultyTarget);
+                }
+                // we have validated the target difficulty, so lets set it as valid
+                block.verified.set_target_difficulty_verified();
+            },
+            None => {
+                debug!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty could not yet be verified", self.pow_algo);
+            },
+        }
         Ok(())
     }
 
@@ -245,7 +316,7 @@ impl InMemoryShareChain {
     async fn submit_block_with_lock(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-        block: Arc<P2Block>,
+        mut block: P2Block,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
     ) -> Result<ChainAddResult, ShareChainError> {
@@ -258,7 +329,7 @@ impl InMemoryShareChain {
 
                 // info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo,
                 // block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
-                if block_in_chain.verified {
+                if block_in_chain.verified.is_verified() {
                     return Ok(ChainAddResult::default());
                 }
                 info!(target: LOG_TARGET, "[{:?}] ❌ Block already added, but not verified: {}:{}, verifying...",
@@ -266,25 +337,21 @@ impl InMemoryShareChain {
             }
         }
 
-        if p2_chain.get_tip().is_none() {
-            let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
-            return p2_chain.add_block_to_chain(block.clone());
+        if let Some(tip) = p2_chain.get_tip() {
+            // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
+            // older than the share window is way too old for us to care about.
+            let tip_height = tip.height();
+            if block.height < tip_height.saturating_sub(self.config.share_window) && !syncing {
+                return Err(ShareChainError::BlockValidation(
+                    "Block is older than share window".to_string(),
+                ));
+            }
         }
-
-        // this is safe as we already checked it does exist
-        let tip_height = p2_chain.get_tip().unwrap().height();
-        // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
-        // older than the share window is way too old for us to care about.
-        if block.height < tip_height.saturating_sub(self.config.share_window) && !syncing {
-            return Err(ShareChainError::BlockValidation(
-                "Block is older than share window".to_string(),
-            ));
-        }
-
         // validate
-        self.validate_block(&block).await?;
+        self.validate_block(p2_chain, &mut block).await?;
         let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
-        let new_block = block.clone();
+        block.verified.set_difficulty_verified();
+        let new_block = Arc::new(block.clone());
 
         // add block to chain
         let new_tip = p2_chain.add_block_to_chain(new_block)?;
@@ -306,88 +373,24 @@ impl InMemoryShareChain {
         None
     }
 
-    async fn get_calculate_and_cache_hashmap_of_shares(
+    fn get_calculate_and_cache_hashmap_of_tip_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-    ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
-        fn update_insert(
-            miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
-            miner: String,
-            new_share: u64,
-            coinbase_extra: Vec<u8>,
-        ) {
-            match miner_shares.get_mut(&miner) {
-                Some((v, extra)) => {
-                    *v += new_share;
-                    *extra = coinbase_extra;
-                },
-                None => {
-                    miner_shares.insert(miner, (new_share, coinbase_extra));
-                },
-            }
-        }
-        let mut miners_to_shares = HashMap::new();
-        let tip_level = match p2_chain.get_tip() {
-            Some(tip_level) => tip_level,
-            None => return Ok(miners_to_shares),
+    ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
+        let tip = match p2_chain.get_tip() {
+            Some(tip) => tip,
+            None => return Ok(HashMap::new()),
         };
-
-        // we want to count 1 short,as the final share will be for this node
-        let stop_height = tip_level.height().saturating_sub(self.config.share_window - 1);
-        let tip_hash = tip_level.chain_block();
-        let mut cur_block = tip_level
-            .get_header(&tip_level.chain_block())
-            .ok_or(ShareChainError::BlockNotFound)?;
-        update_insert(
-            &mut miners_to_shares,
-            cur_block.wallet_address_base58,
-            MAIN_REWARD_SHARE,
-            cur_block.coinbase_extra.clone(),
-        );
-        for uncle in &cur_block.uncles {
-            let uncle_block = p2_chain
-                .level_at_height(uncle.0)
-                .ok_or(ShareChainError::UncleBlockNotFound)?
-                .get_header(&uncle.1)
-                .ok_or(ShareChainError::UncleBlockNotFound)?;
-            update_insert(
-                &mut miners_to_shares,
-                uncle_block.wallet_address_base58,
-                UNCLE_REWARD_SHARE,
-                uncle_block.coinbase_extra.clone(),
-            );
-        }
-        while cur_block.height > stop_height {
-            cur_block = p2_chain
-                .level_at_height(cur_block.height.saturating_sub(1))
-                .ok_or(ShareChainError::BlockNotFound)?
-                .get_header(&cur_block.prev_hash)
-                .ok_or(ShareChainError::BlockNotFound)?;
-            update_insert(
-                &mut miners_to_shares,
-                cur_block.wallet_address_base58,
-                MAIN_REWARD_SHARE,
-                cur_block.coinbase_extra.clone(),
-            );
-            for uncle in &cur_block.uncles {
-                let uncle_block = p2_chain
-                    .level_at_height(uncle.0)
-                    .ok_or(ShareChainError::UncleBlockNotFound)?
-                    .get_header(&uncle.1)
-                    .ok_or(ShareChainError::UncleBlockNotFound)?;
-                update_insert(
-                    &mut miners_to_shares,
-                    uncle_block.wallet_address_base58,
-                    UNCLE_REWARD_SHARE,
-                    uncle_block.coinbase_extra.clone(),
-                );
-            }
-        }
+        // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+        // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+        // this is safe
+        #[allow(clippy::mutable_key_type)]
+        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height())?;
         p2_chain.cached_shares = Some(CachedShares {
-            at_hash: tip_hash,
-            shares: miners_to_shares.clone(),
+            at_hash: tip.chain_block(),
+            shares: shares.clone(),
         });
-        Ok(miners_to_shares)
+        Ok(shares)
     }
 
     fn all_blocks_with_lock(
@@ -445,7 +448,7 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
+    async fn submit_block(&self, block: P2Block) -> Result<ChainAddResult, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
             return Err(ShareChainError::BlockValidation(
                 "Block version not supported".to_string(),
@@ -481,7 +484,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<ChainAddResult, ShareChainError> {
+    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         let mut blocks = blocks.to_vec();
@@ -581,21 +584,10 @@ impl ShareChain for InMemoryShareChain {
         }
     }
 
-    // async fn get_tip_and_uncles(&self) -> Vec<(u64, FixedHash)> {
-    //     let mut res = Vec::new();
-    //     let bl = self.p2_chain.read().await;
-    //     let tip_level = bl.get_tip();
-    //     if let Some(tip_level) = tip_level {
-    //         res.push((tip_level.height, tip_level.chain_block));
-    //         tip_level.block_in_main_chain().inspect(|block| {
-    //             for uncle in block.uncles.iter() {
-    //                 res.push((uncle.0, uncle.1));
-    //             }
-    //         });
-    //     }
-    //     res
-    // }
-
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     async fn generate_shares_and_get_target_difficulty(
         &self,
         new_tip_block: &P2Block,
@@ -623,16 +615,21 @@ impl ShareChain for InMemoryShareChain {
                 drop(chain_read_lock);
                 // if there is none, lets see if we need to calculate one
                 let mut wl = self.p2_chain.write().await;
-                miners_to_shares = self.get_calculate_and_cache_hashmap_of_shares(&mut wl).await?;
+                miners_to_shares = self.get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)?;
                 chain_read_lock = wl.downgrade();
             }
             miners_to_shares
         };
 
         // lets add the new tip block to the hashmap
+        let miner_share = MinerShare {
+            miner: new_tip_block.miner_wallet_address.clone(),
+            share_count: MAIN_REWARD_SHARE,
+            coinbase_extra: new_tip_block.miner_coinbase_extra.clone(),
+        };
         miners_to_shares.insert(
-            new_tip_block.miner_wallet_address.to_base58(),
-            (MAIN_REWARD_SHARE, new_tip_block.miner_coinbase_extra.clone()),
+            new_tip_block.miner_wallet_address.public_spend_key().clone(),
+            miner_share,
         );
         if !solo_mine {
             for uncle in &new_tip_block.uncles {
@@ -641,23 +638,25 @@ impl ShareChain for InMemoryShareChain {
                     .ok_or(ShareChainError::UncleBlockNotFound)?
                     .get(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
-                miners_to_shares.insert(
-                    uncle_block.miner_wallet_address.to_base58(),
-                    (UNCLE_REWARD_SHARE, uncle_block.miner_coinbase_extra.clone()),
-                );
+                let miner_share = MinerShare {
+                    miner: uncle_block.miner_wallet_address.clone(),
+                    share_count: UNCLE_REWARD_SHARE,
+                    coinbase_extra: uncle_block.miner_coinbase_extra.clone(),
+                };
+                miners_to_shares.insert(uncle_block.miner_wallet_address.public_spend_key().clone(), miner_share);
             }
         }
 
         let mut res = vec![];
 
-        for (key, (shares, extra)) in miners_to_shares {
+        for (_key, miner_share) in miners_to_shares {
             // find coinbase extra for wallet address
             res.push(NewBlockCoinbase {
-                address: key,
-                value: shares,
+                address: miner_share.miner.to_base58(),
+                value: miner_share.share_count,
                 stealth_payment: false,
                 revealed_value_proof: true,
-                coinbase_extra: extra,
+                coinbase_extra: miner_share.coinbase_extra,
             });
         }
 
@@ -687,7 +686,6 @@ impl ShareChain for InMemoryShareChain {
             Some(ref prev_block) => prev_block.height.saturating_add(1),
             None => 0,
         };
-
         // lets calculate the uncles
         // uncle rules are:
         // 1. The uncle can only be a max of 3 blocks older than the new tip
@@ -821,21 +819,6 @@ impl ShareChain for InMemoryShareChain {
         Ok((blocks, tip_level, chain_pow))
     }
 
-    // async fn get_target_difficulty(&self, height: u64) -> Difficulty {
-    //     let min = match self.pow_algo {
-    //         PowAlgorithm::RandomX => Difficulty::from_u64(MIN_RANDOMX_DIFFICULTY).unwrap(),
-    //         PowAlgorithm::Sha3x => Difficulty::from_u64(MIN_SHA3X_DIFFICULTY).unwrap(),
-    //     };
-    //     let max = self
-    //         .consensus_manager
-    //         .consensus_constants(height)
-    //         .max_pow_difficulty(self.pow_algo);
-    //     let chain_read_lock = self.p2_chain.read().await;
-
-    //     let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
-    //     cmp::max(min, cmp::min(max, difficulty))
-    // }
-
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty {
         let chain_read_lock = self.p2_chain.read().await;
         chain_read_lock.total_accumulated_tip_difficulty()
@@ -908,11 +891,14 @@ impl ShareChain for InMemoryShareChain {
 
 #[cfg(test)]
 pub mod test {
+    use rand::Rng;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
+    use tari_core::proof_of_work::lwma_diff::LinearWeightedMovingAverage;
     use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 
     use super::*;
+    use crate::sharechain::DIFFICULTY_ADJUSTMENT_WINDOW;
 
     pub fn new_chain() -> InMemoryShareChain {
         let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
@@ -922,12 +908,22 @@ pub mod test {
         let pow_algo = PowAlgorithm::Sha3x;
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_target_difficulty_verified();
+        bypass_checks.set_difficulty_verified();
+        bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,
             config.share_window,
             config.block_time,
             block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
         );
 
         InMemoryShareChain {
@@ -940,6 +936,7 @@ pub mod test {
             squad: "NoSquad".to_string(),
             minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
             minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
         }
     }
 
@@ -950,6 +947,10 @@ pub mod test {
         TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_shares() {
         let share_chain = new_chain();
@@ -972,20 +973,23 @@ pub mod test {
                 .unwrap();
 
             prev_block = Some(block.clone());
-            share_chain.submit_block(block).await.unwrap();
+            share_chain.submit_block((*block).clone()).await.unwrap();
         }
 
         let mut wl = share_chain.p2_chain.write().await;
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
-            .await
+            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
             .unwrap();
         assert_eq!(shares.len(), 15);
         for share in shares {
-            assert_eq!(share.1, (5, static_coinbase_extra.clone()))
+            assert_eq!(share.1.share_count, 5);
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_share_same_participants() {
         let static_coinbase_extra = Vec::new();
@@ -998,36 +1002,41 @@ pub mod test {
             let address = new_random_address();
             miners.push(address);
         }
-
+        let mut lwma =
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
         for i in 0..15 {
+            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
             let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
-                .with_target_difficulty(Difficulty::from_u64(1).unwrap())
+                .with_target_difficulty(target_diff)
                 .unwrap()
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build()
                 .unwrap();
-
+            lwma.add_front(block.timestamp, block.target_difficulty());
             prev_block = Some(block.clone());
 
-            share_chain.submit_block(block).await.unwrap();
+            share_chain.submit_block((*block).clone()).await.unwrap();
         }
 
         let mut wl = share_chain.p2_chain.write().await;
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
-            .await
+            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
             .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
-            assert_eq!(share.1, (15, static_coinbase_extra.clone()))
+            assert_eq!(share.1.share_count, 15);
         }
     }
 
+    // we need to do this as clippy complains about the public key as mutable, which the underlying struct
+    // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
+    // this is safe
+    #[allow(clippy::mutable_key_type)]
     #[tokio::test]
     async fn equal_share_same_participants_with_uncles() {
         let static_coinbase_extra = Vec::new();
@@ -1066,7 +1075,7 @@ pub mod test {
                     .build()
                     .unwrap();
                 uncles.push(block.clone());
-                share_chain.submit_block(block).await.unwrap();
+                share_chain.submit_block((*block).clone()).await.unwrap();
             }
             let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
                 .with_timestamp(timestamp)
@@ -1082,13 +1091,12 @@ pub mod test {
 
             prev_block = Some(block.clone());
 
-            share_chain.submit_block(block).await.unwrap();
+            share_chain.submit_block((*block).clone()).await.unwrap();
         }
 
         let mut wl = share_chain.p2_chain.write().await;
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_shares(&mut wl)
-            .await
+            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
             .unwrap();
         assert_eq!(shares.len(), 5);
         // we have 1 miner with 15 shares and 4 with 19 shares
@@ -1097,7 +1105,7 @@ pub mod test {
         let mut counter_19 = 0;
         let mut counter_15 = 0;
         for share in shares {
-            match share.1 .0 {
+            match share.1.share_count {
                 19 => counter_19 += 1,
                 15 => counter_15 += 1,
                 _ => panic!("Should be 19 or 15"),
@@ -1120,9 +1128,9 @@ pub mod test {
                 .build()
                 .unwrap();
             prev_block = Some(block.clone());
-            blocks.push(block);
+            blocks.push((*block).clone());
         }
-        chain.add_synced_blocks(&blocks).await.unwrap();
+        chain.add_synced_blocks(blocks.clone()).await.unwrap();
         assert_eq!(chain.tip_height().await.unwrap(), 9);
 
         let mut their_blocks = Vec::new();
@@ -1185,14 +1193,352 @@ pub mod test {
             .await
             .unwrap();
         assert_eq!(new_tip.height, 0);
-        share_chain.submit_block(new_tip).await.unwrap();
+        share_chain.submit_block((*new_tip).clone()).await.unwrap();
         for i in 1..10 {
             new_tip = share_chain
                 .generate_new_tip_block(&new_random_address(), static_coinbase_extra.clone())
                 .await
                 .unwrap();
             assert_eq!(new_tip.height, i);
-            share_chain.submit_block(new_tip).await.unwrap();
+            share_chain.submit_block((*new_tip).clone()).await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn chain_rejects_bad_target_difficulty() {
+        let static_coinbase_extra = Vec::new();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_difficulty_verified();
+        bypass_checks.set_correct_shares();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
+        );
+
+        let share_chain = InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
+            coinbase_extras,
+            stat_client,
+            config: config.clone(),
+            squad: "NoSquad".to_string(),
+            minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
+            minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
+        };
+
+        let mut timestamp = EpochTime::now();
+        let mut prev_block = None;
+        let address = new_random_address();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        for i in 0..14 {
+            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+            timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+                .with_timestamp(timestamp)
+                .with_height(i as u64)
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_diff)
+                .unwrap()
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
+                .build()
+                .unwrap();
+            lwma.add_back(block.timestamp, block.target_difficulty());
+            prev_block = Some(block.clone());
+
+            share_chain.submit_block((*block).clone()).await.unwrap();
+        }
+
+        // lets add a bad target difficulty block
+        let target_diff = Difficulty::min();
+        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+            .with_timestamp(timestamp)
+            .with_height(14)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap();
+        assert!(share_chain.submit_block((*block).clone()).await.is_err());
+
+        let chain = share_chain.p2_chain.read().await;
+        // chain tip should not have been updated
+        assert_eq!(chain.get_tip().unwrap().height(), 13);
+    }
+
+    #[tokio::test]
+    async fn chain_rejects_bad_difficulty() {
+        let static_coinbase_extra = Vec::new();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_median_timestamp();
+        bypass_checks.set_correct_shares();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
+        );
+
+        let share_chain = InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
+            coinbase_extras,
+            stat_client,
+            config: config.clone(),
+            squad: "NoSquad".to_string(),
+            minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
+            minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
+        };
+
+        let mut timestamp = EpochTime::now();
+        let mut prev_block = None;
+        let address = new_random_address();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        for i in 0..5 {
+            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+            timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
+            let mut block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
+                .with_timestamp(timestamp)
+                .with_height(i as u64)
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_diff)
+                .unwrap()
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
+                .build()
+                .unwrap()))
+            .clone();
+            lwma.add_back(block.timestamp, block.target_difficulty());
+            mine_block(&mut block, target_diff);
+            prev_block = Some(block.clone());
+
+            share_chain.submit_block((block).clone()).await.unwrap();
+        }
+
+        // lets add a bad target difficulty block
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
+        let block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
+            .with_timestamp(timestamp)
+            .with_height(5)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap()))
+        .clone();
+        assert!(share_chain.submit_block(block.clone()).await.is_err());
+
+        let chain = share_chain.p2_chain.read().await;
+        // chain tip should not have been updated
+        assert_eq!(chain.get_tip().unwrap().height(), 4);
+    }
+
+    fn mine_block(block: &mut P2Block, target: Difficulty) {
+        block.original_header.nonce = rand::thread_rng().gen();
+        for _i in 0..20000 {
+            if sha3x_difficulty(&block.original_header).expect("should get difficulty") == target {
+                return;
+            }
+            block.original_header.nonce += 1;
+        }
+        panic!("Could not mine to difficulty in 20000 iterations");
+    }
+
+    #[tokio::test]
+    async fn chain_rejects_bad_median_timestamp() {
+        let static_coinbase_extra = Vec::new();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let mut bypass_checks = VerifiedStatus::new();
+        bypass_checks.set_correct_shares();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
+        );
+
+        let share_chain = InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
+            coinbase_extras,
+            stat_client,
+            config: config.clone(),
+            squad: "NoSquad".to_string(),
+            minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
+            minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
+        };
+
+        let mut timestamp = EpochTime::now();
+        let first_timestamp = timestamp;
+        let mut prev_block = None;
+        let address = new_random_address();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        for i in 0..5 {
+            let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+            timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+            let mut block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
+                .with_timestamp(timestamp)
+                .with_height(i as u64)
+                .with_miner_wallet_address(address.clone())
+                .with_target_difficulty(target_diff)
+                .unwrap()
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
+                .build()
+                .unwrap()))
+            .clone();
+            lwma.add_back(block.timestamp, block.target_difficulty());
+            mine_block(&mut block, target_diff);
+            prev_block = Some(block.clone());
+
+            share_chain.submit_block((block).clone()).await.unwrap();
+        }
+
+        // lets add a bad median timestamp block
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let mut block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
+            .with_timestamp(first_timestamp)
+            .with_height(5)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap()))
+        .clone();
+
+        mine_block(&mut block, target_diff);
+        assert!(share_chain.submit_block(block.clone()).await.is_err());
+
+        let chain = share_chain.p2_chain.read().await;
+        // chain tip should not have been updated
+        assert_eq!(chain.get_tip().unwrap().height(), 4);
+    }
+
+    #[tokio::test]
+    async fn chain_rejects_block_with_bad_shares() {
+        let static_coinbase_extra = Vec::new();
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let config = Config::default();
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+        let bypass_checks = VerifiedStatus::new();
+        let p2chain = P2Chain::new_empty(
+            pow_algo,
+            config.share_window * 2,
+            config.share_window,
+            config.block_time,
+            block_cache,
+            1,
+            1,
+            bypass_checks,
+            None,
+        );
+
+        let share_chain = InMemoryShareChain {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
+            pow_algo,
+            block_validation_params: None,
+            coinbase_extras,
+            stat_client,
+            config: config.clone(),
+            squad: "NoSquad".to_string(),
+            minimum_randomx_target_difficulty: MIN_RANDOMX_DIFFICULTY,
+            minimum_sha3_target_difficulty: MIN_SHA3X_DIFFICULTY,
+            bypass_checks,
+        };
+
+        let mut timestamp = EpochTime::now();
+        let mut prev_block = None;
+        let mut lwma =
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
+
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let address = new_random_address();
+        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+            .with_timestamp(timestamp)
+            .with_height(0)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap();
+        lwma.add_front(block.timestamp, block.target_difficulty());
+        prev_block = Some(block.clone());
+
+        share_chain.submit_block((*block).clone()).await.unwrap();
+
+        let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
+        let address = new_random_address();
+        timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
+        let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+            .with_timestamp(timestamp)
+            .with_height(1)
+            .with_miner_wallet_address(address.clone())
+            .with_target_difficulty(target_diff)
+            .unwrap()
+            .with_miner_coinbase_extra(static_coinbase_extra.clone())
+            .build()
+            .unwrap();
+        lwma.add_front(block.timestamp, block.target_difficulty());
+
+        share_chain.submit_block((*block).clone()).await.unwrap_err();
+
+        let chain = share_chain.p2_chain.read().await;
+        // chain tip should not have been updated
+        assert_eq!(chain.get_tip().unwrap().height(), 0);
     }
 }

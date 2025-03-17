@@ -71,4 +71,14 @@ pub enum ValidationError {
     RandomXDifficulty(#[from] MergeMineError),
     #[error("Block achieved difficulty is below the target")]
     DifficultyTarget,
+    #[error("Block timestamp is too far in the future")]
+    FutureTimestamp,
+    #[error("Block median timestamp is too far in the past")]
+    MedianTimestamp,
+    #[error("Tari block header does not match P2Block outputs")]
+    OutputMismatch,
+    #[error("Invalid block outputs")]
+    InvalidOutputs,
+    #[error("Invalid coinbase")]
+    InvalidCoinbase,
 }

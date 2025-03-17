@@ -13,7 +13,10 @@ use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{server::PROTOCOL_VERSION, sharechain::p2block::P2Block};
+use crate::{
+    server::PROTOCOL_VERSION,
+    sharechain::p2block::{P2Block, VerifiedStatus},
+};
 
 #[macro_export]
 macro_rules! impl_conversions {
@@ -203,7 +206,7 @@ impl CatchUpSyncResponse {
     pub fn into_blocks(self) -> Vec<P2Block> {
         let mut blocks = self.blocks;
         for block in &mut blocks {
-            block.verified = false;
+            block.verified = VerifiedStatus::new();
         }
         blocks
     }
@@ -324,7 +327,7 @@ impl SyncMissingBlocksResponse {
     pub fn into_blocks(self) -> Vec<P2Block> {
         let mut blocks = self.blocks;
         for block in &mut blocks {
-            block.verified = false;
+            block.verified = VerifiedStatus::new();
         }
         blocks
     }
