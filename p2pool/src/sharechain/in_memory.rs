@@ -1371,7 +1371,7 @@ pub mod test {
 
         // lets add a bad target difficulty block
         let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
-        timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
+        timestamp = timestamp.checked_add(EpochTime::from(1)).unwrap();
         let block = (*(P2BlockBuilder::new_from_block(prev_block.as_ref())
             .with_timestamp(timestamp)
             .with_height(5)

@@ -1051,7 +1051,7 @@ impl<T: BlockCache> P2Chain<T> {
         // we want to count 1 short,as the final share will be for this node
         let stop_height = start_level.height().saturating_sub(self.share_window - 1);
         let mut cur_block = start_level
-            .get_header(&prev_hash)
+            .get_header(prev_hash)
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
