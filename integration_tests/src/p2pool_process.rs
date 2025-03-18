@@ -35,6 +35,7 @@ pub struct P2PoolProcess {
     pub name: String,
     pub temp_dir_path: PathBuf,
     pub is_seed_node: bool,
+    pub diagnostic_mode: bool,
     pub config: ShaP2PoolConfig,
     pub node_id: PeerId,
     pub squad: String,
@@ -54,6 +55,7 @@ impl Drop for P2PoolProcess {
 pub async fn spawn_p2pool_node_and_wait_for_start(
     world: &mut TariWorld,
     is_seed_node: bool,
+    diagnostic_mode: bool,
     p2pool_name: String,
     squad: String,
     connected_base_node: String,
@@ -61,6 +63,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
     let mut node_config = ShaP2PoolConfig::default();
     std::env::set_var("TARI_NETWORK", "localnet");
     set_network_if_choice_valid(Network::LocalNet)?;
+    let is_seed_node = if diagnostic_mode { false } else { is_seed_node };
 
     let temp_dir_path: PathBuf;
 
@@ -74,15 +77,25 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         node_config.p2p_service.peer_info_publish_interval = Duration::from_secs(1);
         node_config.p2p_service.peer_exchange_interval = Duration::from_secs(1);
         node_config.p2p_service.meta_data_exchange_interval = Duration::from_secs(1);
-        node_config.network_silence_delay = 0;
+        node_config.p2p_service.diagnostic_mode = diagnostic_mode;
+        if diagnostic_mode {
+            node_config.p2p_service.randomx_enabled = false;
+            node_config.p2p_service.sha3x_enabled = false;
+            node_config.network_silence_delay = u64::from(u16::MAX);
+        } else {
+            node_config.p2p_service.randomx_enabled = true;
+            node_config.p2p_service.sha3x_enabled = true;
+            node_config.network_silence_delay = 0;
+        }
         // Each spawned p2pool node will use different ports
-        node_config.p2p_port = get_port(18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
-        node_config.grpc_port = get_port(18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
+        node_config.p2p_port = get_port(world, 18000..18499, Duration::from_secs(20)).ok_or("p2p_port no free port")?;
+        node_config.grpc_port =
+            get_port(world, 18500..18999, Duration::from_secs(20)).ok_or("grpc_port no free port")?;
         if is_seed_node {
             node_config.http_server.enabled = false;
         } else {
             node_config.http_server.port =
-                get_port(19000..19499, Duration::from_secs(20)).ok_or("http_server_port no free port")?;
+                get_port(world, 19000..19499, Duration::from_secs(20)).ok_or("http_server_port no free port")?;
             node_config.http_server.enabled = true;
         }
         // The format for this addrress can be either "/ip4/127.0.0.1/tcp/{}" or "/ip4/127.0.0.1/udp/{}/quic-v1"
@@ -147,6 +160,9 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         .filter(|(_, process)| process.is_seed_node && process.squad == squad)
         .map(|(_, value)| format!("/ip4/127.0.0.1/tcp/{}/p2p/{}", value.p2p_port, value.node_id))
         .collect::<Vec<String>>();
+    for seed_peer in &seed_peers {
+        debug!(target: LOG_TARGET, "'{}' has seed peer: '{}'", p2pool_name, seed_peer);
+    }
 
     let args = StartArgs {
         base_dir: Some(temp_dir_path.clone()),
@@ -170,14 +186,20 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         http_server_disabled: !node_config.http_server.enabled,
         user_agent: None,
         peer_publish_interval: Some(node_config.p2p_service.peer_info_publish_interval.as_secs()),
-        debug_print_chain: true,
+        debug_print_chain: false,
+        diagnostic_mode: node_config.p2p_service.diagnostic_mode,
+        diagnostic_mode_file_path: None,
         max_connections: None,
-        randomx_disabled: false,
-        sha3x_disabled: false,
+        randomx_disabled: !node_config.p2p_service.randomx_enabled,
+        sha3x_disabled: !node_config.p2p_service.sha3x_enabled,
         block_time: Some(1),
         share_window: Some(100),
         export_libp2p_info: Some(temp_dir_path.join(LIBP2P_INFO_FILE).clone()),
-        network_silence_delay: Some(0),
+        network_silence_delay: {
+            // Note: Any value above u16::MAX will be set to u16::MAX
+            let bytes = node_config.network_silence_delay.to_le_bytes();
+            Some(u16::from_le_bytes([bytes[0], bytes[1]]))
+        },
         minimum_sha3_target_difficulty: Some(Difficulty::min().as_u64()),
         minimum_randomx_target_difficulty: Some(Difficulty::min().as_u64()),
     };
@@ -204,6 +226,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         name: p2pool_name.clone(),
         temp_dir_path: temp_dir_path.clone(),
         is_seed_node,
+        diagnostic_mode,
         config: node_config.clone(),
         node_id: libp2p_info.peer_id,
         squad: libp2p_info.squad,
@@ -277,6 +300,7 @@ pub async fn restart_node(world: &mut TariWorld, p2pool_name: String) -> TestRes
 
     let p2pool_process = world.get_p2pool_node(&p2pool_name)?;
     let is_seed_node = p2pool_process.is_seed_node;
+    let diagnostic_mode = p2pool_process.diagnostic_mode;
     let name = p2pool_process.name.clone();
     let squad = p2pool_process.squad.clone();
     let connected_base_node = p2pool_process.connected_base_node.clone();
@@ -284,6 +308,7 @@ pub async fn restart_node(world: &mut TariWorld, p2pool_name: String) -> TestRes
     spawn_p2pool_node_and_wait_for_start(
         world,
         is_seed_node,
+        diagnostic_mode,
         name.clone(),
         squad.clone(),
         connected_base_node.clone(),
@@ -291,6 +316,7 @@ pub async fn restart_node(world: &mut TariWorld, p2pool_name: String) -> TestRes
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
     let mut args_vec = Vec::new();
 
@@ -379,6 +405,17 @@ pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
         args_vec.push("--debug-print-chain".to_string());
     }
 
+    if args.diagnostic_mode {
+        args_vec.push("--diagnostic-mode".to_string());
+    }
+
+    if args.diagnostic_mode_file_path.is_some() {
+        args_vec.push(format!(
+            "--diagnostic-mode-file-path={}",
+            args.diagnostic_mode_file_path.unwrap().display()
+        ));
+    }
+
     if let Some(max_connections) = args.max_connections {
         args_vec.push(format!("--max-connections={}", max_connections));
     }
@@ -429,6 +466,26 @@ pub fn get_p2pool_exe_path() -> PathBuf {
         let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         crate_root.join("../target/release/sha_p2pool")
     }
+}
+
+pub async fn verify_diagnostic_file_created(
+    world: &mut TariWorld,
+    p2pool_name: String,
+    seconds: u64,
+) -> TestResult<()> {
+    debug!(target: LOG_TARGET, "verify '{}' creates a diagnostic file", p2pool_name);
+
+    let p2pool_process = world.get_p2pool_node(&p2pool_name)?;
+    let diagnostic_file_path = p2pool_process.temp_dir_path.join("diagnostic_results.json");
+    let start = Instant::now();
+    while !diagnostic_file_path.exists() && start.elapsed() < Duration::from_secs(seconds) {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    if !diagnostic_file_path.exists() {
+        return Err(format!("Diagnostic file not found at: '{}'", diagnostic_file_path.display()).into());
+    }
+
+    Ok(())
 }
 
 pub async fn verify_peer_connected(world: &mut TariWorld, p2pool_name: String, peer_name: String) -> TestResult<()> {

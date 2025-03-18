@@ -232,6 +232,16 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn with_diagnostic_mode_file_path(&mut self, config: PathBuf) -> &mut Self {
+        self.config.p2p_service.diagnostic_mode_file_path = Some(config);
+        self
+    }
+
+    pub fn with_diagnostic_mode(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.diagnostic_mode = config;
+        self
+    }
+
     pub fn build(&self) -> Config {
         self.config.clone()
     }
