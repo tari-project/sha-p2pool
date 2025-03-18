@@ -810,10 +810,7 @@ impl<T: BlockCache> P2Chain<T> {
                     Ok(shares) => shares,
                     // We dont care here about errors as this just means we dont have enough blocks to calculate the
                     // shares, so we just return false as unverified
-                    Err(_) => {
-                        warn!(target: LOG_TARGET, "[{:?}] ❌ Could not calc new hashmap shares", block.original_header.pow.pow_algo);
-                        return Ok(false)
-                    },
+                    Err(_) => return Ok(false),
                 }
             }
         } else {
@@ -821,10 +818,7 @@ impl<T: BlockCache> P2Chain<T> {
                 Ok(shares) => shares,
                 // We dont care here about errors as this just means we dont have enough blocks to calculate the shares,
                 // so we just return false as unverified
-                Err(_) => {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Could not calc new hashmap shares", block.original_header.pow.pow_algo);
-                    return Ok(false)
-                },
+                Err(_) => return Ok(false),
             }
         };
 
@@ -866,6 +860,7 @@ impl<T: BlockCache> P2Chain<T> {
         }
 
         if block.coinbases.is_empty() {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ No coinbases in P2Block", block.original_header.pow.pow_algo);
             return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
         }
 
@@ -873,6 +868,7 @@ impl<T: BlockCache> P2Chain<T> {
             let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
                 spend_key
             } else {
+                warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase script, found: {}", block.original_header.pow.pow_algo, output.script);
                 return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
             };
             match miners_shares.get(spend_key) {
@@ -887,13 +883,18 @@ impl<T: BlockCache> P2Chain<T> {
                     // We do this as it might be the order of output generation is different, and it might be that a few
                     // outputs are a few micro tari off due to division as its not always possible to divide exactly
                     if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
+                        warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase value for {}, expected: {}, found: {}", block.original_header.pow.pow_algo, spend_key, value, output_value);
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                     if miner_share.coinbase_extra != *output.features.coinbase_extra {
+                        warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase extra mis match for {}, expected: {:?}, found {:?}", block.original_header.pow.pow_algo, spend_key, output.features.coinbase_extra,  miner_share.coinbase_extra);
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                 },
-                None => return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase)),
+                None => {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase not found for share: {}", block.original_header.pow.pow_algo, spend_key);
+                    return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                },
             }
         }
         Ok(true)
@@ -1014,6 +1015,7 @@ impl<T: BlockCache> P2Chain<T> {
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
+        prev_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
@@ -1038,6 +1040,9 @@ impl<T: BlockCache> P2Chain<T> {
             }
         }
         let mut miners_to_shares = HashMap::new();
+        if calculating_height == 0 {
+            return Ok(miners_to_shares);
+        }
         let start_level = match self.level_at_height(calculating_height) {
             Some(level) => level,
             None => return Ok(miners_to_shares),
@@ -1045,9 +1050,8 @@ impl<T: BlockCache> P2Chain<T> {
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = start_level.height().saturating_sub(self.share_window - 1);
-        // let tip_hash = start_level.chain_block();
         let mut cur_block = start_level
-            .get_header(&start_level.chain_block())
+            .get_header(&prev_hash)
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
