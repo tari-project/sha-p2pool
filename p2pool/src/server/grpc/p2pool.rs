@@ -49,7 +49,11 @@ use crate::{
         http::stats_collector::StatsBroadcastClient,
         p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
     },
-    sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
+    sharechain::{
+        p2block::{OldP2Block, P2Block},
+        BlockValidationParams,
+        ShareChain,
+    },
     PROFILING_LOG_TARGET,
 };
 
@@ -167,6 +171,10 @@ where S: ShareChain
                         .map(Arc::<P2Block>::unwrap_or_clone)
                         .collect();
                     new_blocks.append(&mut uncles);
+                    let new_blocks = new_blocks
+                        .into_iter()
+                        .map(|b| <P2Block as Clone>::clone(&b).to_old_p2block())
+                        .collect::<Vec<OldP2Block>>();
                     let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks);
                     let res = self
                         .p2p_client

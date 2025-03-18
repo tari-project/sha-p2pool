@@ -332,7 +332,7 @@ impl InMemoryShareChain {
                 if block_in_chain.verified.is_verified() {
                     return Ok(ChainAddResult::default());
                 }
-                info!(target: LOG_TARGET, "[{:?}] ❌ Block already added, but not verified: {}:{}, verifying...",
+                info!(target: LOG_TARGET, "[{:?}] Block already added, but not verified: {}:{}, verifying...",
                 self.pow_algo, block.height, &block.hash.to_hex()[0..8]);
             }
         }
@@ -385,7 +385,7 @@ impl InMemoryShareChain {
         // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
         // this is safe
         #[allow(clippy::mutable_key_type)]
-        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height())?;
+        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height(), &tip.chain_block())?;
         p2_chain.cached_shares = Some(CachedShares {
             at_hash: tip.chain_block(),
             shares: shares.clone(),
@@ -677,11 +677,12 @@ impl ShareChain for InMemoryShareChain {
         coinbase_extra: Vec<u8>,
     ) -> Result<Arc<P2Block>, ShareChainError> {
         let chain_read_lock = self.p2_chain.read().await;
-
+        let mut timestamp = EpochTime::now();
         // edge case for chain start
         let prev_block = chain_read_lock
             .get_tip()
             .and_then(|tip| tip.block_header_in_main_chain());
+
         let new_height = match prev_block {
             Some(ref prev_block) => prev_block.height.saturating_add(1),
             None => 0,
@@ -746,8 +747,29 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
+        // let check the median timestamp to ensure we create valid blocks
+        if let Some(prev_header) = &prev_block {
+            if let Ok(median_timestamp) =
+                chain_read_lock.calculate_median_timestamp_for_block(prev_header.height, &prev_header.prev_hash)
+            {
+                let mut break_counter = 0;
+                while timestamp <= median_timestamp {
+                    break_counter += 1;
+                    if break_counter > MAX_FUTURE_BLOCK_TIME {
+                        // this should not happen, but if it is, something major is wrong here. So lets see if the
+                        // timestamp gets mined. If we go above Now + 540 secs we break he FTL but the median timestamp
+                        // cannot be above the FTL anyway.
+                        break;
+                    }
+                    timestamp = median_timestamp
+                        .checked_add(EpochTime::from(1))
+                        .expect("should be able to add a 1 sec to timestamp");
+                }
+            }
+        }
+
         Ok(P2BlockBuilder::new(prev_block.map(|b| (b.hash, b.total_pow)))
-            .with_timestamp(EpochTime::now())
+            .with_timestamp(timestamp)
             .with_height(new_height)
             .with_uncles(&uncles)?
             .with_miner_wallet_address(miner_address.clone())
