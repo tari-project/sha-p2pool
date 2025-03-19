@@ -878,7 +878,7 @@ impl<T: BlockCache> P2Chain<T> {
                         (cur_share_sum.saturating_mul(block_reward)).saturating_div(total_shares) - prev_coinbase_value,
                     )
                     .unwrap_or(0);
-                    prev_coinbase_value += u128::from(miner_share.share_count);
+                    prev_coinbase_value += u128::from(value);
                     let output_value = output.minimum_value_promise.as_u64();
                     // We do this as it might be the order of output generation is different, and it might be that a few
                     // outputs are a few micro tari off due to division as its not always possible to divide exactly
