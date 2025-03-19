@@ -130,7 +130,7 @@ impl Display for ChainAddResult {
                 tip.1, tip.0[0], tip.0[1], tip.0[2], tip.0[3]
             )?;
         } else {
-            write!(f, "No new tip added")?;
+            write!(f, "No new tip added ")?;
         }
         if !self.missing_blocks.is_empty() {
             let mut missing_blocks: Vec<String> = Vec::new();
@@ -661,9 +661,10 @@ impl<T: BlockCache> P2Chain<T> {
         let mut total_work = AccumulatedDifficulty::from_u128(u128::from(block.target_difficulty().as_u64()))
             .expect("Difficulty will always fit into accumulated difficulty");
         for uncle in &block.uncles {
-            let uncle_block = self
-                .get_block_at_height(uncle.0, &uncle.1)
-                .ok_or(ShareChainError::BlockNotFound)?;
+            let uncle_block = match self.get_block_at_height(uncle.0, &uncle.1) {
+                Some(block) => block,
+                None => return Ok(false),
+            };
             total_work = total_work
                 .checked_add_difficulty(uncle_block.target_difficulty())
                 .ok_or(ShareChainError::DifficultyOverflow)?;
@@ -671,15 +672,17 @@ impl<T: BlockCache> P2Chain<T> {
 
         // special edge case for start, there is no parent
         if block.height != 0 {
-            let parent = self
-                .get_block_at_height(block.height.saturating_sub(1), &block.prev_hash)
-                .ok_or(ShareChainError::BlockNotFound)?;
+            let parent = match self.get_block_at_height(block.height.saturating_sub(1), &block.prev_hash) {
+                Some(block) => block,
+                None => return Ok(false),
+            };
             total_work = AccumulatedDifficulty::from_u128(total_work.as_u128() + parent.total_pow().as_u128())
                 .map_err(|_| ShareChainError::DifficultyOverflow)?;
         }
 
         if block.total_pow() != total_work {
-            return Ok(false);
+            warn!(target: LOG_TARGET, "❌ Block accumulated difficulty does not match claimed pow! Claimed: {:?}, Actual: {:?}", block.total_pow(), total_work);
+            return Err(ShareChainError::ValidationError(ValidationError::DifficultyTarget));
         }
         Ok(true)
     }
@@ -736,27 +739,39 @@ impl<T: BlockCache> P2Chain<T> {
         if block.verified.has_median_timestamp() || self.bypass_checks.has_median_timestamp() || block.height == 0 {
             return Ok(true);
         }
-        let mut current_block = match self.level_at_height(block.height.saturating_sub(1)) {
-            Some(level) => match level.get_header(&block.prev_hash) {
-                Some(block) => block.clone(),
-                None => return Ok(false),
-            },
-            None => return Ok(false),
+
+        let median_timestamp = match self.calculate_median_timestamp_for_block(block.height, &block.prev_hash) {
+            Ok(median_timestamp) => median_timestamp,
+            Err(_) => return Ok(false),
         };
+        if block.timestamp > median_timestamp {
+            Ok(true)
+        } else {
+            Err(ShareChainError::ValidationError(ValidationError::MedianTimestamp))
+        }
+    }
+
+    pub fn calculate_median_timestamp_for_block(
+        &self,
+        block_height: u64,
+        block_prev_hash: &FixedHash,
+    ) -> Result<EpochTime, ShareChainError> {
+        let mut current_block = self
+            .level_at_height(block_height.saturating_sub(1))
+            .ok_or(ShareChainError::BlockLevelNotFound)?
+            .get_header(block_prev_hash)
+            .ok_or(ShareChainError::BlockNotFound)?;
         let mut timestamps = Vec::with_capacity(MEDIAN_TIMESTAMP_WINDOW);
         timestamps.push(current_block.timestamp);
         while timestamps.len() < MEDIAN_TIMESTAMP_WINDOW {
             if current_block.height == 0 {
                 break;
             }
-            let parent_level = match self.level_at_height(current_block.height.saturating_sub(1)) {
-                Some(level) => level,
-                None => return Ok(false),
-            };
-            current_block = match parent_level.get_header(&current_block.prev_hash) {
-                Some(block) => block,
-                None => return Ok(false),
-            };
+            current_block = self
+                .level_at_height(current_block.height.saturating_sub(1))
+                .ok_or(ShareChainError::BlockLevelNotFound)?
+                .get_header(&current_block.prev_hash)
+                .ok_or(ShareChainError::BlockNotFound)?;
             timestamps.push(current_block.timestamp);
         }
 
@@ -775,11 +790,7 @@ impl<T: BlockCache> P2Chain<T> {
         } else {
             timestamps[mid_index]
         };
-        if block.timestamp > median_timestamp {
-            Ok(true)
-        } else {
-            Err(ShareChainError::ValidationError(ValidationError::MedianTimestamp))
-        }
+        Ok(median_timestamp)
     }
 
     // we need to do this as clippy complains about the public key as mutable, which the underlying struct
@@ -795,10 +806,20 @@ impl<T: BlockCache> P2Chain<T> {
             if block.prev_hash == shares.at_hash {
                 shares.shares.clone()
             } else {
-                self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
+                match self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1), &block.prev_hash) {
+                    Ok(shares) => shares,
+                    // We dont care here about errors as this just means we dont have enough blocks to calculate the
+                    // shares, so we just return false as unverified
+                    Err(_) => return Ok(false),
+                }
             }
         } else {
-            self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1))?
+            match self.get_calculate_and_cache_hashmap_of_shares(block.height.saturating_sub(1), &block.prev_hash) {
+                Ok(shares) => shares,
+                // We dont care here about errors as this just means we dont have enough blocks to calculate the shares,
+                // so we just return false as unverified
+                Err(_) => return Ok(false),
+            }
         };
 
         // lets add the new tip block to the hashmap
@@ -839,6 +860,7 @@ impl<T: BlockCache> P2Chain<T> {
         }
 
         if block.coinbases.is_empty() {
+            warn!(target: LOG_TARGET, "[{:?}] ❌ No coinbases in P2Block", block.original_header.pow.pow_algo);
             return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
         }
 
@@ -846,6 +868,7 @@ impl<T: BlockCache> P2Chain<T> {
             let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
                 spend_key
             } else {
+                warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase script, found: {}", block.original_header.pow.pow_algo, output.script);
                 return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
             };
             match miners_shares.get(spend_key) {
@@ -855,18 +878,23 @@ impl<T: BlockCache> P2Chain<T> {
                         (cur_share_sum.saturating_mul(block_reward)).saturating_div(total_shares) - prev_coinbase_value,
                     )
                     .unwrap_or(0);
-                    prev_coinbase_value += u128::from(miner_share.share_count);
+                    prev_coinbase_value += u128::from(value);
                     let output_value = output.minimum_value_promise.as_u64();
                     // We do this as it might be the order of output generation is different, and it might be that a few
                     // outputs are a few micro tari off due to division as its not always possible to divide exactly
                     if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
+                        warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase value for {}, expected: {}, found: {}", block.original_header.pow.pow_algo, spend_key, value, output_value);
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                     if miner_share.coinbase_extra != *output.features.coinbase_extra {
+                        warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase extra mismatch for {}, expected: {:?}, found {:?}", block.original_header.pow.pow_algo, spend_key, output.features.coinbase_extra,  miner_share.coinbase_extra);
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                 },
-                None => return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase)),
+                None => {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase not found for share: {}", block.original_header.pow.pow_algo, spend_key);
+                    return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
+                },
             }
         }
         Ok(true)
@@ -987,6 +1015,7 @@ impl<T: BlockCache> P2Chain<T> {
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
+        prev_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
@@ -1011,6 +1040,9 @@ impl<T: BlockCache> P2Chain<T> {
             }
         }
         let mut miners_to_shares = HashMap::new();
+        if calculating_height == 0 {
+            return Ok(miners_to_shares);
+        }
         let start_level = match self.level_at_height(calculating_height) {
             Some(level) => level,
             None => return Ok(miners_to_shares),
@@ -1018,9 +1050,8 @@ impl<T: BlockCache> P2Chain<T> {
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = start_level.height().saturating_sub(self.share_window - 1);
-        // let tip_hash = start_level.chain_block();
         let mut cur_block = start_level
-            .get_header(&start_level.chain_block())
+            .get_header(prev_hash)
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
