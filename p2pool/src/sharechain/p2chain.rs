@@ -887,7 +887,7 @@ impl<T: BlockCache> P2Chain<T> {
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                     if miner_share.coinbase_extra != *output.features.coinbase_extra {
-                        warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase extra mis match for {}, expected: {:?}, found {:?}", block.original_header.pow.pow_algo, spend_key, output.features.coinbase_extra,  miner_share.coinbase_extra);
+                        warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase extra mismatch for {}, expected: {:?}, found {:?}", block.original_header.pow.pow_algo, spend_key, output.features.coinbase_extra,  miner_share.coinbase_extra);
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                 },
