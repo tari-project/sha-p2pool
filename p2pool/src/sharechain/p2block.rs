@@ -222,7 +222,7 @@ impl P2Block {
             target_difficulty: self.target_difficulty,
             uncles: self.uncles,
             miner_coinbase_extra: self.miner_coinbase_extra,
-            verified: self.verified.is_verified() as bool,
+            verified: self.verified.is_verified(),
             total_pow: self.total_pow,
         }
     }
