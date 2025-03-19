@@ -15,7 +15,7 @@ use tari_utilities::epoch_time::EpochTime;
 
 use crate::{
     server::PROTOCOL_VERSION,
-    sharechain::p2block::{P2Block, VerifiedStatus},
+    sharechain::p2block::{OldP2Block, P2Block, VerifiedStatus},
 };
 
 #[macro_export]
@@ -159,7 +159,7 @@ pub struct CatchUpSyncResponse {
     pub version: u64,
     peer_id: PeerId,
     algo: u64,
-    blocks: Vec<P2Block>,
+    blocks: Vec<OldP2Block>,
     // the tip is used to work out if we should continuing syncing from them
     tip: (u64, FixedHash),
     achieved_pow: Option<u128>,
@@ -169,7 +169,7 @@ impl CatchUpSyncResponse {
     pub fn new(
         algo: PowAlgorithm,
         peer_id: PeerId,
-        blocks: &[Arc<P2Block>],
+        blocks: &[Arc<OldP2Block>],
         tip: (u64, FixedHash),
         achieved_pow: u128,
     ) -> Self {
@@ -203,10 +203,10 @@ impl CatchUpSyncResponse {
         self.tip.0
     }
 
-    pub fn into_blocks(self) -> Vec<P2Block> {
+    pub fn into_blocks(self) -> Vec<OldP2Block> {
         let mut blocks = self.blocks;
         for block in &mut blocks {
-            block.verified = VerifiedStatus::new();
+            block.verified = false;
         }
         blocks
     }
@@ -243,7 +243,7 @@ pub struct DirectPeerInfoResponse {
 pub struct NotifyNewTipBlock {
     pub version: u64,
     peer_id: PeerId,
-    pub new_blocks: Vec<P2Block>,
+    pub new_blocks: Vec<OldP2Block>,
     pub timestamp: u64,
 }
 
@@ -272,7 +272,7 @@ impl NotifyNewTipBlock {
         }
     }
 
-    pub fn new(peer_id: PeerId, new_blocks: Vec<P2Block>) -> Self {
+    pub fn new(peer_id: PeerId, new_blocks: Vec<OldP2Block>) -> Self {
         let timestamp = EpochTime::now().as_u64();
         Self {
             version: PROTOCOL_VERSION,
@@ -299,11 +299,11 @@ pub struct SyncMissingBlocksResponse {
     version: u64,
     peer_id: PeerId,
     algo: u64,
-    pub blocks: Vec<P2Block>,
+    pub blocks: Vec<OldP2Block>,
 }
 
 impl SyncMissingBlocksResponse {
-    pub fn new(peer_id: PeerId, algo: PowAlgorithm, blocks: &[Arc<P2Block>]) -> Self {
+    pub fn new(peer_id: PeerId, algo: PowAlgorithm, blocks: &[Arc<OldP2Block>]) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             peer_id,
@@ -324,10 +324,10 @@ impl SyncMissingBlocksResponse {
         PowAlgorithm::try_from(self.algo).unwrap_or(PowAlgorithm::RandomX)
     }
 
-    pub fn into_blocks(self) -> Vec<P2Block> {
+    pub fn into_blocks(self) -> Vec<OldP2Block> {
         let mut blocks = self.blocks;
         for block in &mut blocks {
-            block.verified = VerifiedStatus::new();
+            block.verified = false;
         }
         blocks
     }

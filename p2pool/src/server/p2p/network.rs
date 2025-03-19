@@ -83,7 +83,7 @@ use crate::{
         PROTOCOL_VERSION,
     },
     sharechain::{
-        p2block::{P2Block, VerifiedStatus, CURRENT_CHAIN_ID},
+        p2block::{OldP2Block, P2Block, VerifiedStatus, CURRENT_CHAIN_ID},
         ShareChain,
     },
 };
@@ -220,7 +220,7 @@ pub enum P2pServiceQuery {
         pow_algo: PowAlgorithm,
         height: u64,
         count: usize,
-        response: oneshot::Sender<Vec<Arc<P2Block>>>,
+        response: oneshot::Sender<Vec<Arc<OldP2Block>>>,
     },
 }
 
@@ -265,7 +265,7 @@ enum InnerRequest {
     PerformCatchUpSync(PerformCatchUpSync),
     AddSyncedBlock {
         algo: PowAlgorithm,
-        block: Box<P2Block>,
+        block: Box<OldP2Block>,
         source_peer: PeerId,
     },
 }
@@ -653,7 +653,11 @@ where S: ShareChain
                                 .max()
                                 .unwrap_or(0);
 
-                            let mut blocks: Vec<P2Block> = payload.new_blocks.to_vec();
+                            let old_blocks: Vec<OldP2Block> = payload.new_blocks.to_vec();
+                            let mut blocks = old_blocks
+                                .into_iter()
+                                .map(|block| block.to_p2block())
+                                .collect::<Vec<P2Block>>();
                             for block in &mut blocks {
                                 block.verified = VerifiedStatus::new();
                             }
@@ -1173,6 +1177,10 @@ where S: ShareChain
                 });
             return;
         }
+        let blocks = blocks
+            .into_iter()
+            .map(|b| Arc::new(<P2Block as Clone>::clone(&b).to_old_p2block()))
+            .collect::<Vec<Arc<OldP2Block>>>();
         let response = SyncMissingBlocksResponse::new(local_peer_id, request.algo(), &blocks);
 
         let _unused = self
@@ -1215,6 +1223,7 @@ where S: ShareChain
         let peer_store = self.network_peer_store.clone();
         let max_sync_depth = self.config.max_missing_blocks_sync_depth;
         tokio::spawn(async move {
+            let blocks = blocks.into_iter().map(|b| b.to_p2block()).collect();
             match share_chain.add_synced_blocks(blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
@@ -1845,7 +1854,10 @@ where S: ShareChain
                 return;
             },
         };
-
+        let blocks = blocks
+            .into_iter()
+            .map(|b| Arc::new(<P2Block as Clone>::clone(&b).to_old_p2block()))
+            .collect::<Vec<Arc<OldP2Block>>>();
         if self
             .swarm
             .behaviour_mut()
@@ -2374,13 +2386,17 @@ where S: ShareChain
                     PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                     PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
                 };
-                let blocks = match share_chain.all_blocks(Some(height), count, true).await {
+                let new_blocks = match share_chain.all_blocks(Some(height), count, true).await {
                     Ok(blocks) => blocks,
                     Err(e) => {
                         error!(target: LOG_TARGET, "Failed to get blocks from height: {e:?}");
                         vec![]
                     },
                 };
+                let blocks = new_blocks
+                    .into_iter()
+                    .map(|b| Arc::new(<P2Block as Clone>::clone(&b).to_old_p2block()))
+                    .collect::<Vec<Arc<OldP2Block>>>();
                 let _unused = response.send(blocks);
             },
         }
@@ -2438,7 +2454,8 @@ where S: ShareChain
                     ),
                 };
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Adding block {}({:x}{:x}{:x}{:x}) to share chain from peer {}", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3], source_peer);
-                match share_chain.add_synced_blocks(vec![*block]).await {
+                let block = (*block).clone().to_p2block();
+                match share_chain.add_synced_blocks(vec![block]).await {
                     Ok(result) => {
                         info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, result);
                         let missing_parents = result.into_missing_parents_vec();

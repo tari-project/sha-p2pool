@@ -83,7 +83,8 @@ impl InMemoryShareChain {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
         }
-        let bypass_checks = bypass_checks.unwrap_or_default();
+        let mut bypass_checks = bypass_checks.unwrap_or_default();
+        bypass_checks.set_target_difficulty_verified();
 
         let data_path = config.block_cache_file.join(pow_algo.to_string());
 

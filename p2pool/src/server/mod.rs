@@ -13,4 +13,4 @@ pub mod grpc;
 pub mod http;
 pub mod p2p;
 
-pub const PROTOCOL_VERSION: u64 = 33;
+pub const PROTOCOL_VERSION: u64 = 32;

@@ -622,24 +622,34 @@ impl<T: BlockCache> P2Chain<T> {
         let block = level.get(&hash).ok_or(ShareChainError::BlockNotFound)?;
         let mut verified = block.verified;
 
+        info!(target: LOG_TARGET, "Verifying parents and pow: {}", height);
         if self.verify_pow_and_parents(block.clone())? {
             verified.set_has_parents();
+            info!(target: LOG_TARGET, "Verified parents and pow");
         }
 
+        info!(target: LOG_TARGET, "Verifying difficulty: {}", height);
         if self.verify_difficulty(block.clone())? {
             verified.set_difficulty_verified();
+            info!(target: LOG_TARGET, "Verified difficulty");
         }
 
+        info!(target: LOG_TARGET, "Verifying target difficulty: {}", height);
         if self.verify_target_difficulty(block.clone())? {
             verified.set_target_difficulty_verified();
+            info!(target: LOG_TARGET, "Verified target difficulty");
         }
 
-        if self.verify_median_timestamp_for_block(block.clone())? {
-            verified.set_median_timestamp();
-        }
+        // info!(target: LOG_TARGET, "Verifying median timestamp: {}", height);
+        // if self.verify_median_timestamp_for_block(block.clone())? {
+        verified.set_median_timestamp();
+        //     info!(target: LOG_TARGET, "Verified median timestamp");
+        // }
 
+        info!(target: LOG_TARGET, "Verifying shares");
         if self.verify_shares_for_block(block.clone())? {
-            verified.set_correct_shares();
+        verified.set_correct_shares();
+            info!(target: LOG_TARGET, "Verified shares");
         }
 
         // lets update verification status
@@ -832,11 +842,17 @@ impl<T: BlockCache> P2Chain<T> {
         for uncle in &block.uncles {
             let uncle_level = match self.level_at_height(uncle.0) {
                 Some(level) => level,
-                None => return Ok(false),
+                None => {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Could not get uncle level of new tip block in calculating shares", block.original_header.pow.pow_algo);
+                    return Ok(false)
+                },
             };
             let uncle_block = match uncle_level.get(&uncle.1) {
                 Some(block) => block.clone(),
-                None => return Ok(false),
+                None => {
+                    warn!(target: LOG_TARGET, "[{:?}] ❌ Could not get uncle block of new tip block in calculating shares", block.original_header.pow.pow_algo);
+                    return Ok(false)
+                },
             };
             let miner_share = MinerShare {
                 miner: uncle_block.miner_wallet_address.clone(),
@@ -1045,14 +1061,17 @@ impl<T: BlockCache> P2Chain<T> {
         }
         let start_level = match self.level_at_height(calculating_height) {
             Some(level) => level,
-            None => return Ok(miners_to_shares),
+            None => {
+                warn!(target: LOG_TARGET, "❌ No level at height: {}", calculating_height);
+                return Ok(miners_to_shares)},
         };
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = start_level.height().saturating_sub(self.share_window - 1);
+        warn!(target: LOG_TARGET, "❌ stop level: {}", stop_height);
         let mut cur_block = start_level
-            .get_header(prev_hash)
-            .ok_or(ShareChainError::BlockNotFound)?;
+            .get_header(&prev_hash)
+            .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ start block not found"))?;
         update_insert(
             &mut miners_to_shares,
             cur_block.wallet_address,
@@ -1062,9 +1081,9 @@ impl<T: BlockCache> P2Chain<T> {
         for uncle in &cur_block.uncles {
             let uncle_block = self
                 .level_at_height(uncle.0)
-                .ok_or(ShareChainError::UncleBlockNotFound)?
+                .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌start uncle level not found"))?
                 .get_header(&uncle.1)
-                .ok_or(ShareChainError::UncleBlockNotFound)?;
+                .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌start uncle block not found"))?;
             update_insert(
                 &mut miners_to_shares,
                 uncle_block.wallet_address,
@@ -1075,9 +1094,9 @@ impl<T: BlockCache> P2Chain<T> {
         while cur_block.height > stop_height {
             cur_block = self
                 .level_at_height(cur_block.height.saturating_sub(1))
-                .ok_or(ShareChainError::BlockNotFound)?
+                .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No level at height: {}", cur_block.height.saturating_sub(1)))?
                 .get_header(&cur_block.prev_hash)
-                .ok_or(ShareChainError::BlockNotFound)?;
+                .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No block at height: {}", cur_block.height.saturating_sub(1)))?;
             update_insert(
                 &mut miners_to_shares,
                 cur_block.wallet_address,
@@ -1087,9 +1106,9 @@ impl<T: BlockCache> P2Chain<T> {
             for uncle in &cur_block.uncles {
                 let uncle_block = self
                     .level_at_height(uncle.0)
-                    .ok_or(ShareChainError::UncleBlockNotFound)?
+                    .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No uncle level at height: {}", uncle.0))?
                     .get_header(&uncle.1)
-                    .ok_or(ShareChainError::UncleBlockNotFound)?;
+                    .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No uncle block at height: {}", uncle.0))?;
                 update_insert(
                     &mut miners_to_shares,
                     uncle_block.wallet_address,

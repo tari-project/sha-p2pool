@@ -167,6 +167,7 @@ where S: ShareChain
                         .map(Arc::<P2Block>::unwrap_or_clone)
                         .collect();
                     new_blocks.append(&mut uncles);
+                    let new_blocks = new_blocks.into_iter().map(|b| b.to_old_p2block()).collect();
                     let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks);
                     let res = self
                         .p2p_client

@@ -60,6 +60,60 @@ pub struct P2Block {
     total_pow: AccumulatedDifficulty,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OldP2Block {
+    #[serde(default)]
+    pub version: u64,
+    pub squad: String,
+    pub hash: BlockHash,
+    pub timestamp: EpochTime,
+    pub prev_hash: BlockHash,
+    pub height: u64,
+    pub original_header: BlockHeader,
+    pub coinbases: Vec<TransactionOutput>,
+    pub other_output_hash: FixedHash,
+    pub miner_wallet_address: TariAddress,
+    pub sent_to_main_chain: bool,
+    target_difficulty: Difficulty,
+    // list of uncles blocks confirmed by this block
+    // (height of uncle, hash of uncle)
+    pub uncles: Vec<(u64, BlockHash)>,
+    pub miner_coinbase_extra: Vec<u8>,
+    pub verified: bool,
+    total_pow: AccumulatedDifficulty,
+}
+
+impl OldP2Block {
+    pub fn to_p2block(self) -> P2Block {
+        P2Block {
+            version: self.version,
+            squad: self.squad,
+            hash: self.hash,
+            timestamp: self.timestamp,
+            prev_hash: self.prev_hash,
+            height: self.height,
+            original_header: self.original_header,
+            coinbases: self.coinbases,
+            other_output_hash: self.other_output_hash,
+            miner_wallet_address: self.miner_wallet_address,
+            sent_to_main_chain: self.sent_to_main_chain,
+            target_difficulty: self.target_difficulty,
+            uncles: self.uncles,
+            miner_coinbase_extra: self.miner_coinbase_extra,
+            verified: VerifiedStatus::new(),
+            total_pow: self.total_pow,
+        }
+    }
+
+    pub fn target_difficulty(&self) -> Difficulty {
+        self.target_difficulty
+    }
+
+    pub fn total_pow(&self) -> AccumulatedDifficulty {
+        self.total_pow
+    }
+}
+
 impl Default for P2Block {
     fn default() -> Self {
         Self {
@@ -107,6 +161,7 @@ impl P2Block {
             .total_pow
             .checked_add_difficulty(target_difficulty)
             .ok_or(ShareChainError::DifficultyOverflow)?;
+        // updates the pow to the newer value, but  we need to subtract the old value
         self.total_pow = self
             .total_pow
             .checked_sub_difficulty(self.target_difficulty)
@@ -149,6 +204,27 @@ impl P2Block {
             .map_err(|e| ShareChainError::InvalidBlock { reason: e.to_string() })?;
         self.original_header = block.header;
         Ok(())
+    }
+
+    pub fn to_old_p2block(self) -> OldP2Block {
+        OldP2Block {
+            version: self.version,
+            squad: self.squad,
+            hash: self.hash,
+            timestamp: self.timestamp,
+            prev_hash: self.prev_hash,
+            height: self.height,
+            original_header: self.original_header,
+            coinbases: self.coinbases,
+            other_output_hash: self.other_output_hash,
+            miner_wallet_address: self.miner_wallet_address,
+            sent_to_main_chain: self.sent_to_main_chain,
+            target_difficulty: self.target_difficulty,
+            uncles: self.uncles,
+            miner_coinbase_extra: self.miner_coinbase_extra,
+            verified: self.verified.is_verified() as bool,
+            total_pow: self.total_pow,
+        }
     }
 }
 
