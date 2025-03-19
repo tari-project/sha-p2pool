@@ -4,7 +4,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 
 use crate::cli::{
     commands,
@@ -124,6 +124,14 @@ pub struct StartArgs {
     #[arg(long)]
     pub debug_print_chain: bool,
 
+    /// If set, basic connectivity statistics about seeds and normal peers will be collected and printed to a csv file.
+    #[arg(long, short, alias = "diag")]
+    pub diagnostic_mode: bool,
+
+    /// An optional location for the diagnostic output file, only relevant when diagnostic mode is set.
+    #[arg(long, short, alias = "diag")]
+    pub diagnostic_mode_file_path: Option<PathBuf>,
+
     #[arg(long)]
     pub max_connections: Option<u32>,
 
@@ -174,6 +182,12 @@ pub enum Commands {
         args: StartArgs,
     },
 
+    /// Starts sha-p2pool node in diagnostic mode.
+    Diagnostics {
+        #[clap(flatten)]
+        args: StartArgs,
+    },
+
     /// Generating new identity.
     GenerateIdentity,
 
@@ -203,6 +217,10 @@ impl Cli {
                 .base_dir
                 .clone()
                 .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
+            Commands::Diagnostics { args } => args
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".tari/p2pool")),
             Commands::GenerateIdentity => dirs::home_dir().unwrap().join(".tari/p2pool"),
             Commands::ListSquads {
                 args,
@@ -217,7 +235,7 @@ impl Cli {
     /// Handles CLI command.
     /// [`Cli::parse`] must be called (to have all the args and params set properly)
     /// before calling this method.
-    pub async fn handle_command(&self, cli_shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    pub async fn handle_command(&self, cli_shutdown: Shutdown) -> anyhow::Result<()> {
         let cli_ref = Arc::new(self.clone());
 
         run_with_cli(&self.command, cli_ref, cli_shutdown).await?;
@@ -227,10 +245,13 @@ impl Cli {
 }
 
 /// Run with provided CLI command.
-pub async fn run_with_cli(command: &Commands, cli_ref: Arc<Cli>, cli_shutdown: ShutdownSignal) -> anyhow::Result<()> {
+pub async fn run_with_cli(command: &Commands, cli_ref: Arc<Cli>, cli_shutdown: Shutdown) -> anyhow::Result<()> {
     match command {
         Commands::Start { args } => {
             commands::handle_start(cli_ref.clone(), args, cli_shutdown.clone()).await?;
+        },
+        Commands::Diagnostics { args } => {
+            commands::handle_diagnostics(cli_ref.clone(), args, cli_shutdown.clone()).await?;
         },
         Commands::GenerateIdentity => {
             commands::handle_generate_identity().await?;

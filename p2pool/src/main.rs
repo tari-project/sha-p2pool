@@ -58,6 +58,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }));
 
-    Cli::parse().handle_command(Shutdown::new().to_signal()).await?;
+    Cli::parse().handle_command(Shutdown::new()).await?;
     Ok(())
 }

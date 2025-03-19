@@ -8,6 +8,7 @@ pub mod miner;
 pub mod world;
 
 use std::{
+    collections::HashSet,
     net::TcpListener,
     ops::Range,
     path::PathBuf,
@@ -21,15 +22,26 @@ pub use world::TariWorld;
 
 type TestResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-pub fn get_port(range: Range<u16>, time_out: Duration) -> Option<u16> {
+pub fn get_port(world: &TariWorld, range: Range<u16>, time_out: Duration) -> Option<u16> {
     let min = range.clone().min().expect("A minimum possible port number");
     let max = range.max().expect("A maximum possible port number");
+
+    // Collect all used ports in the world
+    let mut used_ports = HashSet::new();
+    for node in world.p2pool_nodes.values() {
+        used_ports.insert(node.grpc_port);
+        used_ports.insert(node.p2p_port);
+    }
+    for node in world.base_nodes.values() {
+        used_ports.insert(node.port);
+        used_ports.insert(node.grpc_port);
+    }
 
     let start = Instant::now();
     loop {
         let port = rand::thread_rng().gen_range(min..max);
 
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        if !used_ports.contains(&port) && TcpListener::bind(("127.0.0.1", port)).is_ok() {
             return Some(port);
         }
         if start.elapsed() > time_out {

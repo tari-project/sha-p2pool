@@ -6,7 +6,7 @@ use std::{num::TryFromIntError, time::Duration};
 use log::error;
 use minotari_app_grpc::tari_rpc::base_node_client::BaseNodeClient;
 use minotari_node_grpc_client::BaseNodeGrpcClient;
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 use tokio::select;
 use tonic::transport::Channel;
 
@@ -15,7 +15,7 @@ use crate::server::grpc::error::{Error, TonicError};
 /// Utility function to connect to a Base node and try infinitely when it fails until gets connected.
 pub async fn connect_base_node(
     base_node_address: String,
-    shutdown_signal: ShutdownSignal,
+    shutdown: Shutdown,
 ) -> Result<BaseNodeClient<Channel>, Error> {
     let client_result = BaseNodeGrpcClient::connect(base_node_address.clone())
         .await
@@ -26,6 +26,7 @@ pub async fn connect_base_node(
             error!("[Retry] Failed to connect to Tari base node: {:?}", error.to_string());
             let mut client = None;
             let mut retry_interval = tokio::time::interval(Duration::from_secs(5));
+            let shutdown_signal = shutdown.to_signal();
             tokio::pin!(shutdown_signal);
             while client.is_none() {
                 select! {

@@ -123,7 +123,7 @@ jobs:
       - name: rustup show
         run: rustup show
       - name: cargo check
-        run: cargo check --release --all-targets --workspace --exclude tari_integration_tests --locked
+        run: cargo check --release --all-targets --workspace --exclude integration_tests --locked
 
   licenses:
     name: file licenses
@@ -190,7 +190,7 @@ jobs:
       - name: cargo test compile
         run: cargo test -vv --no-run --locked --all-features --release
       - name: cargo test
-        run: cargo nextest run --all-features --release -E "not package(tari_integration_tests)"
+        run: cargo nextest run --all-features --release -E "not package(integration_tests)"
       - name: upload artifact
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()

@@ -41,6 +41,7 @@ pub const MAIN_REWARD_SHARE: u64 = 5;
 pub const UNCLE_REWARD_SHARE: u64 = 4;
 
 pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
+pub const MEDIAN_TIMESTAMP_WINDOW: usize = 11;
 
 pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every ten seconds
 pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs every ten seconds
@@ -88,10 +89,10 @@ impl BlockValidationParams {
 pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError>;
+    async fn submit_block(&self, block: P2Block) -> Result<ChainAddResult, ShareChainError>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: &[Arc<P2Block>]) -> Result<ChainAddResult, ShareChainError>;
+    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, ShareChainError>;
@@ -135,4 +136,11 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn chain_pow(&self) -> AccumulatedDifficulty;
 
     async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)>;
+}
+
+#[derive(Debug, Clone)]
+pub struct MinerShare {
+    pub miner: TariAddress,
+    pub share_count: u64,
+    pub coinbase_extra: Vec<u8>,
 }

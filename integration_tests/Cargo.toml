@@ -1,5 +1,5 @@
 [package]
-name = "tari_integration_tests"
+name = "integration_tests"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/sha-p2pool"
 license = "BSD-3-Clause"

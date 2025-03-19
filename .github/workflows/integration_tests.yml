@@ -92,7 +92,7 @@ jobs:
             -v \
             --all-features \
             --release \
-            --package tari_integration_tests \
+            --package integration_tests \
             -- -t "${{ env.CI_PROFILE }} and (not @broken)" \
             -c 5 \
             --retry 2

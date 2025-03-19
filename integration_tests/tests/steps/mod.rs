@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use cucumber::{then, when};
-use tari_integration_tests::TariWorld;
+use integration_tests::TariWorld;
 
 pub mod base_node_steps;
 pub mod p2pool_steps;
