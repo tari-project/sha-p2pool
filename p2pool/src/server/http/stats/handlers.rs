@@ -6,9 +6,11 @@ use std::collections::HashMap;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
+    response::Response,
     Json,
 };
 use log::{error, info};
+use prometheus::{Encoder, Gauge, GaugeVec, IntGauge, Opts, Registry, TextEncoder};
 use serde::Serialize;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
@@ -21,6 +23,7 @@ use crate::server::{
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats::get";
+const METRICS_LOG_TARGET: &str = "tari::p2pool::server::stats::metrics";
 
 #[derive(Serialize)]
 pub(crate) struct BlockResult {
@@ -361,3 +364,162 @@ async fn get_chain_stats(state: AppState) -> Result<(GetStatsResponse, GetStatsR
 //             .await,
 //     )
 // }
+pub(crate) async fn handle_metrics(State(state): State<AppState>) -> Response {
+    let timer = std::time::Instant::now();
+    info!(target: METRICS_LOG_TARGET, "handle_metrics");
+
+    // Create a new registry
+    let registry = Registry::new();
+
+    // Get stats data
+    let stats_result = get_metrics_data(state, &registry).await;
+
+    // Generate the metrics output
+    let encoder = TextEncoder::new();
+    let metric_families = registry.gather();
+    let mut buffer = Vec::new();
+
+    if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
+        error!(target: METRICS_LOG_TARGET, "Failed to encode metrics: {e:?}");
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(format!("Failed to encode metrics: {e:?}").into())
+            .unwrap();
+    }
+
+    if timer.elapsed() > MAX_ACCEPTABLE_HTTP_TIMEOUT {
+        error!(target: METRICS_LOG_TARGET, "handle_metrics took too long: {}ms", timer.elapsed().as_millis());
+    }
+
+    // Return the metrics in Prometheus format
+    match stats_result {
+        Ok(_) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/plain; version=0.0.4")
+            .body(String::from_utf8_lossy(&buffer).to_string().into())
+            .unwrap(),
+        Err(e) => Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(format!("Failed to collect metrics: {e:?}").into())
+            .unwrap(),
+    }
+}
+
+async fn get_metrics_data(state: AppState, registry: &Registry) -> Result<(), StatusCode> {
+    // Get full stats which includes chain stats and connection info
+    let stats = handle_get_stats(State(state.clone())).await?.0;
+
+    // Get peer info
+    let (tx, rx) = oneshot::channel();
+    state
+        .p2p_service_client
+        .send(P2pServiceQuery::GetPeers(tx))
+        .await
+        .map_err(|error| {
+            error!(target: METRICS_LOG_TARGET, "Failed to get peers info: {error:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let peers_info = rx.await.map_err(|error| {
+        error!(target: METRICS_LOG_TARGET, "Failed to receive peers info: {error:?}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Register and set metrics
+
+    // We'll use serde_json to convert the stats to a value we can extract fields from
+    let rx_stats_json = serde_json::to_value(&stats.randomx_stats).unwrap_or_default();
+    let sha3x_stats_json = serde_json::to_value(&stats.sha3x_stats).unwrap_or_default();
+
+    // Chain height metrics
+    let chain_height = GaugeVec::new(Opts::new("p2pool_chain_height", "Current chain height"), &["algorithm"]).unwrap();
+    registry.register(Box::new(chain_height.clone())).unwrap();
+
+    if let Some(height) = rx_stats_json.get("height").and_then(|v| v.as_u64()) {
+        chain_height.with_label_values(&["randomx"]).set(height as f64);
+    }
+
+    if let Some(height) = sha3x_stats_json.get("height").and_then(|v| v.as_u64()) {
+        chain_height.with_label_values(&["sha3x"]).set(height as f64);
+    }
+
+    // Shares metrics
+    let total_shares = GaugeVec::new(Opts::new("p2pool_total_shares", "Total number of shares"), &[
+        "algorithm",
+    ])
+    .unwrap();
+    registry.register(Box::new(total_shares.clone())).unwrap();
+
+    if let Some(shares) = rx_stats_json.get("total_shares").and_then(|v| v.as_u64()) {
+        total_shares.with_label_values(&["randomx"]).set(shares as f64);
+    }
+
+    if let Some(shares) = sha3x_stats_json.get("total_shares").and_then(|v| v.as_u64()) {
+        total_shares.with_label_values(&["sha3x"]).set(shares as f64);
+    }
+
+    // My shares metrics
+    let my_shares = GaugeVec::new(Opts::new("p2pool_my_shares", "Number of my shares"), &["algorithm"]).unwrap();
+    registry.register(Box::new(my_shares.clone())).unwrap();
+
+    if let Some(shares) = rx_stats_json.get("num_my_shares").and_then(|v| v.as_u64()) {
+        my_shares.with_label_values(&["randomx"]).set(shares as f64);
+    }
+
+    if let Some(shares) = sha3x_stats_json.get("num_my_shares").and_then(|v| v.as_u64()) {
+        my_shares.with_label_values(&["sha3x"]).set(shares as f64);
+    }
+
+    // Connection metrics
+    let connected_peers = Gauge::new("p2pool_connected_peers", "Number of connected peers").unwrap();
+    registry.register(Box::new(connected_peers.clone())).unwrap();
+    connected_peers.set(stats.connection_info.connected_peers as f64);
+
+    // Connection counters
+    let pending_incoming = Gauge::new("p2pool_pending_incoming", "Number of pending incoming connections").unwrap();
+    registry.register(Box::new(pending_incoming.clone())).unwrap();
+    pending_incoming.set(stats.connection_info.network_info.connection_counters.pending_incoming as f64);
+
+    let pending_outgoing = Gauge::new("p2pool_pending_outgoing", "Number of pending outgoing connections").unwrap();
+    registry.register(Box::new(pending_outgoing.clone())).unwrap();
+    pending_outgoing.set(stats.connection_info.network_info.connection_counters.pending_outgoing as f64);
+
+    let established_incoming = Gauge::new(
+        "p2pool_established_incoming",
+        "Number of established incoming connections",
+    )
+    .unwrap();
+    registry.register(Box::new(established_incoming.clone())).unwrap();
+    established_incoming.set(
+        stats
+            .connection_info
+            .network_info
+            .connection_counters
+            .established_incoming as f64,
+    );
+
+    let established_outgoing = Gauge::new(
+        "p2pool_established_outgoing",
+        "Number of established outgoing connections",
+    )
+    .unwrap();
+    registry.register(Box::new(established_outgoing.clone())).unwrap();
+    established_outgoing.set(
+        stats
+            .connection_info
+            .network_info
+            .connection_counters
+            .established_outgoing as f64,
+    );
+
+    // Peer list metrics
+    let whitelist_peers = IntGauge::new("p2pool_whitelist_peers", "Number of whitelisted peers").unwrap();
+    registry.register(Box::new(whitelist_peers.clone())).unwrap();
+    whitelist_peers.set(peers_info.0.len() as i64);
+
+    let greylist_peers = IntGauge::new("p2pool_greylist_peers", "Number of greylisted peers").unwrap();
+    registry.register(Box::new(greylist_peers.clone())).unwrap();
+    greylist_peers.set(peers_info.1.len() as i64);
+
+    Ok(())
+}

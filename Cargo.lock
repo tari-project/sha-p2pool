@@ -5573,6 +5573,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5700,6 +5715,12 @@ checksum = "cc2f1e56baa61e93533aebc21af4d2134b70f66275e0fcdf3cbe43d77ff7e8fc"
 dependencies = [
  "prost 0.13.4",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "qrcode"
@@ -6667,6 +6688,7 @@ dependencies = [
  "minotari_app_grpc",
  "minotari_node_grpc_client",
  "num",
+ "prometheus",
  "rand",
  "rkv",
  "serde",
