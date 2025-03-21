@@ -31,6 +31,14 @@ impl RelayStore {
             is_circuit_established: false,
         });
     }
+
+    pub fn get_relay_peer_ids(&self) -> Vec<PeerId> {
+        self.possible_relays.keys().copied().collect()
+    }
+
+    pub fn is_relay(&self, peer_id: &PeerId) -> bool {
+        self.possible_relays.contains_key(peer_id)
+    }
 }
 
 #[derive(Debug, Clone)]

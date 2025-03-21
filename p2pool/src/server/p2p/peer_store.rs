@@ -167,6 +167,10 @@ impl PeerStore {
         self.seed_peers.contains(peer_id)
     }
 
+    pub fn all_seed_peers(&self) -> Vec<PeerId> {
+        self.seed_peers.clone()
+    }
+
     pub fn num_catch_ups(&self, peer: &PeerId) -> Option<u64> {
         self.whitelist_peers
             .get(&peer.to_base58())
@@ -197,12 +201,25 @@ impl PeerStore {
         &self.greylist_peers
     }
 
+    pub fn non_squad_peers(&self) -> &HashMap<String, PeerStoreRecord> {
+        &self.non_squad_peers
+    }
+
     pub fn get_known_peers(&self) -> HashSet<PeerId> {
         self.whitelist_peers
             .keys()
             .chain(self.greylist_peers.keys())
             .chain(self.blacklist_peers.keys())
             .chain(self.non_squad_peers.keys())
+            .filter_map(|peer_id| PeerId::from_str(peer_id).ok())
+            .collect()
+    }
+
+    pub fn get_known_same_squad_peers(&self) -> HashSet<PeerId> {
+        self.whitelist_peers
+            .keys()
+            .chain(self.greylist_peers.keys())
+            .chain(self.blacklist_peers.keys())
             .filter_map(|peer_id| PeerId::from_str(peer_id).ok())
             .collect()
     }
