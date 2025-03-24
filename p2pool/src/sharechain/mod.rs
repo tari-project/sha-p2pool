@@ -43,8 +43,8 @@ pub const UNCLE_REWARD_SHARE: u64 = 4;
 pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 pub const MEDIAN_TIMESTAMP_WINDOW: usize = 11;
 
-pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every ten seconds
-pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs every ten seconds
+pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every twenty seconds
+pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs twenty seconds
 
 pub mod error;
 pub mod in_memory;
