@@ -43,10 +43,16 @@ pub enum ShareChainError {
     UncleInMainChain { height: u64, hash: FixedHash },
     #[error("Uncle block does not link back to main chain")]
     UncleParentNotInMainChain,
+    #[error("Block contains uncles that are too old")]
+    UncleTooOld,
+    #[error("Block contains uncles on the same height or higher")]
+    UnclesOnSameHeightOrHigher,
     #[error("Block does not have correct total work accumulated")]
     BlockTotalWorkMismatch,
     #[error("Other: {0}")]
     Anyhow(#[from] anyhow::Error),
+    #[error("The Lwma difficulty adjustment algorithm has not been initialized correctly after a reorg")]
+    LwmaNotInitializedCorrectly,
 }
 
 #[derive(Error, Debug)]

@@ -107,6 +107,7 @@ impl P2Block {
             .total_pow
             .checked_add_difficulty(target_difficulty)
             .ok_or(ShareChainError::DifficultyOverflow)?;
+        // updates the pow to the newer value, but  we need to subtract the old value
         self.total_pow = self
             .total_pow
             .checked_sub_difficulty(self.target_difficulty)

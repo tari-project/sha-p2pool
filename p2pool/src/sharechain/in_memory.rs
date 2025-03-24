@@ -299,7 +299,11 @@ impl InMemoryShareChain {
         match p2_chain.get_target_difficulty_for_block(block) {
             Some(difficulty) => {
                 if difficulty != block.target_difficulty() && !self.bypass_checks.has_target_difficulty_verified() {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty(), difficulty);
+                    warn!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}",
+                        self.pow_algo, block.target_difficulty(), difficulty
+                    );
                     return Err(ValidationError::DifficultyTarget);
                 }
                 // we have validated the target difficulty, so lets set it as valid
@@ -665,8 +669,30 @@ impl ShareChain for InMemoryShareChain {
             PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
         };
 
-        let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
-        let difficulty = cmp::max(min, difficulty);
+        let difficulty = match chain_read_lock.lwma.get_difficulty() {
+            Some(val) => {
+                if val < min {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[{:?}] Calculated difficulty ({}) too low, using the minimum ({}), likely due to insufficient \
+                        timestamps({})",
+                        self.pow_algo, val, min, !chain_read_lock.lwma.is_full()
+                    );
+                    min
+                } else {
+                    val
+                }
+            },
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "[{:?}] Difficulty could not be calculated, using the minimum, likely due to insufficient \
+                    timestamps({})",
+                    self.pow_algo, !chain_read_lock.lwma.is_full()
+                );
+                Difficulty::min()
+            },
+        };
 
         Ok((res, difficulty))
     }
