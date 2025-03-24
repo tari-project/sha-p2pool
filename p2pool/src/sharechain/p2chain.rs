@@ -1118,6 +1118,7 @@ impl<T: BlockCache> P2Chain<T> {
     // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
     // this is safe
     #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::too_many_lines)]
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
