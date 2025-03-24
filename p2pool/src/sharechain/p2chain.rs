@@ -418,14 +418,6 @@ impl<T: BlockCache> P2Chain<T> {
                 algo, new_block_height, &block.hash.to_hex()[0..8]
             );
             for uncle in &block.uncles {
-                if uncle.0 < block.height.saturating_sub(MAX_UNCLE_AGE) {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too old! {:?}", algo, uncle.0);
-                    return Err(ShareChainError::UncleTooOld);
-                }
-                if uncle.0 >= block.height {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Uncle is too young! {:?}", algo, uncle.0);
-                    return Err(ShareChainError::UnclesOnSameHeightOrHigher);
-                }
                 let uncle_block = self
                     .get_block_at_height(uncle.0, &uncle.1)
                     .ok_or(ShareChainError::BlockNotFound)?;
@@ -521,12 +513,12 @@ impl<T: BlockCache> P2Chain<T> {
                 new_tip.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
-                self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
+                let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
                     .expect("Failed to create LWMA");
-                self.lwma.add_front(block.timestamp, block.target_difficulty);
+                lwma.add_front(block.timestamp, block.target_difficulty);
                 let chain_height = self
                     .level_at_height(block.height)
-                    .ok_or(ShareChainError::BlockLevelNotFound)?;
+                    .ok_or(ShareChainError::BlockLevelNotFound)?; // Do we need a panic here?
                 chain_height.set_chain_block(block.hash);
                 self.cached_shares = None;
                 self.current_tip = block.height;
@@ -534,7 +526,9 @@ impl<T: BlockCache> P2Chain<T> {
                 // lets first go up and reset all chain block links
                 let mut current_height = block.height;
                 while self.level_at_height(current_height.saturating_add(1)).is_some() {
-                    let mut_child_level = self.level_at_height(current_height.saturating_add(1)).unwrap();
+                    let mut_child_level = self
+                        .level_at_height(current_height.saturating_add(1))
+                        .expect("wil not fail");
                     mut_child_level.set_chain_block(FixedHash::zero());
                     current_height += 1;
                 }
@@ -543,45 +537,50 @@ impl<T: BlockCache> P2Chain<T> {
                 let mut counter = 1;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                     counter += 1;
-                    let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
+                    let parent_level = self
+                        .level_at_height(current_block.height.saturating_sub(1))
+                        .expect("wil not fail");
                     if current_block.prev_hash != parent_level.chain_block() {
-                        // safety check
-                        let nextblock = parent_level.get_header(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(
-                                target: LOG_TARGET,
-                                "FATAL: Reorging (block in chain) failed because parent block was not found and chain \
-                                data is corrupted."
-                            );
-                            return Err(ShareChainError::BlockNotFound);
+                        match parent_level.get_header(&current_block.prev_hash) {
+                            None => {
+                                error!(
+                                    target: LOG_TARGET,
+                                    "FATAL: Reorging (block in chain) failed because parent block was not found and \
+                                    chain data is corrupted."
+                                );
+                                return Err(ShareChainError::BlockNotFound); // Do we need a panic here?
+                            },
+                            Some(nextblock) => {
+                                let mut_parent_level = self
+                                    .level_at_height(current_block.height.saturating_sub(1))
+                                    .expect("wil not fail");
+                                mut_parent_level.set_chain_block(current_block.prev_hash);
+                                current_block = nextblock.clone();
+                                lwma.add_front(current_block.timestamp, current_block.target_difficulty);
+                            },
                         }
-                        // fix the main chain
-                        let mut_parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
-                        mut_parent_level.set_chain_block(current_block.prev_hash);
-                        current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
-                    } else if !self.lwma.is_full() {
+                    } else if !lwma.is_full() {
                         // we still need more blocks to fill up the lwma
-                        let nextblock = parent_level.get_header(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(
-                                target: LOG_TARGET,
-                                "FATAL: Reorging (block not in chain) failed because parent block was not found and \
-                                chain data is corrupted."
-                            );
-                            panic!(
-                                "FATAL: Could not calculate LMWA while reorging (block in chain) failed because \
-                                 parent block was not found and chain data is corrupted. current_block: {:?}, current \
-                                 tip: {:?}",
-                                current_block.height,
-                                self.get_tip().map(|t| t.height())
-                            );
+                        match parent_level.get_header(&current_block.prev_hash) {
+                            None => {
+                                error!(
+                                    target: LOG_TARGET,
+                                    "FATAL: Reorging (block not in chain) failed because parent block was not found and \
+                                    chain data is corrupted."
+                                );
+                                panic!(
+                                    "FATAL: Could not calculate LMWA while reorging (block in chain) failed because \
+                                     parent block was not found and chain data is corrupted. current_block: {:?}, \
+                                     current tip: {:?}",
+                                    current_block.height,
+                                    self.get_tip().map(|t| t.height())
+                                );
+                            },
+                            Some(nextblock) => {
+                                current_block = nextblock.clone();
+                                lwma.add_front(current_block.timestamp, current_block.target_difficulty);
+                            },
                         }
-
-                        current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
                     } else {
                         break;
                     }
@@ -591,7 +590,8 @@ impl<T: BlockCache> P2Chain<T> {
                         break;
                     }
                 }
-                // Verify that the lwma was initialized correctly
+                self.lwma = lwma;
+                // TODO: Verify that the lwma was initialized correctly (NOT FOR PRODUCTION - remove)
                 let level = self
                     .level_at_height(new_block_height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?;
