@@ -568,6 +568,8 @@ impl<T: BlockCache> P2Chain<T> {
                                     "FATAL: Reorging (block not in chain) failed because parent block was not found and \
                                     chain data is corrupted."
                                 );
+                                // The purpose of the panic here is to clear the memory and force a reload of the chain
+                                // as the database is probably corrupted.
                                 panic!(
                                     "FATAL: Could not calculate LMWA while reorging (block in chain) failed because \
                                      parent block was not found and chain data is corrupted. current_block: {:?}, \
@@ -1136,7 +1138,7 @@ impl<T: BlockCache> P2Chain<T> {
 
         // we want to count 1 short,as the final share will be for this node
         let stop_height = start_level.height().saturating_sub(self.share_window - 1);
-        warn!(target: LOG_TARGET, "❌ stop level: {}", stop_height);
+        debug!(target: LOG_TARGET, "Stop level: {}", stop_height);
         let mut cur_block = start_level
             .get_header(prev_hash)
             .ok_or(ShareChainError::BlockNotFound)
