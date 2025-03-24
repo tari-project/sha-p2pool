@@ -577,6 +577,10 @@ impl<T: BlockCache> P2Chain<T> {
                         // we still need more blocks to fill up the lwma
                         match parent_level.get_header(&current_block.prev_hash) {
                             None => {
+                                if current_block.height == 0 {
+                                    // edge case we are at the start of the chain
+                                    break;
+                                }
                                 let msg = format!(
                                     "FATAL: Reorging (block not in chain) failed because parent block was not found \
                                      and chain data is corrupted. current_block: {:?}, current tip: {:?}",
