@@ -674,9 +674,8 @@ impl ShareChain for InMemoryShareChain {
                 if val < min {
                     debug!(
                         target: LOG_TARGET,
-                        "[{:?}] Calculated difficulty ({}) too low, using the minimum ({}), likely due to insufficient \
-                        timestamps({})",
-                        self.pow_algo, val, min, !chain_read_lock.lwma.is_full()
+                        "[{:?}] Calculated difficulty ({}) too low, using the minimum ({})",
+                        self.pow_algo, val, min
                     );
                     min
                 } else {
@@ -686,9 +685,8 @@ impl ShareChain for InMemoryShareChain {
             None => {
                 debug!(
                     target: LOG_TARGET,
-                    "[{:?}] Difficulty could not be calculated, using the minimum, likely due to insufficient \
-                    timestamps({})",
-                    self.pow_algo, !chain_read_lock.lwma.is_full()
+                    "[{:?}] Difficulty could not be calculated, using the minimum",
+                    self.pow_algo,
                 );
                 Difficulty::min()
             },
