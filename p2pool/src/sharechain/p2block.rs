@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{fmt, fmt::Display, sync::Arc};
 
 use bitflags::bitflags;
 use blake2::Blake2b;
@@ -338,6 +338,28 @@ impl VerifiedStatus {
 
     pub fn has_correct_shares(self) -> bool {
         self.contains(VerifiedStatus::CORRECT_SHARES)
+    }
+}
+
+impl Display for VerifiedStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut verified = "";
+        if self.has_parents() {
+            verified = ", Parents";
+        }
+        if self.has_target_difficulty_verified() {
+            verified = ", Target Difficulty";
+        }
+        if self.has_difficulty_verified() {
+            verified = ", Achieved Difficulty";
+        }
+        if self.has_median_timestamp() {
+            verified = ", Median Timestamp";
+        }
+        if self.has_correct_shares() {
+            verified = ", Correct Shares";
+        }
+        write!(f, "Has verified: {}", verified)
     }
 }
 
