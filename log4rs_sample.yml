@@ -17,11 +17,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/p2pool.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
@@ -34,11 +34,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/other.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -53,11 +53,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/sync.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -72,11 +72,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/peers.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -91,11 +91,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/p2p.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -110,11 +110,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/messages.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -126,11 +126,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/peer_info.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
@@ -142,11 +142,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 100mb
+        limit: 10mb
       roller:
         kind: fixed_window
         base: 1
-        count: 50
+        count: 5
         pattern: "{{log_dir}}/log/new_tip_notify.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
