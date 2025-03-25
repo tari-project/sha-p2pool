@@ -381,7 +381,7 @@ impl InMemoryShareChain {
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
         calculating_height: u64,
-        prev_hash: &FixedHash,
+        block_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
@@ -391,8 +391,8 @@ impl InMemoryShareChain {
         // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
         // this is safe
         #[allow(clippy::mutable_key_type)]
-        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(calculating_height, prev_hash)?;
-        if tip.chain_block() == *prev_hash {
+        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(calculating_height, block_hash)?;
+        if tip.chain_block() == *block_hash {
             // we update the cached shares if this is for the tip
             p2_chain.cached_shares = Some(CachedShares {
                 at_hash: tip.chain_block(),

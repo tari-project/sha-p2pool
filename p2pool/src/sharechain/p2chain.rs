@@ -930,10 +930,7 @@ impl<T: BlockCache> P2Chain<T> {
             return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
         }
 
-        let mut counter = 0;
         for output in &block.coinbases {
-            counter += 1;
-            info!(target: LOG_TARGET, "[{:?}] ❌ Coinbases number {} of {}", block.original_header.pow.pow_algo,counter,block.coinbases.len() );
             let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
                 spend_key
             } else {
@@ -1126,7 +1123,7 @@ impl<T: BlockCache> P2Chain<T> {
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
-        prev_hash: &FixedHash,
+        block_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
@@ -1169,9 +1166,9 @@ impl<T: BlockCache> P2Chain<T> {
         // counting at index 0 and we count and use up to the stop height in calculations below
         let stop_height = start_level.height().saturating_sub(self.share_window - 2);
         let mut cur_block = start_level
-            .get_header(prev_hash)
+            .get_header(block_hash)
             .ok_or(ShareChainError::BlockNotFound)
-            .inspect_err(|_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, no start level at height: {}", prev_hash))?;
+            .inspect_err(|_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, no start level at height: {}", block_hash))?;
         update_insert(
             &mut miners_to_shares,
             cur_block.wallet_address,
