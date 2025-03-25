@@ -377,9 +377,11 @@ impl InMemoryShareChain {
         None
     }
 
-    fn get_calculate_and_cache_hashmap_of_tip_shares(
+    fn calculate_and_cache_hashmap_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
+        calculating_height: u64,
+        block_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
@@ -389,11 +391,14 @@ impl InMemoryShareChain {
         // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
         // this is safe
         #[allow(clippy::mutable_key_type)]
-        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height(), &tip.chain_block())?;
-        p2_chain.cached_shares = Some(CachedShares {
-            at_hash: tip.chain_block(),
-            shares: shares.clone(),
-        });
+        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(calculating_height, block_hash)?;
+        if tip.chain_block() == *block_hash {
+            // we update the cached shares if this is for the tip
+            p2_chain.cached_shares = Some(CachedShares {
+                at_hash: tip.chain_block(),
+                shares: shares.clone(),
+            });
+        }
         Ok(shares)
     }
 
@@ -619,7 +624,11 @@ impl ShareChain for InMemoryShareChain {
                 drop(chain_read_lock);
                 // if there is none, lets see if we need to calculate one
                 let mut wl = self.p2_chain.write().await;
-                miners_to_shares = self.get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)?;
+                miners_to_shares = self.calculate_and_cache_hashmap_shares(
+                    &mut wl,
+                    new_tip_block.height.saturating_sub(1),
+                    &new_tip_block.prev_hash,
+                )?;
                 chain_read_lock = wl.downgrade();
             }
             miners_to_shares
@@ -1023,8 +1032,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 15);
         for share in shares {
@@ -1070,8 +1081,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
@@ -1141,8 +1154,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 5);
         // we have 1 miner with 15 shares and 4 with 19 shares

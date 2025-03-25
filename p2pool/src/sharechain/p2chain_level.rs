@@ -54,7 +54,6 @@ pub struct P2BlockHeader {
 }
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
-    // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
     block_cache: Arc<T>,
     height: u64,
     chain_block: RwLock<BlockHash>,
