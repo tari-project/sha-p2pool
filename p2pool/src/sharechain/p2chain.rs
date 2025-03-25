@@ -2728,6 +2728,7 @@ mod test {
             assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
         }
         let tip = chain.get_tip().unwrap();
+        #[allow(clippy::mutable_key_type)]
         let shares = chain
             .get_calculate_and_cache_hashmap_of_shares(tip.height(), &tip.chain_block())
             .unwrap();
