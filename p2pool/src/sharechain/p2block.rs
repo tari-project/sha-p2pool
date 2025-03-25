@@ -343,23 +343,27 @@ impl VerifiedStatus {
 
 impl Display for VerifiedStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut verified = "";
+        let mut verified = Vec::new();
         if self.has_parents() {
-            verified = ", Parents";
+            verified.push("Parents");
         }
         if self.has_target_difficulty_verified() {
-            verified = ", Target Difficulty";
+            verified.push("Target Difficulty");
         }
         if self.has_difficulty_verified() {
-            verified = ", Achieved Difficulty";
+            verified.push("Achieved Difficulty");
         }
         if self.has_median_timestamp() {
-            verified = ", Median Timestamp";
+            verified.push("Median Timestamp");
         }
         if self.has_correct_shares() {
-            verified = ", Correct Shares";
+            verified.push("Correct Shares");
         }
-        write!(f, "Has verified: {}", verified)
+        if verified.is_empty() {
+            write!(f, "Has verified: none")
+        } else {
+            write!(f, "Has verified: {}", verified.join(", "))
+        }
     }
 }
 
