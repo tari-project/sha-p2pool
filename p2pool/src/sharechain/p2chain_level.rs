@@ -36,7 +36,7 @@ use tari_utilities::epoch_time::EpochTime;
 use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{
     error::ShareChainError,
-    p2block::{P2Block, VerifiedStatus},
+    p2block::{_P2Block, _VerifiedStatus},
 };
 
 #[derive(Clone)]
@@ -47,14 +47,13 @@ pub struct P2BlockHeader {
     pub timestamp: EpochTime,
     pub target_difficulty: Difficulty,
     pub total_pow: AccumulatedDifficulty,
-    pub verified: VerifiedStatus,
+    pub verified: _VerifiedStatus,
     pub uncles: Vec<(u64, FixedHash)>,
     pub wallet_address: TariAddress,
     pub coinbase_extra: Vec<u8>,
 }
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
-    // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
     block_cache: Arc<T>,
     height: u64,
     chain_block: RwLock<BlockHash>,
@@ -62,7 +61,7 @@ pub struct P2ChainLevel<T: BlockCache> {
 }
 
 impl<T: BlockCache> P2ChainLevel<T> {
-    pub fn new(block: Arc<P2Block>, block_cache: Arc<T>) -> Self {
+    pub fn new(block: Arc<_P2Block>, block_cache: Arc<T>) -> Self {
         // although this is the only block on this level, it might not be part of the main chain, so we need to set this
         // later
         let chain_block = RwLock::new(FixedHash::zero());
@@ -137,7 +136,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         *lock = hash;
     }
 
-    pub fn add_block(&self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
+    pub fn add_block(&self, block: Arc<_P2Block>) -> Result<(), ShareChainError> {
         if self.height != block.height {
             return Err(ShareChainError::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
@@ -168,11 +167,11 @@ impl<T: BlockCache> P2ChainLevel<T> {
         // self.block_cache.get(&self.chain_block())
     }
 
-    pub fn get_block_in_main_chain(&self) -> Option<Arc<P2Block>> {
+    pub fn get_block_in_main_chain(&self) -> Option<Arc<_P2Block>> {
         self.block_cache.get(&self.chain_block())
     }
 
-    pub fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
+    pub fn get(&self, hash: &BlockHash) -> Option<Arc<_P2Block>> {
         self.block_cache.get(hash)
     }
 
@@ -184,7 +183,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         self.block_headers.read().expect("could not lock").contains_key(hash)
     }
 
-    pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {
+    pub fn all_blocks(&self) -> Vec<Arc<_P2Block>> {
         self.block_headers
             .read()
             .expect("could not lock")

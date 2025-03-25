@@ -14,6 +14,8 @@ blake2 = "0.10.6"
 bitflags = { version = "2.4", features = ["serde"] }
 chrono = "0.4.39"
 clap = { version = "4.5.7", features = ["derive"] }
+ctrlc = "3.2"
+dhat = "0.3.3"
 digest = "0.10.7"
 dirs = "4.0.0"
 hex = "0.4.3"
@@ -64,7 +66,7 @@ tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "b3dc63f79e
 tari_utilities = { version = "0.8", features = ["borsh"] }
 thiserror = "1.0"
 tokio = { version = "1.41.0", features = ["full"] }
-tonic = "0.12.3"
+tonic = { version = "0.12.3", features = ["tls-webpki-roots"] }
 lru = "0.12.5"
 tempfile = "3.14.0"
 rkv = { version = "0.19.0", features = ["lmdb"] }
@@ -80,3 +82,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "sha_p2pool"
 path = "src/main.rs"
+
+[features]
+dhat-heap = []    # if you are doing heap profiling
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[profile.release.dhat-heap]
+debug = true

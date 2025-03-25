@@ -21,7 +21,6 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    cmp,
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Display, Formatter},
@@ -59,7 +58,7 @@ use crate::{
     sharechain::{
         error::{ShareChainError, ValidationError},
         in_memory::MAX_UNCLE_AGE,
-        p2block::{P2Block, VerifiedStatus},
+        p2block::{_P2Block, _VerifiedStatus},
         p2chain_level::P2ChainLevel,
         DIFFICULTY_ADJUSTMENT_WINDOW,
     },
@@ -163,7 +162,7 @@ pub struct P2Chain<T: BlockCache> {
     pub lwma: LinearWeightedMovingAverage,
     minimum_randomx_target_difficulty: u64,
     minimum_sha3_target_difficulty: u64,
-    bypass_checks: VerifiedStatus,
+    bypass_checks: _VerifiedStatus,
     params: Option<Arc<BlockValidationParams>>,
 }
 
@@ -176,7 +175,7 @@ impl<T: BlockCache> P2Chain<T> {
         block_cache: T,
         minimum_randomx_target_difficulty: u64,
         minimum_sha3_target_difficulty: u64,
-        bypass_checks: VerifiedStatus,
+        bypass_checks: _VerifiedStatus,
         params: Option<Arc<BlockValidationParams>>,
     ) -> Self {
         let levels = HashMap::new();
@@ -209,7 +208,7 @@ impl<T: BlockCache> P2Chain<T> {
         squad: &str,
         minimum_randomx_target_difficulty: u64,
         minimum_sha3_target_difficulty: u64,
-        bypass_checks: VerifiedStatus,
+        bypass_checks: _VerifiedStatus,
         params: Option<Arc<BlockValidationParams>>,
     ) -> Result<Self, ShareChainError> {
         let mut new_chain = Self::new_empty(
@@ -223,7 +222,7 @@ impl<T: BlockCache> P2Chain<T> {
             bypass_checks,
             params,
         );
-        for block in from_block_cache.all_blocks()? {
+        for (i, block) in from_block_cache.all_blocks()?.into_iter().enumerate() {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
                 continue;
@@ -232,7 +231,9 @@ impl<T: BlockCache> P2Chain<T> {
                 warn!(target: LOG_TARGET, "Block squad mismatch, skipping block");
                 continue;
             }
-            info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
+            if i % 250 == 0 {
+                info!(target: LOG_TARGET, "Loading block {} into chain", i);
+            }
             let _unused = new_chain.add_block_to_chain(block).inspect_err(|e| {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
             });
@@ -263,7 +264,7 @@ impl<T: BlockCache> P2Chain<T> {
         self.levels.get(&height)
     }
 
-    pub fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<Arc<P2Block>> {
+    pub fn get_block_at_height(&self, height: u64, hash: &FixedHash) -> Option<Arc<_P2Block>> {
         let level = self.level_at_height(height)?;
         level.get(hash)
     }
@@ -278,7 +279,7 @@ impl<T: BlockCache> P2Chain<T> {
     }
 
     #[cfg(test)]
-    fn get_chain_block_at_height(&self, height: u64) -> Option<Arc<P2Block>> {
+    fn get_chain_block_at_height(&self, height: u64) -> Option<Arc<_P2Block>> {
         let level = self.level_at_height(height)?;
         level.get(&level.chain_block())
     }
@@ -412,7 +413,11 @@ impl<T: BlockCache> P2Chain<T> {
 
         if self.get_tip().is_some() && self.get_tip().unwrap().chain_block() == block.prev_hash {
             // easy this builds on the tip
-            info!(target: LOG_TARGET, "[{:?}] New block added to tip, and is now the new tip: {:?}:{}", algo, new_block_height, &block.hash.to_hex()[0..8]);
+            info!(
+                target: LOG_TARGET,
+                "[{:?}] New block added to tip, and is now the new tip: {:?}:{}",
+                algo, new_block_height, &block.hash.to_hex()[0..8]
+            );
             for uncle in &block.uncles {
                 let uncle_block = self
                     .get_block_at_height(uncle.0, &uncle.1)
@@ -488,7 +493,6 @@ impl<T: BlockCache> P2Chain<T> {
                 if level.chain_block() == current_counting_block.hash {
                     break;
                 }
-                // we can unwrap as we now the parent exists
                 current_counting_block = self
                     .get_block_header_at_height(
                         current_counting_block.height.saturating_sub(1),
@@ -510,12 +514,24 @@ impl<T: BlockCache> P2Chain<T> {
                 new_tip.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
-                self.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
+                let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
                     .expect("Failed to create LWMA");
-                self.lwma.add_front(block.timestamp, block.target_difficulty);
-                let chain_height = self
-                    .level_at_height(block.height)
-                    .ok_or(ShareChainError::BlockLevelNotFound)?;
+                lwma.add_front(block.timestamp, block.target_difficulty);
+                let chain_height = match self.level_at_height(block.height) {
+                    None => {
+                        let msg = format!(
+                            "FATAL: LMWA calculation failed while reorging because a block was not found and chain \
+                             data is corrupted. current_block: {:?}, current tip: {:?}",
+                            block.height,
+                            self.get_tip().map(|t| t.height())
+                        );
+                        error!(target: LOG_TARGET, "{}", msg);
+                        // The purpose of the panic here is to clear the memory and force a reload of the chain
+                        // as the database is probably corrupted.
+                        panic!("{}", msg);
+                    },
+                    Some(level) => level,
+                };
                 chain_height.set_chain_block(block.hash);
                 self.cached_shares = None;
                 self.current_tip = block.height;
@@ -523,7 +539,9 @@ impl<T: BlockCache> P2Chain<T> {
                 // lets first go up and reset all chain block links
                 let mut current_height = block.height;
                 while self.level_at_height(current_height.saturating_add(1)).is_some() {
-                    let mut_child_level = self.level_at_height(current_height.saturating_add(1)).unwrap();
+                    let mut_child_level = self
+                        .level_at_height(current_height.saturating_add(1))
+                        .expect("wil not fail");
                     mut_child_level.set_chain_block(FixedHash::zero());
                     current_height += 1;
                 }
@@ -532,43 +550,52 @@ impl<T: BlockCache> P2Chain<T> {
                 let mut counter = 1;
                 while self.level_at_height(current_block.height.saturating_sub(1)).is_some() {
                     counter += 1;
-                    let parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
+                    let parent_level = self
+                        .level_at_height(current_block.height.saturating_sub(1))
+                        .expect("wil not fail");
                     if current_block.prev_hash != parent_level.chain_block() {
-                        // safety check
-                        let nextblock = parent_level.get_header(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
-                            return Err(ShareChainError::BlockNotFound);
-                            // panic!(
-                            //     "FATAL: Reorging (block in chain) failed because parent block was not found and chain
-                            // \      data is corrupted. current_block: {:?}, current tip:
-                            // {:?}",     current_block.height,
-                            //     self.get_tip().map(|t| t.height())
-                            // );
+                        match parent_level.get_header(&current_block.prev_hash) {
+                            None => {
+                                let msg = "FATAL: Reorging (block in chain) failed because parent block was not found \
+                                           and chain data is corrupted.";
+                                error!(target: LOG_TARGET, "{}", msg);
+                                // The purpose of the panic here is to clear the memory and force a reload of the chain
+                                // as the database is probably corrupted.
+                                panic!("{}", msg);
+                            },
+                            Some(nextblock) => {
+                                let mut_parent_level = self
+                                    .level_at_height(current_block.height.saturating_sub(1))
+                                    .expect("wil not fail");
+                                mut_parent_level.set_chain_block(current_block.prev_hash);
+                                current_block = nextblock.clone();
+                                lwma.add_front(current_block.timestamp, current_block.target_difficulty);
+                            },
                         }
-                        // fix the main chain
-                        let mut_parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();
-                        mut_parent_level.set_chain_block(current_block.prev_hash);
-                        current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
-                    } else if !self.lwma.is_full() {
+                    } else if !lwma.is_full() {
                         // we still need more blocks to fill up the lwma
-                        let nextblock = parent_level.get_header(&current_block.prev_hash);
-                        if nextblock.is_none() {
-                            error!(target: LOG_TARGET, "FATAL: Reorging (block not in chain) failed because parent block was not found and chain data is corrupted.");
-                            panic!(
-                                "FATAL: Could not calculate LMWA while reorging (block in chain) failed because \
-                                 parent block was not found and chain data is corrupted. current_block: {:?}, current \
-                                 tip: {:?}",
-                                current_block.height,
-                                self.get_tip().map(|t| t.height())
-                            );
+                        match parent_level.get_header(&current_block.prev_hash) {
+                            None => {
+                                if current_block.height == 0 {
+                                    // edge case we are at the start of the chain
+                                    break;
+                                }
+                                let msg = format!(
+                                    "FATAL: Reorging (block not in chain) failed because parent block was not found \
+                                     and chain data is corrupted. current_block: {:?}, current tip: {:?}",
+                                    current_block.height,
+                                    self.get_tip().map(|t| t.height())
+                                );
+                                error!(target: LOG_TARGET, "{}", msg);
+                                // The purpose of the panic here is to clear the memory and force a reload of the chain
+                                // as the database is probably corrupted.
+                                panic!("{}", msg);
+                            },
+                            Some(nextblock) => {
+                                current_block = nextblock.clone();
+                                lwma.add_front(current_block.timestamp, current_block.target_difficulty);
+                            },
                         }
-
-                        current_block = nextblock.unwrap().clone();
-                        self.lwma
-                            .add_front(current_block.timestamp, current_block.target_difficulty);
                     } else {
                         break;
                     }
@@ -578,6 +605,7 @@ impl<T: BlockCache> P2Chain<T> {
                         break;
                     }
                 }
+                self.lwma = lwma;
             }
         }
 
@@ -622,35 +650,35 @@ impl<T: BlockCache> P2Chain<T> {
         let block = level.get(&hash).ok_or(ShareChainError::BlockNotFound)?;
         let mut verified = block.verified;
 
-        info!(target: LOG_TARGET, "Verifying parents and pow: {}", height);
+        trace!(target: LOG_TARGET, "Verifying parents and pow: {}", height);
         if self.verify_pow_and_parents(block.clone())? {
             verified.set_has_parents();
-            info!(target: LOG_TARGET, "Verified parents and pow");
+            trace!(target: LOG_TARGET, "Verified parents and pow");
         }
 
-        info!(target: LOG_TARGET, "Verifying difficulty: {}", height);
+        trace!(target: LOG_TARGET, "Verifying difficulty: {}", height);
         if self.verify_difficulty(block.clone())? {
             verified.set_difficulty_verified();
-            info!(target: LOG_TARGET, "Verified difficulty");
+            trace!(target: LOG_TARGET, "Verified difficulty");
         }
 
-        info!(target: LOG_TARGET, "Verifying target difficulty: {}", height);
+        trace!(target: LOG_TARGET, "Verifying target difficulty: {}", height);
         if self.verify_target_difficulty(block.clone())? {
             verified.set_target_difficulty_verified();
-            info!(target: LOG_TARGET, "Verified target difficulty");
+            trace!(target: LOG_TARGET, "Verified target difficulty");
         }
 
-        // info!(target: LOG_TARGET, "Verifying median timestamp: {}", height);
-        // if self.verify_median_timestamp_for_block(block.clone())? {
-        verified.set_median_timestamp();
-        //     info!(target: LOG_TARGET, "Verified median timestamp");
-        // }
+        trace!(target: LOG_TARGET, "Verifying median timestamp: {}", height);
+        if self.verify_median_timestamp_for_block(block.clone())? {
+            verified.set_median_timestamp();
+        }
 
-        info!(target: LOG_TARGET, "Verifying shares");
+        trace!(target: LOG_TARGET, "Verifying shares");
         if self.verify_shares_for_block(block.clone())? {
-        verified.set_correct_shares();
-            info!(target: LOG_TARGET, "Verified shares");
+            verified.set_correct_shares();
+            trace!(target: LOG_TARGET, "Verified shares");
         }
+        debug!(target: LOG_TARGET, "Verified block {}({:x}{:x}{:x}{:x}): {}", height, hash[0], hash[1], hash[2], hash[3], verified);
 
         // lets update verification status
         let mut actual_block = block.deref().clone();
@@ -663,7 +691,7 @@ impl<T: BlockCache> P2Chain<T> {
         Ok(())
     }
 
-    pub fn verify_pow_and_parents(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    pub fn verify_pow_and_parents(&self, block: Arc<_P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_parents() || self.bypass_checks.has_parents() {
             return Ok(true);
         }
@@ -691,13 +719,17 @@ impl<T: BlockCache> P2Chain<T> {
         }
 
         if block.total_pow() != total_work {
-            warn!(target: LOG_TARGET, "❌ Block accumulated difficulty does not match claimed pow! Claimed: {:?}, Actual: {:?}", block.total_pow(), total_work);
+            warn!(
+                target: LOG_TARGET,
+                "❌ Block accumulated difficulty does not match claimed pow! Claimed: {:?}, Actual: {:?}",
+                block.total_pow(), total_work
+            );
             return Err(ShareChainError::ValidationError(ValidationError::DifficultyTarget));
         }
         Ok(true)
     }
 
-    pub fn verify_difficulty(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    pub fn verify_difficulty(&self, block: Arc<_P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_difficulty_verified() || self.bypass_checks.has_difficulty_verified() {
             return Ok(true);
         }
@@ -720,20 +752,28 @@ impl<T: BlockCache> P2Chain<T> {
             PowAlgorithm::Sha3x => sha3x_difficulty(&block.original_header).map_err(ValidationError::Difficulty)?,
         };
         if curr_difficulty < block.target_difficulty() && !self.bypass_checks.has_difficulty_verified() {
-            warn!(target: LOG_TARGET, "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}", pow_algo, block.target_difficulty(), curr_difficulty);
+            warn!(
+                target: LOG_TARGET,
+                "[{:?}] ❌ Claimed difficulty is too low! Claimed: {:?}, Actual: {:?}",
+                pow_algo, block.target_difficulty(), curr_difficulty
+            );
             return Ok(false);
         }
         Ok(true)
     }
 
-    pub fn verify_target_difficulty(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    pub fn verify_target_difficulty(&self, block: Arc<_P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_target_difficulty_verified() || self.bypass_checks.has_target_difficulty_verified() {
             return Ok(true);
         }
         match self.get_target_difficulty_for_block(&block) {
             Some(difficulty) => {
                 if difficulty != block.target_difficulty() {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}", block.original_header.pow.pow_algo, block.target_difficulty(), difficulty);
+                    warn!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}",
+                        block.original_header.pow.pow_algo, block.target_difficulty(), difficulty
+                    );
                     return Ok(false);
                 }
             },
@@ -745,7 +785,7 @@ impl<T: BlockCache> P2Chain<T> {
         Ok(true)
     }
 
-    pub fn verify_median_timestamp_for_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    pub fn verify_median_timestamp_for_block(&self, block: Arc<_P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_median_timestamp() || self.bypass_checks.has_median_timestamp() || block.height == 0 {
             return Ok(true);
         }
@@ -807,7 +847,8 @@ impl<T: BlockCache> P2Chain<T> {
     // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
     // this is safe
     #[allow(clippy::mutable_key_type)]
-    pub fn verify_shares_for_block(&self, block: Arc<P2Block>) -> Result<bool, ShareChainError> {
+    #[allow(clippy::too_many_lines)]
+    pub fn verify_shares_for_block(&self, block: Arc<_P2Block>) -> Result<bool, ShareChainError> {
         if block.verified.has_correct_shares() || self.bypass_checks.has_correct_shares() || block.height == 0 {
             return Ok(true);
         }
@@ -843,15 +884,23 @@ impl<T: BlockCache> P2Chain<T> {
             let uncle_level = match self.level_at_height(uncle.0) {
                 Some(level) => level,
                 None => {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Could not get uncle level of new tip block in calculating shares", block.original_header.pow.pow_algo);
-                    return Ok(false)
+                    trace!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Could not get uncle level of new tip block in calculating shares",
+                        block.original_header.pow.pow_algo
+                    );
+                    return Ok(false);
                 },
             };
             let uncle_block = match uncle_level.get(&uncle.1) {
                 Some(block) => block.clone(),
                 None => {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Could not get uncle block of new tip block in calculating shares", block.original_header.pow.pow_algo);
-                    return Ok(false)
+                    trace!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Could not get uncle block of new tip block in calculating shares",
+                        block.original_header.pow.pow_algo
+                    );
+                    return Ok(false);
                 },
             };
             let miner_share = MinerShare {
@@ -884,7 +933,11 @@ impl<T: BlockCache> P2Chain<T> {
             let spend_key = if let Some(Opcode::PushPubKey(spend_key)) = output.script.opcode(0) {
                 spend_key
             } else {
-                warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase script, found: {}", block.original_header.pow.pow_algo, output.script);
+                warn!(
+                    target: LOG_TARGET,
+                    "[{:?}] ❌ Wrong coinbase script, found: {}",
+                    block.original_header.pow.pow_algo, output.script
+                );
                 return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
             };
             match miners_shares.get(spend_key) {
@@ -896,19 +949,34 @@ impl<T: BlockCache> P2Chain<T> {
                     .unwrap_or(0);
                     prev_coinbase_value += u128::from(value);
                     let output_value = output.minimum_value_promise.as_u64();
-                    // We do this as it might be the order of output generation is different, and it might be that a few
-                    // outputs are a few micro tari off due to division as its not always possible to divide exactly
-                    if value < output_value.saturating_sub(10) || value > output_value.saturating_add(10) {
-                        warn!(target: LOG_TARGET, "[{:?}] ❌ Wrong coinbase value for {}, expected: {}, found: {}", block.original_header.pow.pow_algo, spend_key, value, output_value);
+                    // We do this as it might be the order of output generation is different, and it might be that the
+                    // outputs are a micro tari off due to division as its not always possible to divide exactly
+                    if value <= output_value.saturating_sub(10) || value >= output_value.saturating_add(10) {
+                        warn!(
+                            target: LOG_TARGET,
+                            "[{:?}] ❌ Wrong coinbase value for {}, expected: {}, found: {}",
+                            block.original_header.pow.pow_algo, spend_key, value, output_value
+                        );
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                     if miner_share.coinbase_extra != *output.features.coinbase_extra {
-                        warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase extra mismatch for {}, expected: {:?}, found {:?}", block.original_header.pow.pow_algo, spend_key, output.features.coinbase_extra,  miner_share.coinbase_extra);
+                        warn!(
+                            target: LOG_TARGET,
+                            "[{:?}] ❌ Coinbase extra mismatch for {}, expected: {:?}, found {:?}",
+                            block.original_header.pow.pow_algo,
+                            spend_key,
+                            output.features.coinbase_extra,
+                            miner_share.coinbase_extra
+                        );
                         return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                     }
                 },
                 None => {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Coinbase not found for share: {}", block.original_header.pow.pow_algo, spend_key);
+                    warn!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Coinbase not found for share: {}",
+                        block.original_header.pow.pow_algo, spend_key
+                    );
                     return Err(ShareChainError::ValidationError(ValidationError::InvalidCoinbase));
                 },
             }
@@ -916,22 +984,16 @@ impl<T: BlockCache> P2Chain<T> {
         Ok(true)
     }
 
-    pub fn get_target_difficulty_for_block(&self, block: &P2Block) -> Option<Difficulty> {
+    pub fn get_target_difficulty_for_block(&self, block: &_P2Block) -> Option<Difficulty> {
         let tip_header_hash = self
             .get_tip()
             .and_then(|level| level.block_header_in_main_chain())
             .map(|header| header.hash)
             .unwrap_or_default();
         if block.prev_hash == tip_header_hash {
-            // easy this builds on the tip
-            let min = match block.original_header.pow.pow_algo {
-                PowAlgorithm::RandomX => Difficulty::from_u64(self.minimum_randomx_target_difficulty).unwrap(),
-                PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
-            };
+            let difficulty = self.get_lwma_difficulty_for_block(&self.lwma, block);
 
-            let difficulty = self.lwma.get_difficulty().unwrap_or(Difficulty::min());
-
-            return Some(cmp::max(min, difficulty));
+            return Some(difficulty);
         }
         // ok this does not build on the tip, this means we need to calculate what it is
         let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
@@ -956,10 +1018,41 @@ impl<T: BlockCache> P2Chain<T> {
                 break;
             }
         }
-        Some(lwma.get_difficulty().unwrap_or(Difficulty::min()))
+        let difficulty = self.get_lwma_difficulty_for_block(&lwma, block);
+
+        Some(difficulty)
     }
 
-    fn add_block_inner(&mut self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
+    fn get_lwma_difficulty_for_block(&self, lwma: &LinearWeightedMovingAverage, block: &_P2Block) -> Difficulty {
+        let min = match block.original_header.pow.pow_algo {
+            PowAlgorithm::RandomX => Difficulty::from_u64(self.minimum_randomx_target_difficulty).unwrap(),
+            PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
+        };
+        match lwma.get_difficulty() {
+            Some(val) => {
+                if val < min {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[{:?}] Calculated difficulty ({}) at height {:?} too low, using the minimum ({})",
+                        block.original_header.pow.pow_algo, val, block.height, min
+                    );
+                    min
+                } else {
+                    val
+                }
+            },
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "[{:?}] Difficulty could not be calculated at height {:?}, using the minimum ({})",
+                    block.original_header.pow.pow_algo, block.height, min
+                );
+                min
+            },
+        }
+    }
+
+    fn add_block_inner(&mut self, block: Arc<_P2Block>) -> Result<ChainAddResult, ShareChainError> {
         let new_block_height = block.height;
         let block_hash = block.hash;
         // edge case no current chain, lets just add
@@ -982,7 +1075,7 @@ impl<T: BlockCache> P2Chain<T> {
         }
     }
 
-    pub fn add_block_to_chain(&mut self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {
+    pub fn add_block_to_chain(&mut self, block: Arc<_P2Block>) -> Result<ChainAddResult, ShareChainError> {
         // Uncle cannot be the same as prev_hash
         if block.uncles.iter().any(|(_, hash)| hash == &block.prev_hash) {
             return Err(ShareChainError::InvalidBlock {
@@ -1003,7 +1096,7 @@ impl<T: BlockCache> P2Chain<T> {
         level.get_uncles(hash)
     }
 
-    pub fn get_parent_block(&self, block: &P2Block) -> Option<Arc<P2Block>> {
+    pub fn get_parent_block(&self, block: &_P2Block) -> Option<Arc<_P2Block>> {
         let parent_height = block.height.checked_sub(1)?;
         let parent_level = self.level_at_height(parent_height)?;
         parent_level.get(&block.prev_hash)
@@ -1028,10 +1121,11 @@ impl<T: BlockCache> P2Chain<T> {
     // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
     // this is safe
     #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::too_many_lines)]
     pub fn get_calculate_and_cache_hashmap_of_shares(
         &self,
         calculating_height: u64,
-        prev_hash: &FixedHash,
+        block_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>,
@@ -1056,22 +1150,27 @@ impl<T: BlockCache> P2Chain<T> {
             }
         }
         let mut miners_to_shares = HashMap::new();
-        if calculating_height == 0 {
-            return Ok(miners_to_shares);
-        }
         let start_level = match self.level_at_height(calculating_height) {
             Some(level) => level,
             None => {
                 warn!(target: LOG_TARGET, "❌ No level at height: {}", calculating_height);
-                return Ok(miners_to_shares)},
+                if calculating_height == 0 {
+                    // if height 0 does not exist, this most likely means we have nothing, so return empty
+                    return Ok(miners_to_shares);
+                }
+                // if the height is not 0, we need to have something, else we cant create shares.
+                return Err(ShareChainError::BlockLevelNotFound)
+                    .inspect_err(|_| warn!(target: LOG_TARGET, "❌ start block level not found"));
+            },
         };
 
-        // we want to count 1 short,as the final share will be for this node
-        let stop_height = start_level.height().saturating_sub(self.share_window - 1);
-        warn!(target: LOG_TARGET, "❌ stop level: {}", stop_height);
+        // we want to count 1 short, as the final share will be for this node, and another 1 short because we start
+        // counting at index 0 and we count and use up to the stop height in calculations below
+        let stop_height = start_level.height().saturating_sub(self.share_window - 2);
         let mut cur_block = start_level
-            .get_header(&prev_hash)
-            .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ start block not found"))?;
+            .get_header(block_hash)
+            .ok_or(ShareChainError::BlockNotFound)
+            .inspect_err(|_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, no start level at height: {}", block_hash))?;
         update_insert(
             &mut miners_to_shares,
             cur_block.wallet_address,
@@ -1081,9 +1180,15 @@ impl<T: BlockCache> P2Chain<T> {
         for uncle in &cur_block.uncles {
             let uncle_block = self
                 .level_at_height(uncle.0)
-                .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌start uncle level not found"))?
+                .ok_or(ShareChainError::UncleBlockNotFound)
+                .inspect_err(|_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, uncle level '{}' not found", uncle.0))?
                 .get_header(&uncle.1)
-                .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌start uncle block not found"))?;
+                .ok_or(ShareChainError::UncleBlockNotFound)
+                .inspect_err(|_| {
+                    debug!(
+                        target: LOG_TARGET, "❌ Start uncle block '{}' at height '{}' not found", uncle.1, uncle.0
+                    )
+                })?;
             update_insert(
                 &mut miners_to_shares,
                 uncle_block.wallet_address,
@@ -1094,9 +1199,19 @@ impl<T: BlockCache> P2Chain<T> {
         while cur_block.height > stop_height {
             cur_block = self
                 .level_at_height(cur_block.height.saturating_sub(1))
-                .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No level at height: {}", cur_block.height.saturating_sub(1)))?
+                .ok_or(ShareChainError::BlockNotFound)
+                .inspect_err(
+                    |_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, no level at height: {}", cur_block.height.saturating_sub(1)),
+                )?
                 .get_header(&cur_block.prev_hash)
-                .ok_or(ShareChainError::BlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No block at height: {}", cur_block.height.saturating_sub(1)))?;
+                .ok_or(ShareChainError::BlockNotFound)
+                .inspect_err(|_| {
+                    debug!(
+                        target: LOG_TARGET,
+                        "❌ Block '{}' at height '{}' not found",
+                        cur_block.height.saturating_sub(1), cur_block.prev_hash
+                    )
+                })?;
             update_insert(
                 &mut miners_to_shares,
                 cur_block.wallet_address,
@@ -1106,15 +1221,25 @@ impl<T: BlockCache> P2Chain<T> {
             for uncle in &cur_block.uncles {
                 let uncle_block = self
                     .level_at_height(uncle.0)
-                    .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No uncle level at height: {}", uncle.0))?
+                    .ok_or(ShareChainError::UncleBlockNotFound)
+                    .inspect_err(|_| debug!(target: LOG_TARGET, "❌ Could not calculate shares, uncle level not found at height: {}", uncle.0))?
                     .get_header(&uncle.1)
-                    .ok_or(ShareChainError::UncleBlockNotFound).inspect_err(|_|warn!(target: LOG_TARGET, "❌ No uncle block at height: {}", uncle.0))?;
+                    .ok_or(ShareChainError::UncleBlockNotFound)
+                    .inspect_err(|_| {
+                        debug!(
+                            target: LOG_TARGET, "❌ Block '{}' at height '{}' not found", uncle.1, uncle.0
+                        )
+                    })?;
                 update_insert(
                     &mut miners_to_shares,
                     uncle_block.wallet_address,
                     UNCLE_REWARD_SHARE,
                     uncle_block.coinbase_extra.clone(),
                 );
+            }
+            if cur_block.height == 0 {
+                // edge case we are at the start of the chain
+                break;
             }
         }
         Ok(miners_to_shares)
@@ -1171,7 +1296,7 @@ mod test {
     };
 
     fn create_chain() -> P2Chain<LmdbBlockStorage> {
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -1340,7 +1465,7 @@ mod test {
         // as chain start block height 2 will only be valid if it has parents aka block 1, so we need share
         // window + 1 blocks in chain--
 
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_median_timestamp();
         bypass_checks.set_correct_shares();
@@ -1704,7 +1829,7 @@ mod test {
     #[test]
     fn add_blocks_to_chain_super_large_reorg() {
         // this test will verify that we reorg to a completely new chain
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -1780,7 +1905,7 @@ mod test {
     #[test]
     fn add_blocks_missing_block() {
         // this test will verify that we reorg to a completely new chain
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -1834,7 +1959,7 @@ mod test {
     #[test]
     fn reorg_with_missing_uncle() {
         // this test will verify that we reorg to a completely new chain
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -2240,7 +2365,7 @@ mod test {
 
     #[test]
     fn rerog_less_than_share_window() {
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -2317,7 +2442,7 @@ mod test {
 
     #[test]
     fn resets_levels_after_reorg() {
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_correct_shares();
@@ -2575,5 +2700,41 @@ mod test {
 
     fn diff(i: u64) -> Difficulty {
         Difficulty::from_u64(i).unwrap()
+    }
+
+    #[test]
+    fn get_shares() {
+        let mut chain = create_chain();
+
+        let mut prev_block = None;
+        let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
+        for i in 0..5 {
+            tari_block.header.nonce = i;
+            let address = new_random_address();
+            let block = P2BlockBuilder::new_from_block(prev_block.as_deref())
+                .with_timestamp(EpochTime::now())
+                .with_height(i)
+                .with_tari_block(tari_block.clone())
+                .unwrap()
+                .with_miner_wallet_address(address.clone())
+                .build()
+                .unwrap();
+            prev_block = Some(block.clone());
+            chain.add_block_to_chain(block.clone()).unwrap();
+
+            let level = chain.get_tip().unwrap();
+            assert_eq!(level.height(), i);
+            assert_eq!(level.get_block_in_main_chain().unwrap().original_header.nonce, i);
+        }
+        let tip = chain.get_tip().unwrap();
+        #[allow(clippy::mutable_key_type)]
+        let shares = chain
+            .get_calculate_and_cache_hashmap_of_shares(tip.height(), &tip.chain_block())
+            .unwrap();
+        // share window = 5, but we need to leave place for the newest tip, so it should only contain 4 shares
+        assert_eq!(shares.len(), 4);
+        for share in shares.values() {
+            assert_eq!(share.share_count, MAIN_REWARD_SHARE)
+        }
     }
 }

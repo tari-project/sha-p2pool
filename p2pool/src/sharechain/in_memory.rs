@@ -36,7 +36,7 @@ use crate::{
     server::{http::stats_collector::StatsBroadcastClient, Config, PROTOCOL_VERSION},
     sharechain::{
         error::{ShareChainError, ValidationError},
-        p2block::{P2Block, P2BlockBuilder, VerifiedStatus},
+        p2block::{P2BlockBuilder, _P2Block, _VerifiedStatus},
         p2chain::{CachedShares, ChainAddResult, P2Chain},
         BlockValidationParams,
         ShareChain,
@@ -66,7 +66,7 @@ pub(crate) struct InMemoryShareChain {
     squad: String,
     minimum_randomx_target_difficulty: u64,
     minimum_sha3_target_difficulty: u64,
-    bypass_checks: VerifiedStatus,
+    bypass_checks: _VerifiedStatus,
 }
 
 #[allow(dead_code)]
@@ -78,7 +78,7 @@ impl InMemoryShareChain {
         coinbase_extras: Arc<RwLock<HashMap<String, Vec<u8>>>>,
         stat_client: StatsBroadcastClient,
         squad: String,
-        bypass_checks: Option<VerifiedStatus>,
+        bypass_checks: Option<_VerifiedStatus>,
     ) -> Result<Self, ShareChainError> {
         if pow_algo == PowAlgorithm::RandomX && block_validation_params.is_none() {
             return Err(ShareChainError::MissingBlockValidationParams);
@@ -182,7 +182,7 @@ impl InMemoryShareChain {
     }
 
     /// Calculates block difficulty based on it's pow algo.
-    fn block_difficulty(&self, block: &P2Block) -> Result<u64, ValidationError> {
+    fn block_difficulty(&self, block: &_P2Block) -> Result<u64, ValidationError> {
         match block.original_header.pow.pow_algo {
             PowAlgorithm::RandomX => {
                 if let Some(params) = &self.block_validation_params {
@@ -209,7 +209,7 @@ impl InMemoryShareChain {
     /// Validating a new block.
     async fn validate_claimed_difficulty(
         &self,
-        block: &P2Block,
+        block: &_P2Block,
         params: Option<Arc<BlockValidationParams>>,
     ) -> Result<Difficulty, ValidationError> {
         if block.original_header.pow.pow_algo != self.pow_algo {
@@ -244,7 +244,7 @@ impl InMemoryShareChain {
     async fn validate_block(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-        block: &mut P2Block,
+        block: &mut _P2Block,
     ) -> Result<(), ValidationError> {
         if block.uncles.len() > UNCLE_LIMIT {
             warn!(target: LOG_TARGET, "[{:?}] ❌ Too many uncles! {:?}", self.pow_algo, block.uncles.len());
@@ -300,7 +300,11 @@ impl InMemoryShareChain {
         match p2_chain.get_target_difficulty_for_block(block) {
             Some(difficulty) => {
                 if difficulty != block.target_difficulty() && !self.bypass_checks.has_target_difficulty_verified() {
-                    warn!(target: LOG_TARGET, "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}", self.pow_algo, block.target_difficulty(), difficulty);
+                    warn!(
+                        target: LOG_TARGET,
+                        "[{:?}] ❌ Block target difficulty does not match claimed target! Claimed: {:?}, Actual: {:?}",
+                        self.pow_algo, block.target_difficulty(), difficulty
+                    );
                     return Err(ValidationError::DifficultyTarget);
                 }
                 // we have validated the target difficulty, so lets set it as valid
@@ -317,7 +321,7 @@ impl InMemoryShareChain {
     async fn submit_block_with_lock(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
-        mut block: P2Block,
+        mut block: _P2Block,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
     ) -> Result<ChainAddResult, ShareChainError> {
@@ -374,9 +378,11 @@ impl InMemoryShareChain {
         None
     }
 
-    fn get_calculate_and_cache_hashmap_of_tip_shares(
+    fn calculate_and_cache_hashmap_shares(
         &self,
         p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
+        calculating_height: u64,
+        block_hash: &FixedHash,
     ) -> Result<HashMap<CompressedKey<RistrettoPublicKey>, MinerShare>, ShareChainError> {
         let tip = match p2_chain.get_tip() {
             Some(tip) => tip,
@@ -386,11 +392,14 @@ impl InMemoryShareChain {
         // technically is due to optimizations, but the hash is only calculated from the point, which is not mutable. So
         // this is safe
         #[allow(clippy::mutable_key_type)]
-        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(tip.height(), &tip.chain_block())?;
-        p2_chain.cached_shares = Some(CachedShares {
-            at_hash: tip.chain_block(),
-            shares: shares.clone(),
-        });
+        let shares = p2_chain.get_calculate_and_cache_hashmap_of_shares(calculating_height, block_hash)?;
+        if tip.chain_block() == *block_hash {
+            // we update the cached shares if this is for the tip
+            p2_chain.cached_shares = Some(CachedShares {
+                at_hash: tip.chain_block(),
+                shares: shares.clone(),
+            });
+        }
         Ok(shares)
     }
 
@@ -400,7 +409,7 @@ impl InMemoryShareChain {
         mut start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
-    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+    ) -> Result<Vec<Arc<_P2Block>>, ShareChainError> {
         let mut res = Vec::with_capacity(page_size);
         let mut num_actual_blocks = 0;
         let lowest_height = p2_chain.lowest_chain_level_height().unwrap_or(0);
@@ -449,7 +458,7 @@ impl InMemoryShareChain {
 
 #[async_trait]
 impl ShareChain for InMemoryShareChain {
-    async fn submit_block(&self, block: P2Block) -> Result<ChainAddResult, ShareChainError> {
+    async fn submit_block(&self, block: _P2Block) -> Result<ChainAddResult, ShareChainError> {
         if block.version != PROTOCOL_VERSION {
             return Err(ShareChainError::BlockValidation(
                 "Block version not supported".to_string(),
@@ -485,7 +494,7 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError> {
+    async fn add_synced_blocks(&self, blocks: Vec<_P2Block>) -> Result<ChainAddResult, ShareChainError> {
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
         let mut blocks = blocks.to_vec();
@@ -591,7 +600,7 @@ impl ShareChain for InMemoryShareChain {
     #[allow(clippy::mutable_key_type)]
     async fn generate_shares_and_get_target_difficulty(
         &self,
-        new_tip_block: &P2Block,
+        new_tip_block: &_P2Block,
         solo_mine: bool,
     ) -> Result<(Vec<NewBlockCoinbase>, Difficulty), ShareChainError> {
         let mut chain_read_lock = self.p2_chain.read().await;
@@ -616,7 +625,11 @@ impl ShareChain for InMemoryShareChain {
                 drop(chain_read_lock);
                 // if there is none, lets see if we need to calculate one
                 let mut wl = self.p2_chain.write().await;
-                miners_to_shares = self.get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)?;
+                miners_to_shares = self.calculate_and_cache_hashmap_shares(
+                    &mut wl,
+                    new_tip_block.height.saturating_sub(1),
+                    &new_tip_block.prev_hash,
+                )?;
                 chain_read_lock = wl.downgrade();
             }
             miners_to_shares
@@ -666,8 +679,28 @@ impl ShareChain for InMemoryShareChain {
             PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
         };
 
-        let difficulty = chain_read_lock.lwma.get_difficulty().unwrap_or(Difficulty::min());
-        let difficulty = cmp::max(min, difficulty);
+        let difficulty = match chain_read_lock.lwma.get_difficulty() {
+            Some(val) => {
+                if val < min {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[{:?}] Calculated difficulty ({}) at height {:?} too low, using the minimum ({})",
+                        self.pow_algo, val, self.tip_height().await.unwrap_or_default(), min
+                    );
+                    min
+                } else {
+                    val
+                }
+            },
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "[{:?}] Difficulty could not be calculated at height {:?}, using the minimum ({})",
+                    self.pow_algo, self.tip_height().await.unwrap_or_default(), min
+                );
+                min
+            },
+        };
 
         Ok((res, difficulty))
     }
@@ -676,7 +709,7 @@ impl ShareChain for InMemoryShareChain {
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<Arc<P2Block>, ShareChainError> {
+    ) -> Result<Arc<_P2Block>, ShareChainError> {
         let chain_read_lock = self.p2_chain.read().await;
         let mut timestamp = EpochTime::now();
         // edge case for chain start
@@ -695,7 +728,7 @@ impl ShareChain for InMemoryShareChain {
         // 3. The uncle must link back to the main chain
         // 4. The chain height must be above 5
         let mut excluded_uncles: Vec<FixedHash> = vec![];
-        let mut uncles: Vec<Arc<P2Block>> = vec![];
+        let mut uncles: Vec<Arc<_P2Block>> = vec![];
         if new_height >= UNCLE_START_HEIGHT {
             // gather potential uncles
             for height in new_height.saturating_sub(MAX_UNCLE_AGE)..new_height {
@@ -779,7 +812,7 @@ impl ShareChain for InMemoryShareChain {
             .build()?)
     }
 
-    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>> {
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<_P2Block>> {
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut blocks = Vec::with_capacity(requested_blocks.len());
 
@@ -804,7 +837,7 @@ impl ShareChain for InMemoryShareChain {
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError> {
+    ) -> Result<(Vec<Arc<_P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError> {
         let p2_chain_read = self.p2_chain.read().await;
 
         let mut split_height = 0;
@@ -853,7 +886,7 @@ impl ShareChain for InMemoryShareChain {
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
-    ) -> Result<Vec<Arc<P2Block>>, ShareChainError> {
+    ) -> Result<Vec<Arc<_P2Block>>, ShareChainError> {
         let p2_chain_read = self.p2_chain.read().await;
         self.all_blocks_with_lock(&p2_chain_read, start_height, page_size, main_chain_only)
     }
@@ -932,7 +965,7 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_target_difficulty_verified();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_median_timestamp();
@@ -1000,8 +1033,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 15);
         for share in shares {
@@ -1047,8 +1082,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 5);
         for share in shares {
@@ -1118,8 +1155,10 @@ pub mod test {
         }
 
         let mut wl = share_chain.p2_chain.write().await;
+        let height = wl.get_tip().unwrap().height();
+        let tip_hash = wl.get_tip().unwrap().chain_block();
         let shares = share_chain
-            .get_calculate_and_cache_hashmap_of_tip_shares(&mut wl)
+            .calculate_and_cache_hashmap_shares(&mut wl, height, &tip_hash)
             .unwrap();
         assert_eq!(shares.len(), 5);
         // we have 1 miner with 15 shares and 4 with 19 shares
@@ -1238,7 +1277,7 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_difficulty_verified();
         bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
@@ -1318,7 +1357,7 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_median_timestamp();
         bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
@@ -1390,7 +1429,7 @@ pub mod test {
         assert_eq!(chain.get_tip().unwrap().height(), 4);
     }
 
-    fn mine_block(block: &mut P2Block, target: Difficulty) {
+    fn mine_block(block: &mut _P2Block, target: Difficulty) {
         block.original_header.nonce = rand::thread_rng().gen();
         for _i in 0..20000 {
             if sha3x_difficulty(&block.original_header).expect("should get difficulty") == target {
@@ -1412,7 +1451,7 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let mut bypass_checks = VerifiedStatus::new();
+        let mut bypass_checks = _VerifiedStatus::new();
         bypass_checks.set_correct_shares();
         let p2chain = P2Chain::new_empty(
             pow_algo,
@@ -1496,7 +1535,7 @@ pub mod test {
 
         let block_cache = LmdbBlockStorage::new_from_temp_dir();
 
-        let bypass_checks = VerifiedStatus::new();
+        let bypass_checks = _VerifiedStatus::new();
         let p2chain = P2Chain::new_empty(
             pow_algo,
             config.share_window * 2,

@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{fmt, fmt::Display, sync::Arc};
 
 use bitflags::bitflags;
 use blake2::Blake2b;
@@ -38,7 +38,7 @@ lazy_static! {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct P2Block {
+pub struct _P2Block {
     #[serde(default)]
     pub version: u64,
     pub squad: String,
@@ -56,7 +56,7 @@ pub struct P2Block {
     // (height of uncle, hash of uncle)
     pub uncles: Vec<(u64, BlockHash)>,
     pub miner_coinbase_extra: Vec<u8>,
-    pub verified: VerifiedStatus,
+    pub verified: _VerifiedStatus,
     total_pow: AccumulatedDifficulty,
 }
 
@@ -84,8 +84,8 @@ pub struct OldP2Block {
 }
 
 impl OldP2Block {
-    pub fn to_p2block(self) -> P2Block {
-        P2Block {
+    pub fn to_p2block(self) -> _P2Block {
+        _P2Block {
             version: self.version,
             squad: self.squad,
             hash: self.hash,
@@ -100,7 +100,7 @@ impl OldP2Block {
             target_difficulty: self.target_difficulty,
             uncles: self.uncles,
             miner_coinbase_extra: self.miner_coinbase_extra,
-            verified: VerifiedStatus::new(),
+            verified: _VerifiedStatus::new(),
             total_pow: self.total_pow,
         }
     }
@@ -114,7 +114,7 @@ impl OldP2Block {
     }
 }
 
-impl Default for P2Block {
+impl Default for _P2Block {
     fn default() -> Self {
         Self {
             version: PROTOCOL_VERSION,
@@ -131,14 +131,14 @@ impl Default for P2Block {
             target_difficulty: Difficulty::min(),
             uncles: Vec::new(),
             miner_coinbase_extra: vec![],
-            verified: VerifiedStatus::new(),
+            verified: _VerifiedStatus::new(),
             total_pow: AccumulatedDifficulty::default(),
         }
     }
 }
-impl_conversions!(P2Block);
+impl_conversions!(_P2Block);
 
-impl P2Block {
+impl _P2Block {
     pub fn generate_hash(&self) -> BlockHash {
         DomainSeparatedConsensusHasher::<BlocksHashDomain, Blake2b<U32>>::new("block")
             .chain(&self.prev_hash)
@@ -222,21 +222,21 @@ impl P2Block {
             target_difficulty: self.target_difficulty,
             uncles: self.uncles,
             miner_coinbase_extra: self.miner_coinbase_extra,
-            verified: self.verified.is_verified() as bool,
+            verified: self.verified.is_verified(),
             total_pow: self.total_pow,
         }
     }
 }
 
 pub struct P2BlockBuilder {
-    block: P2Block,
+    block: _P2Block,
     use_specific_hash: bool,
     added_target_difficulty: bool,
 }
 
 impl P2BlockBuilder {
     pub fn new(prev_block_hash_and_pow: Option<(FixedHash, AccumulatedDifficulty)>) -> Self {
-        let mut block = P2Block::default();
+        let mut block = _P2Block::default();
         match prev_block_hash_and_pow {
             Some((prev_block_hash, total_pow)) => {
                 block.prev_hash = prev_block_hash;
@@ -254,8 +254,8 @@ impl P2BlockBuilder {
         }
     }
 
-    pub fn new_from_block(block_arg: Option<&P2Block>) -> Self {
-        let mut block = P2Block::default();
+    pub fn new_from_block(block_arg: Option<&_P2Block>) -> Self {
+        let mut block = _P2Block::default();
         if let Some(b) = block_arg {
             block.prev_hash = b.hash;
             block.total_pow = b.total_pow;
@@ -309,7 +309,7 @@ impl P2BlockBuilder {
         self
     }
 
-    pub fn with_uncles(mut self, uncles: &Vec<Arc<P2Block>>) -> Result<Self, ShareChainError> {
+    pub fn with_uncles(mut self, uncles: &Vec<Arc<_P2Block>>) -> Result<Self, ShareChainError> {
         let mut block_uncles = Vec::new();
         for uncle in uncles {
             block_uncles.push((uncle.height, uncle.hash));
@@ -323,7 +323,7 @@ impl P2BlockBuilder {
         Ok(self)
     }
 
-    pub fn build(mut self) -> Result<Arc<P2Block>, ShareChainError> {
+    pub fn build(mut self) -> Result<Arc<_P2Block>, ShareChainError> {
         if !self.added_target_difficulty || self.block.prev_hash == BlockHash::zero() {
             if self.block.prev_hash == BlockHash::zero() {
                 self.block.total_pow =
@@ -345,10 +345,10 @@ impl P2BlockBuilder {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
-pub struct VerifiedStatus(u8);
+pub struct _VerifiedStatus(u8);
 
 bitflags! {
-    impl VerifiedStatus: u8 {
+    impl _VerifiedStatus: u8 {
         /// has parents
         const PARENTS = 0b00000001;
         /// correct target difficulty
@@ -362,57 +362,83 @@ bitflags! {
     }
 }
 
-impl VerifiedStatus {
+impl _VerifiedStatus {
     pub fn is_verified(self) -> bool {
-        self.contains(VerifiedStatus::PARENTS) &&
-            self.contains(VerifiedStatus::TARGET_DIFFICULTY) &&
-            self.contains(VerifiedStatus::DIFFICULTY) &&
-            self.contains(VerifiedStatus::MEDIAN_TIMESTAMP) &&
-            self.contains(VerifiedStatus::CORRECT_SHARES)
+        self.contains(_VerifiedStatus::PARENTS) &&
+            self.contains(_VerifiedStatus::TARGET_DIFFICULTY) &&
+            self.contains(_VerifiedStatus::DIFFICULTY) &&
+            self.contains(_VerifiedStatus::MEDIAN_TIMESTAMP) &&
+            self.contains(_VerifiedStatus::CORRECT_SHARES)
     }
 
     pub fn new() -> Self {
-        VerifiedStatus(0)
+        _VerifiedStatus(0)
     }
 
     pub fn set_has_parents(&mut self) {
-        self.insert(VerifiedStatus::PARENTS);
+        self.insert(_VerifiedStatus::PARENTS);
     }
 
     pub fn set_target_difficulty_verified(&mut self) {
-        self.insert(VerifiedStatus::TARGET_DIFFICULTY);
+        self.insert(_VerifiedStatus::TARGET_DIFFICULTY);
     }
 
     pub fn set_difficulty_verified(&mut self) {
-        self.insert(VerifiedStatus::DIFFICULTY);
+        self.insert(_VerifiedStatus::DIFFICULTY);
     }
 
     pub fn set_median_timestamp(&mut self) {
-        self.insert(VerifiedStatus::MEDIAN_TIMESTAMP);
+        self.insert(_VerifiedStatus::MEDIAN_TIMESTAMP);
     }
 
     pub fn set_correct_shares(&mut self) {
-        self.insert(VerifiedStatus::CORRECT_SHARES);
+        self.insert(_VerifiedStatus::CORRECT_SHARES);
     }
 
     pub fn has_parents(self) -> bool {
-        self.contains(VerifiedStatus::PARENTS)
+        self.contains(_VerifiedStatus::PARENTS)
     }
 
     pub fn has_target_difficulty_verified(self) -> bool {
-        self.contains(VerifiedStatus::TARGET_DIFFICULTY)
+        self.contains(_VerifiedStatus::TARGET_DIFFICULTY)
     }
 
     pub fn has_difficulty_verified(self) -> bool {
-        self.contains(VerifiedStatus::DIFFICULTY)
+        self.contains(_VerifiedStatus::DIFFICULTY)
     }
 
     pub fn has_median_timestamp(self) -> bool {
-        self.contains(VerifiedStatus::MEDIAN_TIMESTAMP)
+        self.contains(_VerifiedStatus::MEDIAN_TIMESTAMP)
     }
 
     pub fn has_correct_shares(self) -> bool {
-        self.contains(VerifiedStatus::CORRECT_SHARES)
+        self.contains(_VerifiedStatus::CORRECT_SHARES)
+    }
+}
+
+impl Display for _VerifiedStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut verified = Vec::new();
+        if self.has_parents() {
+            verified.push("Parents");
+        }
+        if self.has_target_difficulty_verified() {
+            verified.push("Target Difficulty");
+        }
+        if self.has_difficulty_verified() {
+            verified.push("Achieved Difficulty");
+        }
+        if self.has_median_timestamp() {
+            verified.push("Median Timestamp");
+        }
+        if self.has_correct_shares() {
+            verified.push("Correct Shares");
+        }
+        if verified.is_empty() {
+            write!(f, "Has verified: none")
+        } else {
+            write!(f, "Has verified: {}", verified.join(", "))
+        }
     }
 }
 

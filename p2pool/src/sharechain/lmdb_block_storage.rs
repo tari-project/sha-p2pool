@@ -40,7 +40,7 @@ use rkv::{
 use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
 
-use super::P2Block;
+use super::_P2Block;
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::lmdb_block_storage";
 pub struct LmdbBlockStorage {
@@ -123,7 +123,7 @@ impl LmdbBlockStorage {
 }
 
 impl BlockCache for LmdbBlockStorage {
-    fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
+    fn get(&self, hash: &BlockHash) -> Option<Arc<_P2Block>> {
         let env = self.file_handle.read().expect("reader");
         let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
         let reader = env.read().expect("reader");
@@ -152,7 +152,7 @@ impl BlockCache for LmdbBlockStorage {
         }
     }
 
-    fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+    fn insert(&self, hash: BlockHash, block: Arc<_P2Block>) {
         // Retry if the map is full
         // This weird pattern of setting a bool is so that the env is closed before resizing, otherwise
         // you can't resize with active transactions.
@@ -193,7 +193,7 @@ impl BlockCache for LmdbBlockStorage {
         }
     }
 
-    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+    fn all_blocks(&self) -> Result<Vec<Arc<_P2Block>>, Error> {
         let env = self.file_handle.read().expect("reader");
         let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
         let reader = env.read().expect("reader");
@@ -222,10 +222,10 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
     env.set_map_size(new_size).unwrap();
 }
 pub trait BlockCache {
-    fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
+    fn get(&self, hash: &BlockHash) -> Option<Arc<_P2Block>>;
     fn delete(&self, hash: &BlockHash);
-    fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
-    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
+    fn insert(&self, hash: BlockHash, block: Arc<_P2Block>);
+    fn all_blocks(&self) -> Result<Vec<Arc<_P2Block>>, Error>;
 }
 
 #[cfg(test)]
@@ -235,7 +235,7 @@ pub mod test {
     use super::*;
 
     pub(crate) struct InMemoryBlockCache {
-        blocks: Arc<RwLock<HashMap<BlockHash, Arc<P2Block>>>>,
+        blocks: Arc<RwLock<HashMap<BlockHash, Arc<_P2Block>>>>,
     }
 
     impl InMemoryBlockCache {
@@ -247,7 +247,7 @@ pub mod test {
     }
 
     impl BlockCache for InMemoryBlockCache {
-        fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>> {
+        fn get(&self, hash: &BlockHash) -> Option<Arc<_P2Block>> {
             self.blocks.read().unwrap().get(hash).cloned()
         }
 
@@ -255,11 +255,11 @@ pub mod test {
             self.blocks.write().unwrap().remove(hash);
         }
 
-        fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+        fn insert(&self, hash: BlockHash, block: Arc<_P2Block>) {
             self.blocks.write().unwrap().insert(hash, block);
         }
 
-        fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+        fn all_blocks(&self) -> Result<Vec<Arc<_P2Block>>, Error> {
             Ok(self.blocks.read().unwrap().values().cloned().collect())
         }
     }
@@ -267,7 +267,7 @@ pub mod test {
     #[test]
     fn test_saving_and_retrieving_blocks() {
         let cache = LmdbBlockStorage::new_from_temp_dir();
-        let block = Arc::new(P2Block::default());
+        let block = Arc::new(_P2Block::default());
         let hash = block.hash;
         cache.insert(hash, block.clone());
         let retrieved_block = cache.get(&hash).unwrap();
@@ -277,7 +277,7 @@ pub mod test {
     #[test]
     fn test_deleting_blocks() {
         let cache = LmdbBlockStorage::new_from_temp_dir();
-        let block = Arc::new(P2Block::default());
+        let block = Arc::new(_P2Block::default());
         let hash = block.hash;
         cache.insert(hash, block.clone());
         let retrieved_block = cache.get(&hash).unwrap();

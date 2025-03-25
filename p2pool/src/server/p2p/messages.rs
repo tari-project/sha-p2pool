@@ -13,10 +13,7 @@ use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::{
-    server::PROTOCOL_VERSION,
-    sharechain::p2block::{OldP2Block, P2Block, VerifiedStatus},
-};
+use crate::{server::PROTOCOL_VERSION, sharechain::p2block::OldP2Block};
 
 #[macro_export]
 macro_rules! impl_conversions {

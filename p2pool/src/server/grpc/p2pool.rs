@@ -49,7 +49,7 @@ use crate::{
         http::stats_collector::StatsBroadcastClient,
         p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
     },
-    sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
+    sharechain::{p2block::_P2Block, BlockValidationParams, ShareChain},
     PROFILING_LOG_TARGET,
 };
 
@@ -78,9 +78,9 @@ where S: ShareChain
     sha3_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     randomx_block_height_difficulty_cache: Arc<RwLock<HashMap<u64, Difficulty>>>,
     stats_max_difficulty_since_last_success: Arc<RwLock<Difficulty>>,
-    template_store_sha3x: RwLock<HashMap<FixedHash, P2Block>>,
+    template_store_sha3x: RwLock<HashMap<FixedHash, _P2Block>>,
     list_of_templates_sha3x: RwLock<VecDeque<FixedHash>>,
-    template_store_rx: RwLock<HashMap<FixedHash, P2Block>>,
+    template_store_rx: RwLock<HashMap<FixedHash, _P2Block>>,
     list_of_templates_rx: RwLock<VecDeque<FixedHash>>,
     are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
@@ -134,7 +134,7 @@ where S: ShareChain
     }
 
     /// Submits a new block to share chain and broadcasts to the p2p network.
-    pub async fn submit_share_chain_block(&self, block: P2Block) -> Result<(), Status> {
+    pub async fn submit_share_chain_block(&self, block: _P2Block) -> Result<(), Status> {
         let pow_algo = block.original_header.pow.pow_algo;
         match pow_algo {
             PowAlgorithm::RandomX => {
@@ -159,12 +159,12 @@ where S: ShareChain
             Ok(new_tip) => {
                 if new_tip.new_tip.is_some() {
                     let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                    let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(Arc::new(block))];
+                    let mut new_blocks = vec![Arc::<_P2Block>::unwrap_or_clone(Arc::new(block))];
                     let mut uncles = share_chain
                         .get_blocks(&new_blocks[0].uncles)
                         .await
                         .into_iter()
-                        .map(Arc::<P2Block>::unwrap_or_clone)
+                        .map(Arc::<_P2Block>::unwrap_or_clone)
                         .collect();
                     new_blocks.append(&mut uncles);
                     let new_blocks = new_blocks.into_iter().map(|b| b.to_old_p2block()).collect();

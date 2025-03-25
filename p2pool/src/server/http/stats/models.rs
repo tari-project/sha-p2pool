@@ -9,7 +9,7 @@ use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::{
     server::{http::stats_collector::GetStatsResponse, p2p::ConnectionInfo},
-    sharechain::p2block::P2Block,
+    sharechain::p2block::_P2Block,
 };
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -20,8 +20,8 @@ pub struct StatsBlock {
     pub miner_wallet_address: TariAddress,
 }
 
-impl From<Arc<P2Block>> for StatsBlock {
-    fn from(block: Arc<P2Block>) -> Self {
+impl From<Arc<_P2Block>> for StatsBlock {
+    fn from(block: Arc<_P2Block>) -> Self {
         StatsBlock {
             hash: block.hash.to_hex(),
             height: block.height,

@@ -30,7 +30,7 @@ use tari_core::{
     proof_of_work::{randomx_factory::RandomXFactory, AccumulatedDifficulty, Difficulty},
 };
 
-use crate::sharechain::{error::ShareChainError, p2block::P2Block, p2chain::ChainAddResult};
+use crate::sharechain::{error::ShareChainError, p2block::_P2Block, p2chain::ChainAddResult};
 
 /// Chain ID is an identifier which makes sure we apply the same rules to blocks.
 /// Note: This must be updated when new logic applied to blocks handling.
@@ -43,8 +43,8 @@ pub const UNCLE_REWARD_SHARE: u64 = 4;
 pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 pub const MEDIAN_TIMESTAMP_WINDOW: usize = 11;
 
-pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every ten seconds
-pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs every ten seconds
+pub const MIN_RANDOMX_DIFFICULTY: u64 = 1_000; // 1 Khs every twenty seconds
+pub const MIN_SHA3X_DIFFICULTY: u64 = 100_000_000; // 1 Mhs twenty seconds
 
 pub mod error;
 pub mod in_memory;
@@ -89,10 +89,10 @@ impl BlockValidationParams {
 pub(crate) trait ShareChain: Send + Sync + 'static {
     async fn get_total_chain_pow(&self) -> AccumulatedDifficulty;
     /// Adds a new block if valid to chain.
-    async fn submit_block(&self, block: P2Block) -> Result<ChainAddResult, ShareChainError>;
+    async fn submit_block(&self, block: _P2Block) -> Result<ChainAddResult, ShareChainError>;
 
     /// Add multiple blocks at once.
-    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError>;
+    async fn add_synced_blocks(&self, blocks: Vec<_P2Block>) -> Result<ChainAddResult, ShareChainError>;
 
     /// Returns the tip of height in chain (from original Tari block header)
     async fn tip_height(&self) -> Result<u64, ShareChainError>;
@@ -103,7 +103,7 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
     /// Generate shares based on the previous blocks.
     async fn generate_shares_and_get_target_difficulty(
         &self,
-        new_tip_block: &P2Block,
+        new_tip_block: &_P2Block,
         solo_mine: bool,
     ) -> Result<(Vec<NewBlockCoinbase>, Difficulty), ShareChainError>;
 
@@ -112,26 +112,26 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         &self,
         miner_address: &TariAddress,
         coinbase_extra: Vec<u8>,
-    ) -> Result<Arc<P2Block>, ShareChainError>;
+    ) -> Result<Arc<_P2Block>, ShareChainError>;
 
     // /// Return a new block that could be added via `submit_block`.
     // async fn new_block(&self, request: &SubmitBlockRequest, squad: Squad) -> Result<P2Block, ShareChainError>;
 
     /// Returns the requested blocks from this chain
-    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<P2Block>>;
+    async fn get_blocks(&self, requested_blocks: &[(u64, FixedHash)]) -> Vec<Arc<_P2Block>>;
     async fn request_sync(
         &self,
         their_blocks: &[(u64, FixedHash)],
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
-    ) -> Result<(Vec<Arc<P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError>;
+    ) -> Result<(Vec<Arc<_P2Block>>, Option<(u64, FixedHash)>, AccumulatedDifficulty), ShareChainError>;
 
     async fn all_blocks(
         &self,
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
-    ) -> Result<Vec<Arc<P2Block>>, ShareChainError>;
+    ) -> Result<Vec<Arc<_P2Block>>, ShareChainError>;
 
     async fn chain_pow(&self) -> AccumulatedDifficulty;
 
