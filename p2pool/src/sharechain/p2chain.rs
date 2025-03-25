@@ -21,7 +21,6 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    cmp,
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Display, Formatter},
@@ -991,25 +990,9 @@ impl<T: BlockCache> P2Chain<T> {
             .map(|header| header.hash)
             .unwrap_or_default();
         if block.prev_hash == tip_header_hash {
-            // easy this builds on the tip
-            let min = match block.original_header.pow.pow_algo {
-                PowAlgorithm::RandomX => Difficulty::from_u64(self.minimum_randomx_target_difficulty).unwrap(),
-                PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
-            };
+            let difficulty = self.get_lwma_difficulty_for_block(&self.lwma, block);
 
-            let difficulty = match self.lwma.get_difficulty() {
-                Some(val) => val,
-                None => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "[{:?}] Difficulty could not be calculated, using the minimum",
-                        block.original_header.pow.pow_algo
-                    );
-                    Difficulty::min()
-                },
-            };
-
-            return Some(cmp::max(min, difficulty));
+            return Some(difficulty);
         }
         // ok this does not build on the tip, this means we need to calculate what it is
         let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
@@ -1034,19 +1017,38 @@ impl<T: BlockCache> P2Chain<T> {
                 break;
             }
         }
-        let difficulty = match lwma.get_difficulty() {
-            Some(val) => val,
+        let difficulty = self.get_lwma_difficulty_for_block(&lwma, block);
+
+        Some(difficulty)
+    }
+
+    fn get_lwma_difficulty_for_block(&self, lwma: &LinearWeightedMovingAverage, block: &P2Block) -> Difficulty {
+        let min = match block.original_header.pow.pow_algo {
+            PowAlgorithm::RandomX => Difficulty::from_u64(self.minimum_randomx_target_difficulty).unwrap(),
+            PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
+        };
+        match lwma.get_difficulty() {
+            Some(val) => {
+                if val < min {
+                    debug!(
+                        target: LOG_TARGET,
+                        "[{:?}] Calculated difficulty ({}) at height {:?} too low, using the minimum ({})",
+                        block.original_header.pow.pow_algo, val, block.height, min
+                    );
+                    min
+                } else {
+                    val
+                }
+            },
             None => {
                 debug!(
                     target: LOG_TARGET,
-                    "[{:?}] Difficulty could not be calculated, using the minimum",
-                    block.original_header.pow.pow_algo
+                    "[{:?}] Difficulty could not be calculated at height {:?}, using the minimum ({})",
+                    block.original_header.pow.pow_algo, block.height, min
                 );
-                Difficulty::min()
+                min
             },
-        };
-
-        Some(difficulty)
+        }
     }
 
     fn add_block_inner(&mut self, block: Arc<P2Block>) -> Result<ChainAddResult, ShareChainError> {

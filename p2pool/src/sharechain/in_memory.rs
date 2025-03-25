@@ -674,8 +674,8 @@ impl ShareChain for InMemoryShareChain {
                 if val < min {
                     debug!(
                         target: LOG_TARGET,
-                        "[{:?}] Calculated difficulty ({}) too low, using the minimum ({})",
-                        self.pow_algo, val, min
+                        "[{:?}] Calculated difficulty ({}) at height {:?} too low, using the minimum ({})",
+                        self.pow_algo, val, self.tip_height().await.unwrap_or_default(), min
                     );
                     min
                 } else {
@@ -685,10 +685,10 @@ impl ShareChain for InMemoryShareChain {
             None => {
                 debug!(
                     target: LOG_TARGET,
-                    "[{:?}] Difficulty could not be calculated, using the minimum",
-                    self.pow_algo,
+                    "[{:?}] Difficulty could not be calculated at height {:?}, using the minimum ({})",
+                    self.pow_algo, self.tip_height().await.unwrap_or_default(), min
                 );
-                Difficulty::min()
+                min
             },
         };
 

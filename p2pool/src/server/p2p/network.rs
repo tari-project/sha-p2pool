@@ -550,7 +550,11 @@ where S: ShareChain
 
                             // 60 seconds. TODO: make config
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
-                                debug!(target: LOG_TARGET, "Peer {} sent a peer info message that is too old, skipping", source_peer);
+                                debug!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a peer info message that is too old, skipping",
+                                    source_peer
+                                );
                                 // TODO: should be punish
                                 return Ok(MessageAcceptance::Ignore);
                             }
@@ -573,6 +577,7 @@ where S: ShareChain
                     // }
                     match NotifyNewTipBlock::try_from(message) {
                         Ok(payload) => {
+                            let algo = payload.algo();
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "New new tip notify: {}", payload);
                             if payload.version != PROTOCOL_VERSION {
                                 info!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
@@ -581,15 +586,27 @@ where S: ShareChain
                             // lets check age
                             // if this timestamp is older than 60 seconds, we reject it
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
-                                info!(target: LOG_TARGET, "Peer {} sent a notify message that is too old, skipping", source_peer);
+                                info!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a notify message that is too old, skipping",
+                                    source_peer
+                                );
                                 return Ok(MessageAcceptance::Ignore);
                             }
-                            if payload.algo() == PowAlgorithm::RandomX && !self.config.randomx_enabled {
-                                info!(target: LOG_TARGET, "Peer {} sent a RandomX block but RandomX is disabled, skipping", source_peer);
+                            if algo == PowAlgorithm::RandomX && !self.config.randomx_enabled {
+                                info!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a RandomX block but RandomX is disabled, skipping",
+                                    source_peer
+                                );
                                 return Ok(MessageAcceptance::Ignore);
                             }
-                            if payload.algo() == PowAlgorithm::Sha3x && !self.config.sha3x_enabled {
-                                info!(target: LOG_TARGET, "Peer {} sent a Sha3x block but Sha3x is disabled, skipping", source_peer);
+                            if algo == PowAlgorithm::Sha3x && !self.config.sha3x_enabled {
+                                info!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a Sha3x block but Sha3x is disabled, skipping",
+                                    source_peer
+                                );
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             let payload = Arc::new(payload);
@@ -599,9 +616,16 @@ where S: ShareChain
                                 .unwrap_or_else(|_| Duration::from_secs(0))
                                 .checked_sub(Duration::from_secs(payload.timestamp))
                                 .unwrap_or_else(|| Duration::from_secs(0));
-                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} via {propagation_source}-> [{}] Blocks: {} Age:{}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","), humantime::format_duration(
-                              message_age
-                            ));
+                            info!(
+                                target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET,
+                                "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} via \
+                                {propagation_source}-> [{}] Blocks: {} Age:{}",
+                                algo,
+                                payload.new_blocks.iter().map(|b| format!("{}:{}",
+                                b.height,
+                                &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","),
+                                humantime::format_duration(message_age)
+                            );
 
                             // verify payload
                             if payload.new_blocks.is_empty() {
@@ -613,10 +637,14 @@ where S: ShareChain
                             //     return Ok(MessageAcceptance::Accept);
                             // }
 
-                            info!(target: LOG_TARGET, "[{:?}]🆕 New block from broadcast: {:?}", &payload.new_blocks.first().unwrap().original_header.pow.pow_algo ,&payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>());
+                            info!(
+                                target: LOG_TARGET,
+                                "[{:?}]🆕 New block from broadcast: {:?}",
+                                &algo,
+                                &payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>()
+                            );
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New blocks from broadcast:
                             // {:?}", &payload.new_blocks.iter().map(|b| b.hash.to_hex()).collect::<Vec<String>>());
-                            let algo = payload.algo();
                             let share_chain = match algo {
                                 PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
                                 PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -633,7 +661,11 @@ where S: ShareChain
                                     .unwrap_or(0) <=
                                     our_tip.saturating_sub(4)
                             {
-                                info!(target: LOG_TARGET, "Peer {} sent a block that is not better than ours, skipping", message_peer);
+                                info!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a block that is not better than ours, skipping",
+                                    message_peer
+                                );
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
@@ -642,7 +674,11 @@ where S: ShareChain
                             if payload.new_blocks.iter().map(|b| b.height).max().unwrap_or(0) >
                                 our_tip.saturating_add(10)
                             {
-                                info!(target: LOG_TARGET, "Peer {} sent a block that is much higher than ours, skipping", message_peer);
+                                info!(
+                                    target: LOG_TARGET,
+                                    "Peer {} sent a block that is much higher than ours, skipping",
+                                    message_peer
+                                );
                                 // Is reject too harsh? Maybe we should just ignore it
                                 return Ok(MessageAcceptance::Ignore);
                             }
@@ -661,21 +697,37 @@ where S: ShareChain
                             let blocks: Vec<_> = blocks.into_iter().collect();
                             match share_chain.add_synced_blocks(blocks).await {
                                 Ok(new_tip) => {
-                                    info!(target: LOG_TARGET, "[{:?}]New tip notify blocks added to share chain: {}", algo, new_tip);
+                                    info!(
+                                        target: LOG_TARGET,
+                                        "[{:?}]New tip notify blocks added to share chain: {}",
+                                        &algo, new_tip
+                                    );
                                     let missing_parents = new_tip.into_missing_parents_vec();
                                     if !missing_parents.is_empty() {
                                         if missing_parents.len() > 5 {
-                                            info!(target: LOG_TARGET, "We are missing more than 5 blocks, we are missing: {}", missing_parents.len());
+                                            info!(
+                                                target: LOG_TARGET,
+                                                "We are missing more than 5 blocks, we are missing: {}",
+                                                missing_parents.len()
+                                            );
                                             return Ok(MessageAcceptance::Ignore);
                                         }
 
                                         if our_tip < max_payload_height.saturating_sub(10) ||
                                             our_tip > max_payload_height.saturating_add(5)
                                         {
-                                            info!(target: LOG_TARGET, "Our tip({}) is too far off their new block({}) waiting for sync", our_tip, max_payload_height);
+                                            info!(
+                                                target: LOG_TARGET,
+                                                "Our tip({}) is too far off their new block({}) waiting for sync",
+                                                our_tip, max_payload_height
+                                            );
                                             return Ok(MessageAcceptance::Accept);
                                         }
-                                        info!(target: LOG_TARGET, "We are missing less than 5 blocks, sending sync request with missing blocks to {}", propagation_source);
+                                        info!(
+                                            target: LOG_TARGET,
+                                            "We are missing less than 5 blocks, sending sync request with missing blocks to {}",
+                                            propagation_source
+                                        );
                                         let sync_share_chain = SyncMissingBlocks {
                                             algo,
                                             peer: propagation_source,
@@ -1167,7 +1219,15 @@ where S: ShareChain
         let local_peer_id = *self.swarm.local_peer_id();
         let blocks = share_chain.get_blocks(request.missing_blocks()).await;
         if blocks.is_empty() {
-            warn!(target: LOG_TARGET, "No blocks found for sync request: {} {} from {}", request.algo(), request.missing_blocks().iter().map(|(height, hash)| format!("{}({:x}{:x}{:x}{:x})", height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>().join(","), from);
+            warn!(
+                target: LOG_TARGET,
+                "No blocks found for sync request: {} {} from {}",
+                request.algo(),
+                request.missing_blocks().iter().map(
+                    |(height, hash)| format!("{}({:x}{:x}{:x}{:x})", height, hash[0], hash[1], hash[2], hash[3])
+                ).collect::<Vec<String>>().join(","),
+                from
+            );
             let _unused = self
                 .swarm
                 .behaviour_mut()
