@@ -24,10 +24,11 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Display, Formatter},
-    ops::Deref,
+    ops::{Deref, Sub},
     sync::Arc,
 };
 
+use chrono::{Duration, Utc};
 use itertools::Itertools;
 use log::*;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
@@ -222,6 +223,16 @@ impl<T: BlockCache> P2Chain<T> {
             bypass_checks,
             params,
         );
+        let max_blocks_size =
+            i64::try_from(total_size + SAFETY_MARGIN + MAX_EXTRA_SYNC).expect("Failed to convert u64 to i64");
+        // we make an assumption that the block chain of shares in the current chain will not be older than 2 times the
+        // age if blocks would have come in at the block time
+        let earliest_date = (Utc::now()
+            .sub(Duration::seconds(
+                max_blocks_size * i64::try_from(block_time).expect("Failed to convert u64 to i64") * 2,
+            ))
+            .timestamp() as u64)
+            .into();
         for (i, block) in from_block_cache.all_blocks()?.into_iter().enumerate() {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
@@ -229,6 +240,15 @@ impl<T: BlockCache> P2Chain<T> {
             }
             if block.squad != squad {
                 warn!(target: LOG_TARGET, "Block squad mismatch, skipping block");
+                continue;
+            }
+            if !block.verified.is_verified() {
+                warn!(target: LOG_TARGET, "Block not verified, skipping block");
+                continue;
+            }
+
+            if block.timestamp > earliest_date {
+                warn!(target: LOG_TARGET, "Block too old, skipping block");
                 continue;
             }
             if i % 250 == 0 {
