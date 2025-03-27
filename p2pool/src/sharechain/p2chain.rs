@@ -247,7 +247,7 @@ impl<T: BlockCache> P2Chain<T> {
                 continue;
             }
 
-            if block.timestamp > earliest_date {
+            if block.timestamp < earliest_date {
                 warn!(target: LOG_TARGET, "Block too old, skipping block");
                 continue;
             }
