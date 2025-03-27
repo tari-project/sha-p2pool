@@ -26,6 +26,7 @@ use std::{
     fmt::{Display, Formatter},
     ops::{Deref, Sub},
     sync::Arc,
+    time::Instant,
 };
 
 use chrono::{Duration, Utc};
@@ -233,6 +234,7 @@ impl<T: BlockCache> P2Chain<T> {
             ))
             .timestamp() as u64)
             .into();
+        let start = Instant::now();
         for (i, block) in from_block_cache.all_blocks()?.into_iter().enumerate() {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
@@ -258,6 +260,8 @@ impl<T: BlockCache> P2Chain<T> {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
             });
         }
+        let time = start.elapsed();
+        info!(target: LOG_TARGET, "Loaded chain in {:?}", time.as_secs());
         Ok(new_chain)
     }
 
