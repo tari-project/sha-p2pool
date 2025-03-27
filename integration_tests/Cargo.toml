@@ -1,10 +1,10 @@
 [package]
 name = "integration_tests"
-authors = ["The Tari Development Community"]
-repository = "https://github.com/tari-project/sha-p2pool"
-license = "BSD-3-Clause"
-version = "0.22.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 # From tari base layer project
