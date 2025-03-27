@@ -115,10 +115,10 @@ impl InMemoryShareChain {
                 old,
                 new,
                 &squad,
-                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 config
                     .minimum_randomx_target_difficulty
                     .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 bypass_checks,
                 block_validation_params.clone(),
             ) {
@@ -130,9 +130,6 @@ impl InMemoryShareChain {
                 },
                 Err(e) => error!(target: LOG_TARGET, "Could not load chain from file: {}", e),
             };
-
-            // fs::remove_dir_all(bkp_file.as_path())
-            //     .map_err(|e| anyhow::anyhow!("Could not remove old block cache file:{:?}", e))?;
         }
 
         if p2chain.is_none() {
@@ -143,10 +140,10 @@ impl InMemoryShareChain {
                 config.share_window,
                 config.block_time,
                 block_cache,
-                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 config
                     .minimum_randomx_target_difficulty
                     .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 bypass_checks,
                 block_validation_params.clone(),
             ));
@@ -1601,5 +1598,152 @@ pub mod test {
         let chain = share_chain.p2_chain.read().await;
         // chain tip should not have been updated
         assert_eq!(chain.get_tip().unwrap().height(), 0);
+    }
+
+    // Test that minimum difficulty is correctly initialized from config in new()
+    #[tokio::test]
+    async fn minimum_difficulty_initialization_from_config() {
+        // Create config with custom minimum difficulties
+        let mut config = Config::default();
+        let custom_sha3_min = MIN_SHA3X_DIFFICULTY * 3;
+        let custom_randomx_min = MIN_RANDOMX_DIFFICULTY * 3;
+        config.minimum_sha3_target_difficulty = Some(custom_sha3_min);
+        config.minimum_randomx_target_difficulty = Some(custom_randomx_min);
+
+        // Create chain using the new() method
+        let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+        let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+        let stat_client = StatsBroadcastClient::new(stats_tx);
+        let pow_algo = PowAlgorithm::Sha3x;
+
+        // Create a dummy block validation params
+        let block_validation_params = None;
+
+        // Use a temporary directory for block cache
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config_with_path = config.clone();
+        config_with_path.block_cache_file = temp_dir.path().to_path_buf();
+
+        // Create chain using the new() method
+        let chain = InMemoryShareChain::new(
+            config_with_path,
+            pow_algo,
+            block_validation_params,
+            coinbase_extras,
+            stat_client,
+            "TestSquad".to_string(),
+            Some(VerifiedStatus::default()),
+        )
+        .unwrap();
+
+        // Verify that the minimum difficulties were correctly initialized
+        assert_eq!(
+            chain.minimum_sha3_target_difficulty, custom_sha3_min,
+            "Sha3 minimum difficulty should be initialized from config"
+        );
+        assert_eq!(
+            chain.minimum_randomx_target_difficulty, custom_randomx_min,
+            "RandomX minimum difficulty should be initialized from config"
+        );
+    }
+
+    // Test that different minimums are applied based on the algorithm
+    #[tokio::test]
+    async fn different_minimums_based_on_algorithm() {
+        // Create custom config with different minimums for each algorithm
+        let mut config = Config::default();
+        let custom_sha3_min = MIN_SHA3X_DIFFICULTY * 2;
+        let custom_randomx_min = MIN_RANDOMX_DIFFICULTY * 2;
+        config.minimum_sha3_target_difficulty = Some(custom_sha3_min);
+        config.minimum_randomx_target_difficulty = Some(custom_randomx_min);
+
+        // Helper function to create a chain with the given algorithm
+        async fn create_chain_and_get_min_difficulty(config: &Config, pow_algo: PowAlgorithm) -> u64 {
+            let coinbase_extras = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
+            let (stats_tx, _) = tokio::sync::broadcast::channel(1000);
+            let stat_client = StatsBroadcastClient::new(stats_tx);
+
+            let block_cache = LmdbBlockStorage::new_from_temp_dir();
+
+            let mut bypass_checks = VerifiedStatus::new();
+            bypass_checks.set_target_difficulty_verified();
+            bypass_checks.set_difficulty_verified();
+            bypass_checks.set_median_timestamp();
+            bypass_checks.set_correct_shares();
+
+            // Mock block validation params for RandomX
+            let block_validation_params = None;
+
+            let p2chain = P2Chain::new_empty(
+                pow_algo,
+                config.share_window * 2,
+                config.share_window,
+                config.block_time,
+                block_cache,
+                config
+                    .minimum_randomx_target_difficulty
+                    .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
+                bypass_checks,
+                block_validation_params.clone(),
+            );
+
+            let share_chain = InMemoryShareChain {
+                p2_chain: Arc::new(RwLock::new(p2chain)),
+                pow_algo,
+                block_validation_params,
+                coinbase_extras,
+                stat_client,
+                config: config.clone(),
+                squad: "NoSquad".to_string(),
+                minimum_randomx_target_difficulty: config
+                    .minimum_randomx_target_difficulty
+                    .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                minimum_sha3_target_difficulty: config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
+                bypass_checks,
+            };
+
+            // Create a new tip block
+            let static_coinbase_extra = Vec::new();
+            let address = new_random_address();
+            let new_tip = P2BlockBuilder::new(None)
+                .with_timestamp(EpochTime::now())
+                .with_height(0)
+                .with_miner_wallet_address(address.clone())
+                .with_miner_coinbase_extra(static_coinbase_extra.clone())
+                .build()
+                .unwrap();
+
+            // Force the LWMA to return a very low difficulty
+            let mut wl = share_chain.p2_chain.write().await;
+            wl.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+            for i in 0..10 {
+                wl.lwma
+                    .add_back(EpochTime::from(1000 + i), Difficulty::from_u64(1).unwrap());
+            }
+            drop(wl);
+
+            // Generate shares and get target difficulty
+            let (_, difficulty) = share_chain
+                .generate_shares_and_get_target_difficulty(&new_tip, false)
+                .await
+                .unwrap();
+
+            difficulty.as_u64()
+        }
+
+        // Test Sha3x algorithm
+        let sha3_difficulty = create_chain_and_get_min_difficulty(&config, PowAlgorithm::Sha3x).await;
+        assert_eq!(
+            sha3_difficulty, custom_sha3_min,
+            "Sha3x should use its specific minimum difficulty"
+        );
+
+        // Test RandomX algorithm
+        let randomx_difficulty = create_chain_and_get_min_difficulty(&config, PowAlgorithm::RandomX).await;
+        assert_eq!(
+            randomx_difficulty, custom_randomx_min,
+            "RandomX should use its specific minimum difficulty"
+        );
     }
 }
