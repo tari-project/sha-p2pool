@@ -11,12 +11,13 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::signal;
+
 use clap::Parser;
+use ctrlc;
 use log::error;
 use sha_p2pool::Cli;
 use tari_shutdown::Shutdown;
-use ctrlc;
+use tokio::signal;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -42,7 +43,8 @@ async fn main() -> anyhow::Result<()> {
     let should_exit_clone = Arc::clone(&should_exit);
     ctrlc::set_handler(move || {
         should_exit_clone.store(true, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     // Set a custom panic hook
     panic::set_hook(Box::new(|panic_info| {
@@ -96,7 +98,6 @@ async fn main() -> anyhow::Result<()> {
             should_exit.store(true, Ordering::SeqCst);
         },
     }
-
 
     if should_exit.load(Ordering::SeqCst) {
         println!("\nCtrl-C pressed, exiting...\n");

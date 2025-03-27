@@ -848,7 +848,7 @@ where S: ShareChain
                 best_peers: my_best_peers,
                 known_peer_ids: known_peers.into_iter().collect(),
             };
-            debug!(target: LOG_TARGET, "Initiate direct peer exchange with peer: {}, request: {:?}", peer, request);
+            debug!(target: LOG_TARGET, "Initiate direct peer exchange with peer: {}, request: {}", peer, request);
             self.swarm
                 .behaviour_mut()
                 .direct_peer_exchange
@@ -1261,7 +1261,7 @@ where S: ShareChain
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
     async fn handle_sync_missing_blocks_response(&mut self, response: SyncMissingBlocksResponse, depth: usize) {
-        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response}");
         let peer = *response.peer_id();
 
         if response.version() != PROTOCOL_VERSION {
@@ -1482,7 +1482,7 @@ where S: ShareChain
     /// Main method to handle libp2p events.
     #[allow(clippy::too_many_lines)]
     async fn handle_event(&mut self, event: SwarmEvent<ServerNetworkBehaviourEvent>) {
-        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New event: {event:?}");
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New event: {}", format_swarm_event(&event));
 
         match event {
             SwarmEvent::ConnectionEstablished {
@@ -1653,10 +1653,10 @@ where S: ShareChain
                             },
                             request_response::Event::OutboundFailure { peer, error, .. } => {
                                 // Peers can be offline
-                                debug!(target: LOG_TARGET, "REQ-RES meta data outbound failure: {peer:?} -> {error:?}");
+                                debug!(target: LOG_TARGET, "REQ-RES meta data outbound failure: {peer} -> {error:?}");
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
-                                error!(target: LOG_TARGET, "REQ-RES  meta data inbound failure: {peer:?} -> {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES  meta data inbound failure: {peer} -> {error:?}");
                             },
                             request_response::Event::ResponseSent { .. } => {},
                         }
@@ -1689,7 +1689,7 @@ where S: ShareChain
                             },
                             request_response::Event::OutboundFailure { peer, error, .. } => {
                                 // Peers can be offline
-                                debug!(target: LOG_TARGET, "REQ-RES peer info outbound failure: {peer:?} -> {error:?}");
+                                debug!(target: LOG_TARGET, "REQ-RES peer info outbound failure: {peer} -> {error:?}");
                                 // TODO: find out why this errors
                                 // self.network_peer_store
                                 //     .move_to_grey_list(
@@ -1699,7 +1699,7 @@ where S: ShareChain
                                 //     .await;
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
-                                error!(target: LOG_TARGET, "REQ-RES  peer info inbound failure: {peer:?} -> {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES  peer info inbound failure: {peer} -> {error:?}");
                             },
                             request_response::Event::ResponseSent { .. } => {},
                         }
@@ -1727,7 +1727,7 @@ where S: ShareChain
                                             },
                                         }
                                     } else {
-                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Received a response for a request that we didn't send: {peer:?} -> {response:?}");
+                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Received a response for a request that we didn't send: {peer} -> {response:?}");
                                     }
                                 },
                             },
@@ -1736,20 +1736,20 @@ where S: ShareChain
                                 error,
                                 request_id,
                             } => {
-                                debug!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                                debug!(target: LOG_TARGET, "REQ-RES outbound failure: {peer} -> {error:?}");
                                 self.missing_blocks_sync_request_depth.remove(&request_id);
                                 let mut should_grey_list = true;
                                 match error {
                                     OutboundFailure::DialFailure => {
-                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer} -> {error:?}");
                                     },
                                     OutboundFailure::ConnectionClosed => {
                                         // I think it might upgrade to a DCTUR so no need to grey list
-                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer} -> {error:?}");
                                         should_grey_list = false;
                                     },
                                     _ => {
-                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer:?} -> {error:?}");
+                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer} -> {error:?}");
                                     },
                                 }
                                 if should_grey_list {
@@ -1764,7 +1764,7 @@ where S: ShareChain
                                 // self.network_peer_store.remove(&peer).await;
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
-                                error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer} -> {error:?}");
                             },
                             request_response::Event::ResponseSent { .. } => {},
                         };
@@ -1798,7 +1798,7 @@ where S: ShareChain
                                 request_id,
                             } => {
                                 // Peers can be offline
-                                debug!(target: LOG_TARGET, "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                                debug!(target: LOG_TARGET, "REQ-RES outbound failure: {peer} -> {error:?}");
 
                                 let should_remove = self
                                     .randomx_in_progress_syncs
@@ -1808,7 +1808,7 @@ where S: ShareChain
                                 if should_remove {
                                     if let Some((_r, permit)) = self.randomx_in_progress_syncs.remove(&peer) {
                                         // Probably don't need to do this
-                                        info!(target: SYNC_REQUEST_LOG_TARGET, "Removing randomx_in_progress_syncs: {peer:?} -> {error:?}");
+                                        info!(target: SYNC_REQUEST_LOG_TARGET, "Removing randomx_in_progress_syncs: {peer} -> {error:?}");
                                         drop(permit);
                                     }
                                 }
@@ -1820,7 +1820,7 @@ where S: ShareChain
                                     .unwrap_or(false);
                                 if should_remove {
                                     if let Some((_r, permit)) = self.sha3x_in_progress_syncs.remove(&peer) {
-                                        info!(target: SYNC_REQUEST_LOG_TARGET, "Removing sha3x_in_progress_syncs: {peer:?} -> {error:?}");
+                                        info!(target: SYNC_REQUEST_LOG_TARGET, "Removing sha3x_in_progress_syncs: {peer} -> {error:?}");
 
                                         // Probably don't need to do this
                                         drop(permit);
@@ -1830,16 +1830,16 @@ where S: ShareChain
                                 let mut should_grey_list = true;
                                 match error {
                                     OutboundFailure::DialFailure => {
-                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer} -> {error:?}");
                                     },
                                     OutboundFailure::ConnectionClosed => {
                                         // I think it might upgrade to a DCTUR so no need to grey list
-                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                        debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer} -> {error:?}");
                                         self.network_peer_store.write().await.reset_last_sync_attempt(&peer);
                                         should_grey_list = false;
                                     },
                                     _ => {
-                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer} -> {error:?}");
                                     },
                                 }
                                 if should_grey_list {
@@ -1853,7 +1853,7 @@ where S: ShareChain
                                 // self.network_peer_store.remove(&peer).await;
                             },
                             request_response::Event::InboundFailure { peer, error, .. } => {
-                                error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer:?} -> {error:?}");
+                                error!(target: LOG_TARGET, "REQ-RES inbound failure: {peer} -> {error:?}");
                             },
                             request_response::Event::ResponseSent { .. } => {},
                         };
@@ -1996,7 +1996,7 @@ where S: ShareChain
         response: CatchUpSyncResponse,
         permit: Option<OwnedSemaphorePermit>,
     ) {
-        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Catch up sync response: {response:?}");
+        debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Catch up sync response: {response}");
         if response.version != PROTOCOL_VERSION {
             trace!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id());
             return;
@@ -3554,5 +3554,12 @@ where S: ShareChain
         }
         info!(target: LOG_TARGET,"P2P service has been stopped!");
         Ok(())
+    }
+}
+
+fn format_swarm_event<TBehaviourOutEvent: std::fmt::Debug>(event: &SwarmEvent<TBehaviourOutEvent>) -> String {
+    match event {
+        SwarmEvent::Behaviour(_) => "SwarmEvent::Behaviour({..})".to_string(),
+        _ => format!("{:?})", event),
     }
 }
