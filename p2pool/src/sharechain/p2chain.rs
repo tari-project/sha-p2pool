@@ -27,7 +27,7 @@ use std::{
     ops::{Deref, Sub},
     sync::Arc,
 };
-
+use std::time::Instant;
 use chrono::{Duration, Utc};
 use itertools::Itertools;
 use log::*;
@@ -204,7 +204,6 @@ impl<T: BlockCache> P2Chain<T> {
         total_size: u64,
         share_window: u64,
         block_time: u64,
-        from_block_cache: T,
         new_block_cache: T,
         squad: &str,
         minimum_randomx_target_difficulty: u64,
@@ -233,7 +232,8 @@ impl<T: BlockCache> P2Chain<T> {
             ))
             .timestamp() as u64)
             .into();
-        for (i, block) in from_block_cache.all_blocks()?.into_iter().enumerate() {
+        let start = Instant::now();
+        for (i, block) in new_chain.block_cache.all_blocks()?.into_iter().enumerate() {
             if block.version != PROTOCOL_VERSION {
                 warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
                 continue;
@@ -258,6 +258,9 @@ impl<T: BlockCache> P2Chain<T> {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
             });
         }
+        let time = start.elapsed();
+        info!(target: LOG_TARGET, "Loaded chain in {:?}", time.as_secs());
+        panic!("close");
         Ok(new_chain)
     }
 
@@ -706,7 +709,7 @@ impl<T: BlockCache> P2Chain<T> {
         let level = self
             .level_at_height(height)
             .ok_or(ShareChainError::BlockLevelNotFound)?;
-        level.add_block(Arc::new(actual_block))?;
+        level.add_block(Arc::new(actual_block), true)?;
 
         Ok(())
     }
@@ -1083,7 +1086,7 @@ impl<T: BlockCache> P2Chain<T> {
         }
         match self.level_at_height(new_block_height) {
             Some(level) => {
-                level.add_block(block)?;
+                level.add_block(block, false)?;
                 self.verify_chain(new_block_height, block_hash)
             },
             None => {
