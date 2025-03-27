@@ -222,7 +222,12 @@ impl Display for CatchUpSyncResponse {
         writeln!(
             f,
             "version: {}, from: {}, tip height: {}, tip hash: {}, achieved_pow: {:?}, blocks: {:?}",
-            self.version, self.peer_id, self.tip.0, self.tip.1, self.achieved_pow, blocks
+            self.version,
+            self.peer_id,
+            self.tip.0,
+            self.tip.1.to_hex(),
+            self.achieved_pow,
+            blocks
         )?;
         Ok(())
     }
@@ -252,20 +257,20 @@ impl Display for DirectPeerInfoRequest {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         let best_peers = self.best_peers.iter().take(10).collect::<Vec<_>>();
         let best_peers_tag = if self.best_peers.len() > 10 {
-            format!("best_peers ({} of {})", best_peers.len(), self.best_peers.len())
+            &format!("best_peers ({} of {})", best_peers.len(), self.best_peers.len())
         } else {
-            "best_peers".to_string()
+            "best_peers"
         };
 
         let known_peer_ids = self.known_peer_ids.iter().take(10).collect::<Vec<_>>();
         let known_peer_ids_tag = if self.known_peer_ids.len() > 10 {
-            format!(
+            &format!(
                 "known_peer_ids ({} of {})",
                 known_peer_ids.len(),
                 self.known_peer_ids.len()
             )
         } else {
-            "known_peer_ids".to_string()
+            "known_peer_ids"
         };
 
         writeln!(
