@@ -197,7 +197,7 @@ impl BlockCache for LmdbBlockStorage {
         let env = self.file_handle.read().expect("reader");
         let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
         let reader = env.read().expect("reader");
-        let mut res = vec![];
+        let mut res: Vec<Arc<P2Block>> = vec![];
         let iter = store.iter_start(&reader)?;
         for r in iter {
             let (_k, v) = r?;
@@ -211,6 +211,7 @@ impl BlockCache for LmdbBlockStorage {
                 },
             }
         }
+        res.sort_by(|a, b| a.height.cmp(&b.height));
         Ok(res)
     }
 }
