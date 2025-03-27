@@ -115,10 +115,10 @@ impl InMemoryShareChain {
                 old,
                 new,
                 &squad,
-                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 config
                     .minimum_randomx_target_difficulty
                     .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 bypass_checks,
                 block_validation_params.clone(),
             ) {
@@ -130,9 +130,6 @@ impl InMemoryShareChain {
                 },
                 Err(e) => error!(target: LOG_TARGET, "Could not load chain from file: {}", e),
             };
-
-            // fs::remove_dir_all(bkp_file.as_path())
-            //     .map_err(|e| anyhow::anyhow!("Could not remove old block cache file:{:?}", e))?;
         }
 
         if p2chain.is_none() {
@@ -143,10 +140,10 @@ impl InMemoryShareChain {
                 config.share_window,
                 config.block_time,
                 block_cache,
-                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 config
                     .minimum_randomx_target_difficulty
                     .unwrap_or(MIN_RANDOMX_DIFFICULTY),
+                config.minimum_sha3_target_difficulty.unwrap_or(MIN_SHA3X_DIFFICULTY),
                 bypass_checks,
                 block_validation_params.clone(),
             ));

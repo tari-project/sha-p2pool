@@ -11,7 +11,7 @@ use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
-use tari_utilities::epoch_time::EpochTime;
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::{
     server::PROTOCOL_VERSION,
@@ -212,6 +212,22 @@ impl CatchUpSyncResponse {
     }
 }
 
+impl Display for CatchUpSyncResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let blocks = self
+            .blocks
+            .iter()
+            .map(|b| format!("height: {}, hash: {}", b.height, b.hash.to_hex()))
+            .collect::<Vec<_>>();
+        writeln!(
+            f,
+            "version: {}, from: {}, tip height: {}, tip hash: {}, achieved_pow: {:?}, blocks: {:?}",
+            self.version, self.peer_id, self.tip.0, self.tip.1, self.achieved_pow, blocks
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MetaDataRequest {
     pub peer_id: String,
@@ -232,11 +248,58 @@ pub struct DirectPeerInfoRequest {
     pub known_peer_ids: Vec<PeerId>,
 }
 
+impl Display for DirectPeerInfoRequest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let best_peers = self.best_peers.iter().take(10).collect::<Vec<_>>();
+        let best_peers_tag = if self.best_peers.len() > 10 {
+            format!("best_peers ({} of {})", best_peers.len(), self.best_peers.len())
+        } else {
+            "best_peers".to_string()
+        };
+
+        let known_peer_ids = self.known_peer_ids.iter().take(10).collect::<Vec<_>>();
+        let known_peer_ids_tag = if self.known_peer_ids.len() > 10 {
+            format!(
+                "known_peer_ids ({} of {})",
+                known_peer_ids.len(),
+                self.known_peer_ids.len()
+            )
+        } else {
+            "known_peer_ids".to_string()
+        };
+
+        writeln!(
+            f,
+            "peer_id: {}, my_info: {:?}, {}: {:?}, {}: {:?}",
+            self.peer_id, self.my_info, best_peers_tag, best_peers, known_peer_ids_tag, known_peer_ids,
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DirectPeerInfoResponse {
     pub peer_id: String,
     pub info: PeerInfo,
     pub best_peers: Vec<PeerInfo>,
+}
+
+impl Display for DirectPeerInfoResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let best_peers = self.best_peers.iter().take(10).collect::<Vec<_>>();
+        let best_peers_tag = if self.best_peers.len() > 10 {
+            &format!("best_peers ({} of {})", best_peers.len(), self.best_peers.len())
+        } else {
+            "best_peers"
+        };
+
+        writeln!(
+            f,
+            "peer_id: {}, info: {:?}, {}: {:?}",
+            self.peer_id, self.info, best_peers_tag, best_peers,
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -330,5 +393,21 @@ impl SyncMissingBlocksResponse {
             block.verified = VerifiedStatus::new();
         }
         blocks
+    }
+}
+
+impl Display for SyncMissingBlocksResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let blocks = self
+            .blocks
+            .iter()
+            .map(|b| format!("height: {}, hash: {}", b.height, b.hash.to_hex()))
+            .collect::<Vec<_>>();
+        writeln!(
+            f,
+            "peer_id: {}, info: {:?}, peer_id: {}, blocks: {:?}",
+            self.version, self.peer_id, self.algo, blocks,
+        )?;
+        Ok(())
     }
 }
