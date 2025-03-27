@@ -1,9 +1,9 @@
 [workspace.package]
-version = "0.23.2"
-edition = "2021"
-authors = ["The Tari Development Community"]
-repository = "https://github.com/tari-project/sha-p2pool"
-license = "BSD-3-Clause"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [workspace]
 
