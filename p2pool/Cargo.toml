@@ -14,6 +14,8 @@ blake2 = "0.10.6"
 bitflags = { version = "2.4", features = ["serde"] }
 chrono = "0.4.39"
 clap = { version = "4.5.7", features = ["derive"] }
+ctrlc = "3.2"
+dhat = "0.3.3"
 digest = "0.10.7"
 dirs = "4.0.0"
 hex = "0.4.3"
@@ -80,3 +82,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "sha_p2pool"
 path = "src/main.rs"
+
+[features]
+dhat-heap = []    # if you are doing heap profiling
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[profile.release.dhat-heap]
+debug = true
