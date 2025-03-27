@@ -405,7 +405,7 @@ impl Display for SyncMissingBlocksResponse {
             .collect::<Vec<_>>();
         writeln!(
             f,
-            "peer_id: {}, info: {:?}, peer_id: {}, blocks: {:?}",
+            "version: {}, peer_id: {}, algo: {}, blocks: {:?}",
             self.version, self.peer_id, self.algo, blocks,
         )?;
         Ok(())
