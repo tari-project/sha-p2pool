@@ -89,31 +89,29 @@ impl InMemoryShareChain {
 
         let mut p2chain = None;
         if fs::exists(&data_path).map_err(|e| anyhow!("block cache file errored when checking exists: {}", e))? {
-            let bkp_file = config
-                .block_cache_file
-                .as_path()
-                .parent()
-                .ok_or_else(|| anyhow!("Block cache file has no parent"))?
-                .join("block_cache_backup")
-                .join(pow_algo.to_string());
-            info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
+            // let bkp_file = config
+            //     .block_cache_file
+            //     .as_path()
+            //     .parent()
+            //     .ok_or_else(|| anyhow!("Block cache file has no parent"))?
+            //     .join("block_cache_backup")
+            //     .join(pow_algo.to_string());
+            // info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
 
             // First remove the old backup file
-            let _unused = fs::remove_dir_all(bkp_file.as_path())
-                .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
-            fs::create_dir_all(bkp_file.parent().unwrap())
-                .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
-            fs::rename(data_path.as_path(), bkp_file.as_path())
-                .map_err(|e| anyhow::anyhow!("Could not rename file to old file:{:?}", e))?;
-            let old = LmdbBlockStorage::new_from_path(bkp_file.as_path());
-            let new = LmdbBlockStorage::new_from_path(&data_path);
+            // let _unused = fs::remove_dir_all(bkp_file.as_path())
+            //     .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
+            // fs::create_dir_all(bkp_file.parent().unwrap())
+            //     .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
+            // fs::rename(data_path.as_path(), bkp_file.as_path())
+            //     .map_err(|e| anyhow::anyhow!("Could not rename file to old file:{:?}", e))?;
+            let block_cache = LmdbBlockStorage::new_from_path(&data_path);
             match P2Chain::try_load(
                 pow_algo,
                 config.share_window * 2,
                 config.share_window,
                 config.block_time,
-                old,
-                new,
+                block_cache,
                 &squad,
                 config
                     .minimum_randomx_target_difficulty

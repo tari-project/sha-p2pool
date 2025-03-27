@@ -69,19 +69,11 @@ impl LmdbBlockStorage {
         info!(target: LOG_TARGET, "Using block storage at {:?}", path);
         if !fs::exists(path).expect("could not get file") {
             fs::create_dir_all(path).unwrap();
-            // fs::File::create(path).unwrap();
         }
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
         let env = file_handle.read().expect("reader");
-        // let dbs = env.get_dbs().expect("No dbs");
-        // if !dbs.contains(&Some("migrations".to_string())) {
-        //     let store = env.open_integer("migrations", StoreOptions::create()).unwrap();
-        //     let writer = env.write().expect("writer");
-        //     store.put(&writer, 0, &rkv::Value::Str("init")).unwrap();
-        //     writer.commit();
-        // }
         let mut migrations = HashMap::new();
         {
             let store = env.open_single("migrations", StoreOptions::create()).unwrap();
@@ -152,7 +144,18 @@ impl BlockCache for LmdbBlockStorage {
         }
     }
 
-    fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+    fn insert(&self, hash: BlockHash, block: Arc<P2Block>, force: bool) {
+        //First we check if the block already exists, if it does we don't insert it, if force is set, we overwrite it
+        if force {
+            let env = self.file_handle.read().expect("reader");
+            let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
+            let reader = env.read().expect("reader");
+            let block = store.get(&reader, hash.as_bytes()).unwrap();
+            // we dont want to deserialise this block, so we just check if it exists
+            if block.is_some() {
+                return;
+            }
+        }
         // Retry if the map is full
         // This weird pattern of setting a bool is so that the env is closed before resizing, otherwise
         // you can't resize with active transactions.
@@ -225,7 +228,7 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
     fn delete(&self, hash: &BlockHash);
-    fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
+    fn insert(&self, hash: BlockHash, block: Arc<P2Block>, force: bool);
     fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }
 
@@ -256,7 +259,7 @@ pub mod test {
             self.blocks.write().unwrap().remove(hash);
         }
 
-        fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+        fn insert(&self, hash: BlockHash, block: Arc<P2Block>, force: bool) {
             self.blocks.write().unwrap().insert(hash, block);
         }
 

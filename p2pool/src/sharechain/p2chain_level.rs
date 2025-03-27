@@ -81,7 +81,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         let mut block_headers = HashMap::new();
         block_headers.insert(block.hash, header);
 
-        block_cache.insert(block.hash, block);
+        block_cache.insert(block.hash, block, false);
 
         Self {
             block_cache,
@@ -136,7 +136,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         *lock = hash;
     }
 
-    pub fn add_block(&self, block: Arc<P2Block>) -> Result<(), ShareChainError> {
+    pub fn add_block(&self, block: Arc<P2Block>, force: bool) -> Result<(), ShareChainError> {
         if self.height != block.height {
             return Err(ShareChainError::InvalidBlock {
                 reason: "Block height does not match the chain level height".to_string(),
@@ -158,7 +158,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             .write()
             .expect("could not lock")
             .insert(block.hash, header);
-        self.block_cache.insert(block.hash, block);
+        self.block_cache.insert(block.hash, block, force);
         Ok(())
     }
 
