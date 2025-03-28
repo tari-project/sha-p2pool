@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt::Debug,
     time::{Duration, SystemTime},
 };
@@ -25,7 +25,8 @@ pub struct DiagnosticPeerInfo {
     pub connected_at: Option<SystemTime>,
     #[serde(with = "format_time")]
     pub requested_peers_at: Option<SystemTime>,
-    pub number_of_peers: Option<usize>,
+    pub number_of_peers_received: Option<usize>,
+    pub number_of_peers_added: Option<usize>,
     #[serde(rename = "response_time (s)", with = "duration_option_as_seconds")]
     pub response_time: Option<Duration>,
 }
@@ -178,64 +179,35 @@ impl DiagnosticsCollector {
     #[allow(clippy::too_many_lines)]
     fn handle_diagnostic(&mut self, data: DiagnosticData) {
         match data {
-            DiagnosticData::NewSeedPeer { peer_id, .. } => {
-                if let Entry::Vacant(entry) = self.seed_peer_info.entry(peer_id.to_base58()) {
-                    entry.insert(DiagnosticPeerInfo {
+            DiagnosticData::NewPeer {
+                peer_id, ref peer_type, ..
+            } => {
+                if self.hydrate_and_get_existing(peer_id, *peer_type).is_none() {
+                    let diagnostic_info = DiagnosticPeerInfo {
                         peer_id,
                         connected_at: None,
                         requested_peers_at: None,
-                        number_of_peers: None,
+                        number_of_peers_received: None,
+                        number_of_peers_added: None,
                         response_time: None,
-                    });
-                    debug!(target: LOG_TARGET, "[Diagnostics] handle diagnostics {data:?}");
-                }
-            },
-            DiagnosticData::NewPrivatePeer { peer_id, .. } => {
-                if let Entry::Vacant(entry) = self.private_peer_info.entry(peer_id.to_base58()) {
-                    entry.insert(DiagnosticPeerInfo {
-                        peer_id,
-                        connected_at: None,
-                        requested_peers_at: None,
-                        number_of_peers: None,
-                        response_time: None,
-                    });
-                    debug!(target: LOG_TARGET, "[Diagnostics] handle diagnostics {data:?}");
-                }
-            },
-            DiagnosticData::NewRelayPeer { peer_id, .. } => {
-                if let Entry::Vacant(entry) = self.relay_peer_info.entry(peer_id.to_base58()) {
-                    entry.insert(DiagnosticPeerInfo {
-                        peer_id,
-                        connected_at: None,
-                        requested_peers_at: None,
-                        number_of_peers: None,
-                        response_time: None,
-                    });
-                    debug!(target: LOG_TARGET, "[Diagnostics] handle diagnostics {data:?}");
-                }
-            },
-            DiagnosticData::NewNonSquadPeer { peer_id, .. } => {
-                if let Entry::Vacant(entry) = self.non_squad_peer_info.entry(peer_id.to_base58()) {
-                    entry.insert(DiagnosticPeerInfo {
-                        peer_id,
-                        connected_at: None,
-                        requested_peers_at: None,
-                        number_of_peers: None,
-                        response_time: None,
-                    });
-                    debug!(target: LOG_TARGET, "[Diagnostics] handle diagnostics {data:?}");
-                }
-            },
-            DiagnosticData::NewUnknownPeer { peer_id, .. } => {
-                if let Entry::Vacant(entry) = self.unknown_peer_info.entry(peer_id.to_base58()) {
-                    entry.insert(DiagnosticPeerInfo {
-                        peer_id,
-                        connected_at: None,
-                        requested_peers_at: None,
-                        number_of_peers: None,
-                        response_time: None,
-                    });
-                    debug!(target: LOG_TARGET, "[Diagnostics] handle diagnostics {data:?}");
+                    };
+                    match peer_type {
+                        PeerType::SeedPeer => {
+                            self.seed_peer_info.insert(peer_id.to_base58(), diagnostic_info);
+                        },
+                        PeerType::PrivatePeer => {
+                            self.private_peer_info.insert(peer_id.to_base58(), diagnostic_info);
+                        },
+                        PeerType::RelayPeer => {
+                            self.relay_peer_info.insert(peer_id.to_base58(), diagnostic_info);
+                        },
+                        PeerType::NonSquadPeer => {
+                            self.non_squad_peer_info.insert(peer_id.to_base58(), diagnostic_info);
+                        },
+                        PeerType::Unknown => {
+                            self.unknown_peer_info.insert(peer_id.to_base58(), diagnostic_info);
+                        },
+                    }
                 }
             },
             DiagnosticData::PeerConnected {
@@ -247,52 +219,29 @@ impl DiagnosticsCollector {
                         peer.connected_at = Some(SystemTime::now());
                     }
                 } else {
+                    let diagnostic_info = DiagnosticPeerInfo {
+                        peer_id,
+                        connected_at: Some(SystemTime::now()),
+                        requested_peers_at: None,
+                        number_of_peers_received: None,
+                        number_of_peers_added: None,
+                        response_time: None,
+                    };
                     match peer_type {
                         PeerType::SeedPeer => {
-                            self.seed_peer_info.insert(peer_id.to_base58(), DiagnosticPeerInfo {
-                                peer_id,
-                                connected_at: Some(SystemTime::now()),
-                                requested_peers_at: None,
-                                number_of_peers: None,
-                                response_time: None,
-                            });
+                            let _ = self.seed_peer_info.insert(peer_id.to_base58(), diagnostic_info);
                         },
                         PeerType::PrivatePeer => {
-                            self.private_peer_info.insert(peer_id.to_base58(), DiagnosticPeerInfo {
-                                peer_id,
-                                connected_at: Some(SystemTime::now()),
-                                requested_peers_at: None,
-                                number_of_peers: None,
-                                response_time: None,
-                            });
+                            let _ = self.private_peer_info.insert(peer_id.to_base58(), diagnostic_info);
                         },
                         PeerType::RelayPeer => {
-                            self.relay_peer_info.insert(peer_id.to_base58(), DiagnosticPeerInfo {
-                                peer_id,
-                                connected_at: Some(SystemTime::now()),
-                                requested_peers_at: None,
-                                number_of_peers: None,
-                                response_time: None,
-                            });
+                            let _ = self.relay_peer_info.insert(peer_id.to_base58(), diagnostic_info);
                         },
                         PeerType::NonSquadPeer => {
-                            self.non_squad_peer_info
-                                .insert(peer_id.to_base58(), DiagnosticPeerInfo {
-                                    peer_id,
-                                    connected_at: Some(SystemTime::now()),
-                                    requested_peers_at: None,
-                                    number_of_peers: None,
-                                    response_time: None,
-                                });
+                            let _ = self.non_squad_peer_info.insert(peer_id.to_base58(), diagnostic_info);
                         },
                         PeerType::Unknown => {
-                            self.unknown_peer_info.insert(peer_id.to_base58(), DiagnosticPeerInfo {
-                                peer_id,
-                                connected_at: Some(SystemTime::now()),
-                                requested_peers_at: None,
-                                number_of_peers: None,
-                                response_time: None,
-                            });
+                            let _ = self.unknown_peer_info.insert(peer_id.to_base58(), diagnostic_info);
                         },
                     }
                 }
@@ -314,17 +263,24 @@ impl DiagnosticsCollector {
             DiagnosticData::PeerResponse {
                 peer_id,
                 ref peer_type,
-                number_of_peers,
+                number_of_peers_recieved,
+                number_of_peers_added,
                 ..
             } => {
                 let existing_peer = self.hydrate_and_get_existing(peer_id, *peer_type);
                 if let Some(peer) = existing_peer {
-                    let new_total = if let Some(number) = peer.number_of_peers {
-                        number_of_peers + number
-                    } else {
-                        number_of_peers
-                    };
-                    peer.number_of_peers = Some(new_total);
+                    // Update received peers
+                    peer.number_of_peers_received = peer
+                        .number_of_peers_received
+                        .map(|number| number.saturating_add(number_of_peers_recieved))
+                        .or(Some(number_of_peers_recieved));
+
+                    // Update added peers
+                    peer.number_of_peers_added = peer
+                        .number_of_peers_added
+                        .map(|number| number.saturating_add(number_of_peers_added))
+                        .or(Some(number_of_peers_added));
+                    // Response time
                     if peer.response_time.is_none() {
                         peer.response_time = peer.requested_peers_at.map(|requested_peers_at| {
                             SystemTime::now().duration_since(requested_peers_at).unwrap_or_default()
@@ -366,33 +322,36 @@ impl DiagnosticsCollector {
                 },
                 res = self.request_rx.recv() => {
                     match res {
-                        Some(DiagnosticRequest::GetSeedPeerInfo(tx)) => {
-                            let _unused  = tx.send(self.seed_peer_info.clone())
-                                .inspect_err(|e|
-                                    error!(target: LOG_TARGET, "Error seed peers diagnostics response: {:?}", e)
-                                );
+                        Some(DiagnosticRequest::GetPeerInfo(tx, peer_type)) => {
+                            let _unused = match peer_type {
+                                PeerType::SeedPeer => tx.send(self.seed_peer_info.clone()),
+                                PeerType::PrivatePeer => tx.send(self.private_peer_info.clone()),
+                                PeerType::RelayPeer => tx.send(self.relay_peer_info.clone()),
+                                PeerType::NonSquadPeer => tx.send(self.non_squad_peer_info.clone()),
+                                PeerType::Unknown => tx.send(self.unknown_peer_info.clone()),
+                            }.inspect_err(|e|
+                                error!(
+                                    target: LOG_TARGET,
+                                    "Error connected {} peers diagnostics response: {:?}",
+                                    peer_type, e
+                                )
+                            );
                         },
-                        Some(DiagnosticRequest::GetPrivatePeerInfo(tx)) => {
-                            let _unused  = tx.send(self.private_peer_info.clone())
+                        Some(DiagnosticRequest::GetConnectedPeers(tx, peer_type)) => {
+                            let connected_peers: Vec<_> = match peer_type {
+                                PeerType::SeedPeer => self.seed_peer_info.values().filter(|p| p.connected_at.is_some()).collect(),
+                                PeerType::PrivatePeer => self.private_peer_info.values().filter(|p| p.connected_at.is_some()).collect(),
+                                PeerType::RelayPeer => self.relay_peer_info.values().filter(|p| p.connected_at.is_some()).collect(),
+                                PeerType::NonSquadPeer => self.non_squad_peer_info.values().filter(|p| p.connected_at.is_some()).collect(),
+                                PeerType::Unknown => self.unknown_peer_info.values().filter(|p| p.connected_at.is_some()).collect(),
+                            };
+                            let _unused = tx.send(connected_peers.iter().map(|p| p.peer_id).collect())
                                 .inspect_err(|e|
-                                    error!(target: LOG_TARGET, "Error peers diagnostics response: {:?}", e)
-                                );
-                        },
-                        Some(DiagnosticRequest::GetRelayPeerInfo(tx)) => {
-                            let _unused  = tx.send(self.relay_peer_info.clone())
-                                .inspect_err(|e|
-                                    error!(target: LOG_TARGET, "Error relay peers diagnostics response: {:?}", e)
-                                );
-                        },
-                        Some(DiagnosticRequest::GetConnectedPeers(tx)) => {
-                            let connected_peers: Vec<_> = self.seed_peer_info.values()
-                                .chain(self.private_peer_info.values())
-                                .chain(self.relay_peer_info.values())
-                                .filter_map(|d| d.connected_at.map(|_| d.peer_id))
-                                .collect();
-                            let _unused = tx.send(connected_peers)
-                                .inspect_err(|e|
-                                    error!(target: LOG_TARGET, "Error connected peers diagnostics response: {:?}", e)
+                                    error!(
+                                        target: LOG_TARGET,
+                                        "Error connected {} peers diagnostics response: {:?}",
+                                        peer_type, e
+                                    )
                                 );
                         }
                         None => {
@@ -421,24 +380,9 @@ impl DiagnosticsCollector {
 
 #[derive(Clone, Debug)]
 pub(crate) enum DiagnosticData {
-    NewSeedPeer {
+    NewPeer {
         peer_id: PeerId,
-        timestamp: SystemTime,
-    },
-    NewPrivatePeer {
-        peer_id: PeerId,
-        timestamp: SystemTime,
-    },
-    NewRelayPeer {
-        peer_id: PeerId,
-        timestamp: SystemTime,
-    },
-    NewNonSquadPeer {
-        peer_id: PeerId,
-        timestamp: SystemTime,
-    },
-    NewUnknownPeer {
-        peer_id: PeerId,
+        peer_type: PeerType,
         timestamp: SystemTime,
     },
     PeerConnected {
@@ -454,7 +398,8 @@ pub(crate) enum DiagnosticData {
     PeerResponse {
         peer_id: PeerId,
         peer_type: PeerType,
-        number_of_peers: usize,
+        number_of_peers_recieved: usize,
+        number_of_peers_added: usize,
         timestamp: SystemTime,
     },
 }
@@ -462,24 +407,21 @@ pub(crate) enum DiagnosticData {
 impl DiagnosticData {
     pub fn timestamp(&self) -> SystemTime {
         match self {
-            DiagnosticData::NewSeedPeer { timestamp, .. } => *timestamp,
-            DiagnosticData::NewPrivatePeer { timestamp, .. } => *timestamp,
-            DiagnosticData::NewRelayPeer { timestamp, .. } => *timestamp,
+            DiagnosticData::NewPeer { timestamp, .. } => *timestamp,
             DiagnosticData::PeerRequest { timestamp, .. } => *timestamp,
             DiagnosticData::PeerResponse { timestamp, .. } => *timestamp,
             DiagnosticData::PeerConnected { timestamp, .. } => *timestamp,
-            DiagnosticData::NewNonSquadPeer { timestamp, .. } => *timestamp,
-            DiagnosticData::NewUnknownPeer { timestamp, .. } => *timestamp,
         }
     }
 }
 
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum DiagnosticRequest {
-    GetSeedPeerInfo(tokio::sync::oneshot::Sender<HashMap<String, DiagnosticPeerInfo>>),
-    GetPrivatePeerInfo(tokio::sync::oneshot::Sender<HashMap<String, DiagnosticPeerInfo>>),
-    GetRelayPeerInfo(tokio::sync::oneshot::Sender<HashMap<String, DiagnosticPeerInfo>>),
-    GetConnectedPeers(tokio::sync::oneshot::Sender<Vec<PeerId>>),
+    GetPeerInfo(
+        tokio::sync::oneshot::Sender<HashMap<String, DiagnosticPeerInfo>>,
+        PeerType,
+    ),
+    GetConnectedPeers(tokio::sync::oneshot::Sender<Vec<PeerId>>, PeerType),
 }
 
 #[derive(Debug, Clone)]
@@ -488,27 +430,22 @@ pub(crate) struct DiagnosticsReceiverClient {
 }
 
 impl DiagnosticsReceiverClient {
-    pub async fn get_seed_peer_diagnostic_info(&self) -> Result<HashMap<String, DiagnosticPeerInfo>, anyhow::Error> {
+    pub async fn get_peer_diagnostic_info(
+        &self,
+        peer_type: PeerType,
+    ) -> Result<HashMap<String, DiagnosticPeerInfo>, anyhow::Error> {
         let (tx, rx) = oneshot::channel();
-        self.request_tx.send(DiagnosticRequest::GetSeedPeerInfo(tx)).await?;
+        self.request_tx
+            .send(DiagnosticRequest::GetPeerInfo(tx, peer_type))
+            .await?;
         Ok(rx.await?)
     }
 
-    pub async fn get_private_peer_diagnostic_info(&self) -> Result<HashMap<String, DiagnosticPeerInfo>, anyhow::Error> {
+    pub async fn get_connected_peers(&self, peer_type: PeerType) -> Result<Vec<PeerId>, anyhow::Error> {
         let (tx, rx) = oneshot::channel();
-        self.request_tx.send(DiagnosticRequest::GetPrivatePeerInfo(tx)).await?;
-        Ok(rx.await?)
-    }
-
-    pub async fn get_relay_peer_diagnostic_info(&self) -> Result<HashMap<String, DiagnosticPeerInfo>, anyhow::Error> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx.send(DiagnosticRequest::GetRelayPeerInfo(tx)).await?;
-        Ok(rx.await?)
-    }
-
-    pub async fn get_connected_peers(&self) -> Result<Vec<PeerId>, anyhow::Error> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx.send(DiagnosticRequest::GetConnectedPeers(tx)).await?;
+        self.request_tx
+            .send(DiagnosticRequest::GetConnectedPeers(tx, peer_type))
+            .await?;
         Ok(rx.await?)
     }
 }
@@ -532,28 +469,11 @@ impl DiagnosticsBroadcastClient {
     }
 
     pub fn send_new_peer(&self, peer_id: PeerId, peer_type: PeerType) -> Result<(), anyhow::Error> {
-        match peer_type {
-            PeerType::SeedPeer => self.broadcast(DiagnosticData::NewSeedPeer {
-                peer_id,
-                timestamp: SystemTime::now(),
-            }),
-            PeerType::PrivatePeer => self.broadcast(DiagnosticData::NewPrivatePeer {
-                peer_id,
-                timestamp: SystemTime::now(),
-            }),
-            PeerType::RelayPeer => self.broadcast(DiagnosticData::NewRelayPeer {
-                peer_id,
-                timestamp: SystemTime::now(),
-            }),
-            PeerType::NonSquadPeer => self.broadcast(DiagnosticData::NewNonSquadPeer {
-                peer_id,
-                timestamp: SystemTime::now(),
-            }),
-            PeerType::Unknown => self.broadcast(DiagnosticData::NewUnknownPeer {
-                peer_id,
-                timestamp: SystemTime::now(),
-            }),
-        }
+        self.broadcast(DiagnosticData::NewPeer {
+            peer_id,
+            peer_type,
+            timestamp: SystemTime::now(),
+        })
     }
 
     pub fn send_exchange_request(&self, peer_id: PeerId, peer_type: PeerType) -> Result<(), anyhow::Error> {
@@ -567,13 +487,15 @@ impl DiagnosticsBroadcastClient {
     pub fn send_peer_response(
         &self,
         peer_id: PeerId,
-        number_of_peers: usize,
+        number_of_peers_recieved: usize,
+        number_of_peers_added: usize,
         peer_type: PeerType,
     ) -> Result<(), anyhow::Error> {
         self.broadcast(DiagnosticData::PeerResponse {
             peer_id,
             peer_type,
-            number_of_peers,
+            number_of_peers_recieved,
+            number_of_peers_added,
             timestamp: SystemTime::now(),
         })
     }

@@ -129,7 +129,7 @@ pub struct StartArgs {
     pub diagnostic_mode: bool,
 
     /// An optional location for the diagnostic output file, only relevant when diagnostic mode is set.
-    #[arg(long, short, alias = "diag")]
+    #[arg(long)]
     pub diagnostic_mode_file_path: Option<PathBuf>,
 
     #[arg(long)]
