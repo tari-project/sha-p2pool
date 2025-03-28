@@ -3398,7 +3398,10 @@ where S: ShareChain
             return Ok(seed_peers_result);
         }
 
-        let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+        let mut opts = ResolverOpts::default();
+        opts.edns0 = true;
+        opts.try_tcp_on_error = true;
+        let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), opts);
         for seed_peer in &self.config.seed_peers {
             let addr = seed_peer.parse::<Multiaddr>()?;
             let addr_parts = addr.iter().collect_vec();
