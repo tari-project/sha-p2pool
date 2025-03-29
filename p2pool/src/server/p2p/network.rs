@@ -2041,7 +2041,7 @@ where S: ShareChain
                     )
                 })
                 .collect::<Vec<String>>();
-            // Check if we have recieved their tip
+            // Check if we have received their tip
             let mut must_continue_sync = true;
             if blocks.iter().any(|b| b.hash == their_tip_hash) {
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {}", algo, peer);
@@ -2792,34 +2792,6 @@ where S: ShareChain
         }
     }
 
-    async fn _get_same_squad_peer_records(&self, filter_peers: &[PeerId], is_relay: bool) -> Vec<PeerStoreRecord> {
-        let network_peer_store = self.network_peer_store.read().await;
-        let same_squad_peers = network_peer_store._get_known_same_squad_peers();
-        // Not our own peer id
-        let own_peer_id = self.swarm.local_peer_id();
-        let mut same_squad_peers = same_squad_peers
-            .iter()
-            .filter(|p| p != &own_peer_id)
-            .collect::<Vec<_>>();
-        // Apply peer filter
-        same_squad_peers.retain(|p| !filter_peers.contains(p));
-        // Apply relay filter
-        let known_relays = self.relay_store.read().await.get_relay_peer_ids();
-        same_squad_peers.retain(|p| {
-            if is_relay {
-                known_relays.contains(p)
-            } else {
-                !known_relays.contains(p)
-            }
-        });
-        // Get peer records
-        let peer_records: Vec<_> = same_squad_peers
-            .iter()
-            .filter_map(|peer| network_peer_store.get(peer).cloned())
-            .collect();
-        peer_records
-    }
-
     async fn get_same_squad_peer_records(&self, filter_peers: &[PeerId], is_relay: bool) -> Vec<PeerStoreRecord> {
         let network_peer_store = self.network_peer_store.read().await;
         let same_squad_peers = network_peer_store.get_known_same_squad_peer_records();
@@ -3014,7 +2986,7 @@ where S: ShareChain
                                 peer_records.len()
                             );
                             // Select some random peers
-                            let mut peer_records = peer_records.choose_multiple(&mut thread_rng(), 10).collect_vec();
+                            let mut peer_records = peer_records.choose_multiple(&mut thread_rng(), 50).collect_vec();
                             peer_records.retain(|&x| !dialed_private_peers.contains(&x.peer_id));
                             // Dial selected peers
                             for record in &peer_records {
@@ -3101,7 +3073,7 @@ where S: ShareChain
                                 peer_records.len()
                             );
                             // Select some random peers
-                            let mut peer_records = peer_records.choose_multiple(&mut thread_rng(), 10).collect_vec();
+                            let mut peer_records = peer_records.choose_multiple(&mut thread_rng(), 50).collect_vec();
                             peer_records.retain(|&x| !dialed_relay_peers.contains(&x.peer_id));
                             // Dial selected peers
                             for record in &peer_records {
@@ -3234,6 +3206,7 @@ where S: ShareChain
                                         "1. squad": self.squad,
                                         "2. peer_id": self.swarm.local_peer_id(),
                                         "3. public_addresses": self.swarm.external_addresses().collect::<Vec<_>>(),
+                                        "4. diagnoatics ended after": format!("{:.2?}", uptime.elapsed()),
                                     }
                                 })
                             );
@@ -3251,13 +3224,13 @@ where S: ShareChain
                                             seeds_data.iter().filter(
                                                 |peer| peer.response_time.is_some()).count(),
                                         " 4. Number of peers from DNS seeds    ":
-                                            seeds_data.iter().filter(
-                                                |peer| peer.number_of_peers_received.is_some()
-                                            ).count(),
+                                            seeds_data.iter().map(
+                                                |peer| peer.number_of_peers_received.unwrap_or_default()
+                                            ).sum::<usize>(),
                                         " 5. New peers added from DNS seeds    ":
-                                            seeds_data.iter().filter(
-                                                |peer| peer.number_of_peers_added.is_some()
-                                            ).count(),
+                                            seeds_data.iter().map(
+                                                |peer| peer.number_of_peers_added.unwrap_or_default()
+                                            ).sum::<usize>(),
                                         // Relay peers
                                         " 6. Connect to relay peers            ":
                                             relays_data.iter().any(|peer| peer.connected_at.is_some()),
@@ -3270,13 +3243,13 @@ where S: ShareChain
                                                 |peer| peer.response_time.is_some()
                                             ).count(),
                                         " 9. Number of peers from relay peers  ":
-                                            relays_data.iter().filter(
-                                                |peer| peer.number_of_peers_received.is_some()
-                                            ).count(),
+                                            relays_data.iter().map(
+                                                |peer| peer.number_of_peers_received.unwrap_or_default()
+                                            ).sum::<usize>(),
                                         "10. New peers added from relay peers  ":
-                                            relays_data.iter().filter(
-                                                |peer| peer.number_of_peers_added.is_some()
-                                            ).count(),
+                                            relays_data.iter().map(
+                                                |peer| peer.number_of_peers_added.unwrap_or_default()
+                                            ).sum::<usize>(),
                                         // Private peers
                                         "11. Connect to private peers          ":
                                             private_peers_data.iter().any(|peer| peer.connected_at.is_some()),
@@ -3289,13 +3262,13 @@ where S: ShareChain
                                                 |peer| peer.response_time.is_some()
                                             ).count(),
                                         "14. Number of peers from private peers":
-                                            private_peers_data.iter().filter(
-                                                |peer| peer.number_of_peers_received.is_some()
-                                            ).count(),
+                                            private_peers_data.iter().map(
+                                                |peer| peer.number_of_peers_received.unwrap_or_default()
+                                            ).sum::<usize>(),
                                         "15. New peers added from private peers":
-                                            private_peers_data.iter().filter(
-                                                |peer| peer.number_of_peers_added.is_some()
-                                            ).count(),
+                                            private_peers_data.iter().map(
+                                                |peer| peer.number_of_peers_added.unwrap_or_default()
+                                            ).sum::<usize>(),
                                     }
                                 })
                             );

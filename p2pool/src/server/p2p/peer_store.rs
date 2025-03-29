@@ -211,15 +211,6 @@ impl PeerStore {
             .collect()
     }
 
-    pub fn _get_known_same_squad_peers(&self) -> HashSet<PeerId> {
-        self.whitelist_peers
-            .keys()
-            .chain(self.greylist_peers.keys())
-            .chain(self.blacklist_peers.keys())
-            .filter_map(|peer_id| PeerId::from_str(peer_id).ok())
-            .collect()
-    }
-
     pub fn get_known_same_squad_peer_records(&self) -> Vec<PeerStoreRecord> {
         self.whitelist_peers
             .values()
