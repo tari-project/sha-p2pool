@@ -263,7 +263,7 @@ impl DiagnosticsCollector {
             DiagnosticData::PeerResponse {
                 peer_id,
                 ref peer_type,
-                number_of_peers_recieved,
+                number_of_peers_received,
                 number_of_peers_added,
                 ..
             } => {
@@ -272,8 +272,8 @@ impl DiagnosticsCollector {
                     // Update received peers
                     peer.number_of_peers_received = peer
                         .number_of_peers_received
-                        .map(|number| number.saturating_add(number_of_peers_recieved))
-                        .or(Some(number_of_peers_recieved));
+                        .map(|number| number.saturating_add(number_of_peers_received))
+                        .or(Some(number_of_peers_received));
 
                     // Update added peers
                     peer.number_of_peers_added = peer
@@ -398,7 +398,7 @@ pub(crate) enum DiagnosticData {
     PeerResponse {
         peer_id: PeerId,
         peer_type: PeerType,
-        number_of_peers_recieved: usize,
+        number_of_peers_received: usize,
         number_of_peers_added: usize,
         timestamp: SystemTime,
     },
@@ -487,14 +487,14 @@ impl DiagnosticsBroadcastClient {
     pub fn send_peer_response(
         &self,
         peer_id: PeerId,
-        number_of_peers_recieved: usize,
+        number_of_peers_received: usize,
         number_of_peers_added: usize,
         peer_type: PeerType,
     ) -> Result<(), anyhow::Error> {
         self.broadcast(DiagnosticData::PeerResponse {
             peer_id,
             peer_type,
-            number_of_peers_recieved,
+            number_of_peers_received,
             number_of_peers_added,
             timestamp: SystemTime::now(),
         })
