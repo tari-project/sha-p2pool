@@ -13,7 +13,6 @@ use std::{
 };
 
 use clap::Parser;
-use ctrlc;
 use log::error;
 use sha_p2pool::Cli;
 use tari_shutdown::Shutdown;
@@ -83,10 +82,6 @@ async fn main() -> anyhow::Result<()> {
 
     let binding = Cli::parse();
     let command_future = binding.handle_command(Shutdown::new());
-
-    // while !should_exit.load(Ordering::SeqCst) {
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    // }
 
     tokio::select! {
         _ = async move {
