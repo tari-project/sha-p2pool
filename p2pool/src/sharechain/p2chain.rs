@@ -244,10 +244,12 @@ impl<T: BlockCache> P2Chain<T> {
                 warn!(target: LOG_TARGET, "Block squad mismatch, skipping block");
                 continue;
             }
-            if !block.verified.is_verified() {
-                warn!(target: LOG_TARGET, "Block not verified, skipping block");
-                continue;
-            }
+
+            // We need to add this back in when uncle blocks can be verified and here we can check that they are
+            // verified for being uncles if !block.verified.is_verified() {
+            //     warn!(target: LOG_TARGET, "Block not verified, skipping block");
+            //     continue;
+            // }
 
             if block.timestamp < earliest_date {
                 warn!(target: LOG_TARGET, "Block too old, skipping block");
