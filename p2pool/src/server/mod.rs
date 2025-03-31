@@ -15,7 +15,7 @@ pub mod grpc;
 pub mod http;
 pub mod p2p;
 
-pub const PROTOCOL_VERSION: u64 = 33;
+pub const PROTOCOL_VERSION: u64 = 34;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub(crate) enum PeerType {
