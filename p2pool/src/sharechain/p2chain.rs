@@ -245,11 +245,10 @@ impl<T: BlockCache> P2Chain<T> {
                 continue;
             }
 
-            // We need to add this back in when uncle blocks can be verified and here we can check that they are verified for being uncles
-            // if !block.verified.is_verified() {
-            //     warn!(target: LOG_TARGET, "Block not verified, skipping block");
-            //     continue;
-            // }
+            if !block.verified.has_target_difficulty_verified() {
+                warn!(target: LOG_TARGET, "Block not verified, skipping block");
+                continue;
+            }
 
             if block.timestamp < earliest_date {
                 warn!(target: LOG_TARGET, "Block too old, skipping block");
@@ -384,11 +383,7 @@ impl<T: BlockCache> P2Chain<T> {
         let block_prev_hash = self
             .get_parent_of(new_block_height, &hash)
             .ok_or(ShareChainError::BlockNotFound)?;
-        // let block = self
-        // .get_block_at_height(new_block_height, &hash)
-        // .ok_or(ShareChainError::BlockNotFound)?
-        // .clone();
-        // let algo = block.original_header.pow.pow_algo;
+
         // do we know of the parent
         // we should not check the chain start for parents
         if new_block_height != 0 {
