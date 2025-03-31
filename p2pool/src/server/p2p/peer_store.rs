@@ -211,12 +211,11 @@ impl PeerStore {
             .collect()
     }
 
-    pub fn get_known_same_squad_peer_records(&self) -> Vec<PeerStoreRecord> {
+    pub fn get_known_same_squad_peer_records(&self) -> Vec<&PeerStoreRecord> {
         self.whitelist_peers
             .values()
             .chain(self.greylist_peers.values())
             .chain(self.blacklist_peers.values())
-            .cloned()
             .collect()
     }
 

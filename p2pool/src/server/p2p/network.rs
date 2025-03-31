@@ -13,7 +13,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
+use std::collections::HashSet;
 use anyhow::{anyhow, Error};
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
@@ -2795,25 +2795,22 @@ where S: ShareChain
     async fn get_same_squad_peer_records(&self, filter_peers: &[PeerId], is_relay: bool) -> Vec<PeerStoreRecord> {
         let network_peer_store = self.network_peer_store.read().await;
         let same_squad_peers = network_peer_store.get_known_same_squad_peer_records();
-        // Not our own peer id
-        let own_peer_id = self.swarm.local_peer_id();
-        let mut same_squad_peers = same_squad_peers
-            .iter()
-            .filter(|r| r.peer_id != *own_peer_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        // Apply peer filter
-        same_squad_peers.retain(|r| !filter_peers.contains(&r.peer_id));
-        // Apply relay filter
-        let known_relays = self.relay_store.read().await.get_relay_peer_ids();
-        same_squad_peers.retain(|r| {
-            if is_relay {
-                known_relays.contains(&r.peer_id)
-            } else {
-                !known_relays.contains(&r.peer_id)
-            }
-        });
+    
+        // Prepare filter sets
+        let local_peer_id = *self.swarm.local_peer_id();
+        let filter_peers: HashSet<_> = filter_peers.iter().copied().chain(std::iter::once(local_peer_id)).collect();
+        let known_relays: HashSet<_> = self.relay_store.read().await.get_relay_peer_ids().into_iter().collect();
+    
+        // Filter peers
         same_squad_peers
+            .into_iter()
+            .filter(|record| {
+                let is_filtered = filter_peers.contains(&record.peer_id);
+                let is_known_relay = known_relays.contains(&record.peer_id);
+                !is_filtered && (is_relay == is_known_relay)
+            })
+            .cloned() // Consider avoiding this if possible
+            .collect()
     }
 
     /// Main loop of the diagnostic service that drives the events and libp2p swarm forward.
