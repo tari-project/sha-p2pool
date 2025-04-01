@@ -1703,7 +1703,7 @@ version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.nix]]
-version = "0.24.0"
+version = "0.23.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.nix]]
