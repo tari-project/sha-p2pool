@@ -35,7 +35,7 @@ use crate::{
         http::stats_collector::{StatsBroadcastClient, StatsCollector},
         server::Server,
     },
-    sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
+    sharechain::{in_memory::InMemoryShareChain, p2block::VerifiedStatus, BlockValidationParams},
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
@@ -214,6 +214,12 @@ pub async fn server(
             warn!(target: LOG_TARGET, "Failed to save libp2p info to file: '{}'", err);
         }
     }
+    let mut verification_checks = VerifiedStatus::new();
+    // we should disabled this one we know this is working.
+    verification_checks.set_correct_shares();
+    verification_checks.set_median_timestamp();
+    verification_checks.set_difficulty_verified();
+    verification_checks.set_target_difficulty_verified();
     let share_chain_sha3x = InMemoryShareChain::new(
         config.clone(),
         PowAlgorithm::Sha3x,
@@ -221,7 +227,7 @@ pub async fn server(
         coinbase_extras_sha3x.clone(),
         stats_broadcast_client.clone(),
         squad.clone(),
-        None,
+        Some(verification_checks),
     )?;
     let coinbase_extras_random_x = Arc::new(RwLock::new(HashMap::<String, Vec<u8>>::new()));
     let share_chain_random_x = InMemoryShareChain::new(
@@ -231,7 +237,7 @@ pub async fn server(
         coinbase_extras_random_x.clone(),
         stats_broadcast_client.clone(),
         squad.clone(),
-        None,
+        Some(verification_checks),
     )?;
     Server::new(
         config,

@@ -16,7 +16,9 @@ members = [
 # Add here until we move to edition=2021
 resolver = "2"
 
+
 [profile.release]
-# By default, Rust will wrap an integer in release mode instead of throwing the overflow error
-# seen in debug mode. Panicking at this time is better than silently using the wrong value.
+opt-level = 3
+debug = false
 overflow-checks = true
+
