@@ -37,7 +37,6 @@ use libp2p::{
     PeerId,
     Swarm,
 };
-use libp2p::futures::AsyncReadExt;
 use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
@@ -150,7 +149,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(60 * 5),
+            peer_info_publish_interval: Duration::from_secs(60 * 15),
             stable_peer: true,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -1116,11 +1115,6 @@ where S: ShareChain
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        if response.info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
-            let _ = self.swarm.disconnect_peer_id(peer_id);
-            return;
-        }
         info!(
             target: LOG_TARGET,
             "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers",
@@ -1128,6 +1122,11 @@ where S: ShareChain
         );
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
+                if response.info.version != PROTOCOL_VERSION {
+                    debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
                 let mut num_peers_added = 0;
                 let num_peers_received = response.best_peers.len();
                 for mut peer in response.best_peers {
@@ -1177,7 +1176,8 @@ where S: ShareChain
                     debug!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] No peers added from peer {}", peer_id);
                 }
 
-                // Once we have peer info from the seed peers, disconnect from them, but only if we dialed the seed peer. If the seed peer dialed us, we should keep the connection active
+                // Once we have peer info from the seed peers, disconnect from them, but only if we dialed the seed
+                // peer. If the seed peer dialed us, we should keep the connection active
                 if self.dialed_seed_peers.remove(&peer_id) {
                     info!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Disconnecting from seed peer {}", peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
@@ -1187,7 +1187,7 @@ where S: ShareChain
                 error!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Failed to parse peer id: {error:?}");
             },
         }
-    }sent invalid wire format byte
+    }
 
     /// Handles share chain sync request (coming from other peer).
     async fn handle_sync_missing_blocks_request(
@@ -1483,7 +1483,8 @@ where S: ShareChain
                     if endpoint.is_dialer() {
                         // we have dialed this connection, so  let see if we dialed a seed peer.
                         if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
-                            // we have dialed a seed peer, lets make sure we note this down so that we can disconnect after exchanging peers
+                            // we have dialed a seed peer, lets make sure we note this down so that we can disconnect
+                            // after exchanging peers
                             self.dialed_seed_peers.insert(peer_id);
                         }
                     }
