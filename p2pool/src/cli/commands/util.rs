@@ -35,9 +35,8 @@ use crate::{
         http::stats_collector::{StatsBroadcastClient, StatsCollector},
         server::Server,
     },
-    sharechain::{in_memory::InMemoryShareChain, BlockValidationParams},
+    sharechain::{in_memory::InMemoryShareChain, p2block::VerifiedStatus, BlockValidationParams},
 };
-use crate::sharechain::p2block::VerifiedStatus;
 
 const LOG_TARGET: &str = "tari::p2pool::server::p2p";
 
