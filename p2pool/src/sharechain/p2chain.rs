@@ -245,11 +245,10 @@ impl<T: BlockCache> P2Chain<T> {
                 continue;
             }
 
-            // We need to add this back in when uncle blocks can be verified and here we can check that they are
-            // verified for being uncles if !block.verified.is_verified() {
-            //     warn!(target: LOG_TARGET, "Block not verified, skipping block");
-            //     continue;
-            // }
+            if !block.verified.has_target_difficulty_verified() {
+                warn!(target: LOG_TARGET, "Block not verified, skipping block");
+                continue;
+            }
 
             if block.timestamp < earliest_date {
                 warn!(target: LOG_TARGET, "Block too old, skipping block");
@@ -384,11 +383,7 @@ impl<T: BlockCache> P2Chain<T> {
         let block_prev_hash = self
             .get_parent_of(new_block_height, &hash)
             .ok_or(ShareChainError::BlockNotFound)?;
-        // let block = self
-        // .get_block_at_height(new_block_height, &hash)
-        // .ok_or(ShareChainError::BlockNotFound)?
-        // .clone();
-        // let algo = block.original_header.pow.pow_algo;
+
         // do we know of the parent
         // we should not check the chain start for parents
         if new_block_height != 0 {
@@ -485,6 +480,8 @@ impl<T: BlockCache> P2Chain<T> {
                     current_counting_block.height.saturating_sub(1),
                     &current_counting_block.prev_hash,
                 ) {
+                    // We only care about verification of the main chain, uncles only need their target difficulty
+                    // verified
                     if !parent.verified.is_verified() {
                         all_blocks_verified = false;
                         // so this block is unverified, we cannot count it but lets see if it just misses some blocks so
@@ -729,6 +726,12 @@ impl<T: BlockCache> P2Chain<T> {
                 Some(block) => block,
                 None => return Ok(false),
             };
+            // this check should be sufficient as uncle blocks need to loop back to the main chain. For us to know their
+            // difficultly is correct, we need to verify their target difficulty and as well achieved.
+            if !uncle_block.verified.has_target_difficulty_verified() || !uncle_block.verified.has_difficulty_verified()
+            {
+                return Ok(false);
+            }
             total_work = total_work
                 .checked_add_difficulty(uncle_block.target_difficulty())
                 .ok_or(ShareChainError::DifficultyOverflow)?;
