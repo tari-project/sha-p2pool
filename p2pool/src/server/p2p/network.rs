@@ -1041,10 +1041,6 @@ where S: ShareChain
     }
 
     async fn handle_meta_data_exchange_response(&mut self, response: MetaDataResponse) {
-        if response.info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
-            return;
-        }
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_EXCHANGE_RESP] New peer info: {}", response.peer_id);
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
