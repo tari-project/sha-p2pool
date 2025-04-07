@@ -1466,7 +1466,9 @@ where S: ShareChain
                 ..
             } => {
                 {
-                    if self.network_peer_store.read().await.is_blacklisted(&peer_id) {
+                    let peer_store_read_lock = self.network_peer_store.read().await;
+
+                    if peer_store_read_lock.is_blacklisted(&peer_id) {
                         warn!(
                             target: LOG_TARGET,
                             "Connection established with blacklisted peer: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
@@ -1474,17 +1476,17 @@ where S: ShareChain
                         let _ = self.swarm.disconnect_peer_id(peer_id);
                         return;
                     }
-                }
-                {
+
                     if endpoint.is_dialer() {
                         // we have dialed this connection, so  let see if we dialed a seed peer.
-                        if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                        if peer_store_read_lock.is_seed_peer(&peer_id) {
                             // we have dialed a seed peer, lets make sure we note this down so that we can disconnect
                             // after exchanging peers
                             self.dialed_seed_peers.insert(peer_id);
                         }
                     }
                 }
+
                 info!(
                     target: LOG_TARGET,
                     "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
