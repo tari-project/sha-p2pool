@@ -149,7 +149,7 @@ impl Default for Config {
         Self {
             external_addr: None,
             seed_peers: vec![],
-            peer_info_publish_interval: Duration::from_secs(60 * 5),
+            peer_info_publish_interval: Duration::from_secs(60 * 15),
             stable_peer: true,
             private_key_folder: PathBuf::from("."),
             private_key: None,
@@ -312,6 +312,7 @@ where S: ShareChain
     recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
     share_window: u64,
+    dialed_seed_peers: HashSet<PeerId>,
 }
 
 impl<S> Service<S>
@@ -387,6 +388,7 @@ where S: ShareChain
             recent_synced_tips,
             missing_blocks_sync_request_depth: HashMap::new(),
             share_window,
+            dialed_seed_peers: HashSet::new(),
         })
     }
 
@@ -1039,52 +1041,38 @@ where S: ShareChain
     }
 
     async fn handle_meta_data_exchange_response(&mut self, response: MetaDataResponse) {
-        if response.info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
-            return;
-        }
         info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_EXCHANGE_RESP] New peer info: {}", response.peer_id);
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                if response.info.squad != self.squad {
-                    warn!(target: LOG_TARGET, "Peer {} is not in the same squad, skipping", peer_id);
-                    let mut are_we_their_relay = false;
-                    for address in &response.info.public_addresses() {
-                        for protocol in address {
-                            if let Protocol::P2p(p2p) = protocol {
-                                if p2p == self.local_peer_id() {
-                                    are_we_their_relay = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if !are_we_their_relay {
-                        let _ = self.swarm.disconnect_peer_id(peer_id);
-                    }
-                    return;
-                }
-                if self.add_peer(response.info.clone(), peer_id).await {
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
-                // Once we have peer info from the seed peers, disconnect from them.
-                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
-                    info!(target: LOG_TARGET, "Disconnecting from seed peer {}", peer_id);
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    return;
-                }
-
                 // If they are talking an older version, disconnect
                 if response.info.version != PROTOCOL_VERSION {
                     warn!(target: LOG_TARGET, "Peer {} has an outdated version, disconnecting", peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                     return;
                 }
+                // I dont think this is required, but we should not change too much at once, so lets leave this for now
+                let mut should_we_make_explict_peer = false;
+                if self.add_peer(response.info.clone(), peer_id).await {
+                    should_we_make_explict_peer = true;
+                }
+
+                // This is a seed peer, so we dont care about chain pow
+                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                    return;
+                }
+
+                if response.info.squad != self.squad {
+                    // this is a non squad peer, so we should not care about their tips
+                    return;
+                }
+
                 // if we are a seed peer, end here
                 if self.config.is_seed_peer {
                     return;
                 }
-
+                if should_we_make_explict_peer {
+                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                }
                 let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
 
                 if self.config.sha3x_enabled && response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
@@ -1123,10 +1111,6 @@ where S: ShareChain
     }
 
     async fn handle_direct_peer_exchange_response(&mut self, response: DirectPeerInfoResponse) {
-        if response.info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
-            return;
-        }
         info!(
             target: LOG_TARGET,
             "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers",
@@ -1134,9 +1118,11 @@ where S: ShareChain
         );
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
-                // if self.add_peer(response.info.clone(), peer_id).await {
-                //     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                // }
+                if response.info.version != PROTOCOL_VERSION {
+                    debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", response.peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                    return;
+                }
                 let mut num_peers_added = 0;
                 let num_peers_received = response.best_peers.len();
                 for mut peer in response.best_peers {
@@ -1152,16 +1138,6 @@ where S: ShareChain
                             num_peers_added += 1;
                         }
                     }
-                }
-                // If they are talking an older version, disconnect
-                if response.info.version != PROTOCOL_VERSION {
-                    warn!(
-                        target: LOG_TARGET,
-                        "[DIRECT_PEER_EXCHANGE_RESP] Peer {} has an outdated version, disconnecting",
-                        peer_id
-                    );
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    return;
                 }
 
                 // Update peer diagnostics
@@ -1196,8 +1172,9 @@ where S: ShareChain
                     debug!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] No peers added from peer {}", peer_id);
                 }
 
-                // Once we have peer info from the seed peers, disconnect from them.
-                if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
+                // Once we have peer info from the seed peers, disconnect from them, but only if we dialed the seed
+                // peer. If the seed peer dialed us, we should keep the connection active
+                if self.dialed_seed_peers.remove(&peer_id) {
                     info!(target: LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] Disconnecting from seed peer {}", peer_id);
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                 }
@@ -1489,7 +1466,9 @@ where S: ShareChain
                 ..
             } => {
                 {
-                    if self.network_peer_store.read().await.is_blacklisted(&peer_id) {
+                    let peer_store_read_lock = self.network_peer_store.read().await;
+
+                    if peer_store_read_lock.is_blacklisted(&peer_id) {
                         warn!(
                             target: LOG_TARGET,
                             "Connection established with blacklisted peer: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
@@ -1497,7 +1476,17 @@ where S: ShareChain
                         let _ = self.swarm.disconnect_peer_id(peer_id);
                         return;
                     }
+
+                    if endpoint.is_dialer() {
+                        // we have dialed this connection, so  let see if we dialed a seed peer.
+                        if peer_store_read_lock.is_seed_peer(&peer_id) {
+                            // we have dialed a seed peer, lets make sure we note this down so that we can disconnect
+                            // after exchanging peers
+                            self.dialed_seed_peers.insert(peer_id);
+                        }
+                    }
                 }
+
                 info!(
                     target: LOG_TARGET,
                     "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})"
@@ -1522,6 +1511,17 @@ where S: ShareChain
             },
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
+                let timer = Instant::now();
+                info!(target: LOG_TARGET, "Publishing peer info");
+
+                // broadcast peer info
+                if let Err(error) = self.broadcast_peer_info().await {
+                    warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
+                }
+
+                if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                    warn!(target: LOG_TARGET, "Peer info publishing took too long: {:?}", timer.elapsed());
+                }
             },
             SwarmEvent::ConnectionClosed {
                 peer_id,
@@ -2155,7 +2155,6 @@ where S: ShareChain
             .any(|p| *p == CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL)
         {
             warn!(target: LOG_TARGET, "Peer does not support current catchup sync protocol, will disconnect");
-            // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
             let _res = self.swarm.disconnect_peer_id(peer_id);
 
             // return;
@@ -2566,7 +2565,6 @@ where S: ShareChain
                             .move_to_blacklist(&source_peer, format!("Block failed validation: {error}"));
                     },
                 }
-                // info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);
             },
         }
     }
