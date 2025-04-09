@@ -2644,6 +2644,12 @@ where S: ShareChain
                         let info = self.swarm.network_info();
                         let counters = info.connection_counters();
 
+                        let num_connections = counters.num_established_outgoing();
+                        if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
+                            if let Err(e) = self.dial_seed_peers().await {
+                                warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
+                            }
+                         }
                         let mut store_write_lock = self.network_peer_store.write().await;
 
                         let mut squad_peers = Vec::new();
@@ -2656,26 +2662,19 @@ where S: ShareChain
                         for peer in self.swarm.connected_peers(){
                             if let Some(peer_type) = store_write_lock.peer_type(peer){
                                 match peer_type{
-                                    AddPeerStatus::NonSquad => non_squad_peers.push(peer),
+                                    AddPeerStatus::NonSquad => non_squad_peers.push(*peer),
                                     _ => {
                                         if let Some(record) = store_write_lock.get(peer){
-                                            squad_peers.push((peer, record.peer_info.current_sha3x_height, record.peer_info.current_random_x_height))
+                                            squad_peers.push((*peer, record.peer_info.current_sha3x_height, record.peer_info.current_random_x_height))
                                         }
                                     }
                                 }
                             }
                         }
 
-                        let num_connections = counters.num_established_outgoing();
-                        if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
-                            if let Err(e) = self.dial_seed_peers().await {
-                                warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
-                            }
-                         }
-
                         while non_squad_peers.len() > 1 {
                             let peer_id = non_squad_peers.pop().expect("should be able to pop peer");
-                            let _ = self.swarm.disconnect_peer_id(*peer_id);
+                            let _ = self.swarm.disconnect_peer_id(peer_id);
                         }
                         let mut num_dialed = 0;
                         for record in store_write_lock.non_squad_peers().values(){
@@ -2699,12 +2698,12 @@ where S: ShareChain
                                 a.1.cmp(&b.1)
                             });
                             let peer_id = squad_peers.remove(squad_peers.len() / 2);
-                            let _ = self.swarm.disconnect_peer_id(*peer_id.0);
+                            let _ = self.swarm.disconnect_peer_id(peer_id.0);
                             squad_peers.sort_by(|a, b| {
                                 a.2.cmp(&b.2)
                             });
                             let peer_id = squad_peers.remove(squad_peers.len() / 2);
-                            let _ = self.swarm.disconnect_peer_id(*peer_id.0);
+                            let _ = self.swarm.disconnect_peer_id(peer_id.0);
                         }
 
 
