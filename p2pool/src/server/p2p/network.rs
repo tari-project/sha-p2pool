@@ -2710,12 +2710,12 @@ where S: ShareChain
                             squad_peers.sort_by(|a, b| {
                                 b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow)
                             });
-                            let peer_id = squad_peers.remove(squad_peers.len());
+                            let peer_id = squad_peers.remove(squad_peers.len()-1);
                             let _ = self.swarm.disconnect_peer_id(peer_id.peer_id);
                             squad_peers.sort_by(|a, b| {
                                 b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow)
                             });
-                            let peer_id = squad_peers.remove(squad_peers.len());
+                            let peer_id = squad_peers.remove(squad_peers.len()-1);
                             let _ = self.swarm.disconnect_peer_id(peer_id.peer_id);
                         }
 
