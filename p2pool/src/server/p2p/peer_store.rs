@@ -254,6 +254,16 @@ impl PeerStore {
         peers.into_iter().cloned().collect()
     }
 
+    pub fn random_non_squad_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
+        let mut peers = self.non_squad_peers.values().collect::<Vec<_>>();
+        peers.retain(|peer| {
+            !peer.peer_info.public_addresses().is_empty() &&
+                (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
+        });
+        peers.truncate(count);
+        peers.into_iter().cloned().collect()
+    }
+
     pub fn update_last_dial_attempt(&mut self, peer_id: &PeerId) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
