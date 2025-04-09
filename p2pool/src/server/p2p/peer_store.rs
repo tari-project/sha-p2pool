@@ -326,9 +326,9 @@ impl PeerStore {
         if peer_info.squad != self.my_squad {
             info!(target: LOG_TARGET, "Peer non squad peer: {}", peer_id);
             let return_type = if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
-                AddPeerStatus::NonSquad
-            } else {
                 AddPeerStatus::Existing
+            } else {
+                AddPeerStatus::NonSquad
             };
             self.non_squad_peers
                 .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
