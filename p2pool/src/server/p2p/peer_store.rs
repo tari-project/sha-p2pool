@@ -6,9 +6,10 @@ use std::{
     str::FromStr,
     time::Instant,
 };
-use rand::thread_rng;
+
 use libp2p::PeerId;
 use log::*;
+use rand::thread_rng;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 

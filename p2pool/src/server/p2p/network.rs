@@ -2664,7 +2664,7 @@ where S: ShareChain
                                     AddPeerStatus::NonSquad => non_squad_peers.push(*peer),
                                     _ => {
                                         if let Some(record) = store_write_lock.get(peer){
-                                            squad_peers.push((*peer, record.peer_info.current_sha3x_height, record.peer_info.current_random_x_height))
+                                            squad_peers.push(record.clone())
                                         }
                                     }
                                 }
@@ -2705,18 +2705,18 @@ where S: ShareChain
                         }
 
                         // lets trim some connection, this will bring the connections down to a min of 5
-                        while squad_peers.len() > 6{
+                        while squad_peers.len() > MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(2){
                             // we remove one sha3 and one rx
                             squad_peers.sort_by(|a, b| {
-                                a.1.cmp(&b.1)
+                                b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow)
                             });
-                            let peer_id = squad_peers.remove(squad_peers.len() / 2);
-                            let _ = self.swarm.disconnect_peer_id(peer_id.0);
+                            let peer_id = squad_peers.remove(squad_peers.len());
+                            let _ = self.swarm.disconnect_peer_id(peer_id.peer_id);
                             squad_peers.sort_by(|a, b| {
-                                a.2.cmp(&b.2)
+                                b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow)
                             });
-                            let peer_id = squad_peers.remove(squad_peers.len() / 2);
-                            let _ = self.swarm.disconnect_peer_id(peer_id.0);
+                            let peer_id = squad_peers.remove(squad_peers.len());
+                            let _ = self.swarm.disconnect_peer_id(peer_id.peer_id);
                         }
 
 
@@ -2860,7 +2860,6 @@ where S: ShareChain
             }
         }
     }
-
 
     async fn get_same_squad_peer_records(&self, filter_peers: &[PeerId], is_relay: bool) -> Vec<PeerStoreRecord> {
         let network_peer_store = self.network_peer_store.read().await;
