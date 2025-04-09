@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
     time::Instant,
 };
-
+use rand::thread_rng;
 use libp2p::PeerId;
 use log::*;
 use tari_core::proof_of_work::PowAlgorithm;
@@ -260,6 +260,9 @@ impl PeerStore {
             !peer.peer_info.public_addresses().is_empty() &&
                 (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
         });
+        // Shuffle the peers for true randomization
+        use rand::seq::SliceRandom;
+        peers.shuffle(&mut thread_rng());
         peers.truncate(count);
         peers.into_iter().cloned().collect()
     }
