@@ -2,7 +2,7 @@
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/sha-p2pool"
 license = "BSD-3-Clause"
-version = "0.25.0"
+version = "0.25.1"
 edition = "2021"
 
 
