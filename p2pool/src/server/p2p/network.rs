@@ -55,6 +55,7 @@ use tokio::{
         oneshot,
         OwnedSemaphorePermit,
         RwLock,
+        RwLockWriteGuard,
         Semaphore,
     },
     time::MissedTickBehavior,
@@ -112,6 +113,8 @@ const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
 const NUM_PEERS_TO_META_DATA_EXCHANGE: usize = 8;
 const NUM_PEERS_TO_PEER_INFO_EXCHANGE: usize = 8;
+const MAX_OUTBOUND_SQUAD_PEERS: usize = 8;
+const MAX_OUTBOUND_NON_SQUAD_PEERS: usize = 2;
 
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -1006,7 +1009,7 @@ where S: ShareChain
 
         let source_peer = request.my_info.peer_id;
 
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_REQ] New peer info: {source_peer:?}");
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_REQ] New peer info: {source_peer:?}({})", request.my_info.squad);
         let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())
@@ -1041,7 +1044,7 @@ where S: ShareChain
     }
 
     async fn handle_meta_data_exchange_response(&mut self, response: MetaDataResponse) {
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_EXCHANGE_RESP] New peer info: {}", response.peer_id);
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[META_DATA_EXCHANGE_RESP] New peer info: {}({})", response.peer_id, response.info.squad);
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
                 // If they are talking an older version, disconnect
@@ -1517,6 +1520,12 @@ where S: ShareChain
                 // broadcast peer info
                 if let Err(error) = self.broadcast_peer_info().await {
                     warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
+                }
+
+                // lets dial the seed peers again, so that they can update our new address
+                // We will disconnect again after a peer sync
+                if let Err(e) = self.dial_seed_peers().await {
+                    warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
                 }
 
                 if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -2635,44 +2644,80 @@ where S: ShareChain
                         let info = self.swarm.network_info();
                         let counters = info.connection_counters();
 
-                        let num_connections = counters.num_established_outgoing();
-                        if num_connections > 8 {
-                            continue;
+                        let mut store_write_lock = self.network_peer_store.write().await;
+
+                        let mut squad_peers = Vec::new();
+                        let mut non_squad_peers = Vec::new();
+                        // We try and go for 10 outbound connections
+                        // 6 are for good squad peers we want to use
+                        // 2 are for random squad peers so that we dont form islands
+                        // 2 are for non squad peers to no form squad islands
+
+                        for peer in self.swarm.connected_peers(){
+                            if let Some(peer_type) = store_write_lock.peer_type(peer){
+                                match peer_type{
+                                    AddPeerStatus::NonSquad => non_squad_peers.push(peer),
+                                    _ => {
+                                        if let Some(record) = store_write_lock.get(peer){
+                                            squad_peers.push((peer, record.peer_info.current_sha3x_height, record.peer_info.current_random_x_height))
+                                        }
+                                    }
+                                }
+                            }
                         }
+
+                        let num_connections = counters.num_established_outgoing();
                         if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
                             if let Err(e) = self.dial_seed_peers().await {
                                 warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
                             }
                          }
 
+                        while non_squad_peers.len() > 1 {
+                            let peer_id = non_squad_peers.pop().expect("should be able to pop peer");
+                            let _ = self.swarm.disconnect_peer_id(*peer_id);
+                        }
                         let mut num_dialed = 0;
-                        let mut store_write_lock = self.network_peer_store.write().await;
-
-                        let mut peers_to_dial = vec![];
-                        for record in store_write_lock.best_peers_to_dial(100) {
-                            // Only dial seed peers if we have 0 connections
+                        for record in store_write_lock.non_squad_peers().values(){
                             if !self.swarm.is_connected(&record.peer_id) &&
-                                !store_write_lock.is_seed_peer(&record.peer_id)
+                            !store_write_lock.is_seed_peer(&record.peer_id)
                             {
-                                store_write_lock.update_last_dial_attempt(&record.peer_id);
-                                info!(
-                                    target: LOG_TARGET,
-                                    "Dialing peer: {:?} with height(rx/sha) {}/{} on {}",
-                                    record.peer_id, record.peer_info.current_random_x_height,
-                                    record.peer_info.current_sha3x_height,
-                                    record.peer_info.public_addresses().iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", ")
-                                );
-                                let dial_opts = DialOpts::peer_id(record.peer_id).addresses(
-                                    record.peer_info.public_addresses().clone()
-                                ).extend_addresses_through_behaviour().build();
-                                let _unused = self.swarm.dial(dial_opts).map_err(|e| {
-                                    warn!(target: LOG_TARGET, "Failed to dial peer: {e:?}");
-                                });
-                                peers_to_dial.push(record.peer_id);
+                                self.dial_peer(&mut store_write_lock, &record);
                                 num_dialed += 1;
                                 // We can only do 30 connections
                                 // after 30 it starts cancelling dials
-                                if num_dialed > 10 {
+                                if num_dialed > 1 + MAX_OUTBOUND_NON_SQUAD_PEERS {
+                                    break;
+                                }
+                            }
+                        }
+
+                        // lets trim some connection, this will bring the connections down to a min of 5
+                        while squad_peers.len() > 6{
+                            // we remove one sha3 and one rx
+                            squad_peers.sort_by(|a, b| {
+                                a.1.cmp(&b.1)
+                            });
+                            let peer_id = squad_peers.remove(squad_peers.len() / 2);
+                            let _ = self.swarm.disconnect_peer_id(*peer_id.0);
+                            squad_peers.sort_by(|a, b| {
+                                a.2.cmp(&b.2)
+                            });
+                            let peer_id = squad_peers.remove(squad_peers.len() / 2);
+                            let _ = self.swarm.disconnect_peer_id(*peer_id.0);
+                        }
+
+
+
+                        for record in store_write_lock.best_squad_peers_to_dial(100) {
+                            if !self.swarm.is_connected(&record.peer_id) &&
+                                !store_write_lock.is_seed_peer(&record.peer_id)
+                            {
+                                self.dial_peer(&mut store_write_lock, &record);
+
+                                num_dialed += 1;
+                                // lets go up to 8 squad connections
+                                if num_dialed >  1 + MAX_OUTBOUND_NON_SQUAD_PEERS + (MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(squad_peers.len())) {
                                     break;
                                 }
                             }
@@ -2788,6 +2833,24 @@ where S: ShareChain
                 },
             }
         }
+    }
+
+    async fn dial_peer(&mut self, store_write_lock: &mut RwLockWriteGuard<'_, PeerStore>, record: &PeerStoreRecord) {
+        store_write_lock.update_last_dial_attempt(&record.peer_id);
+        info!(
+            target: LOG_TARGET,
+            "Dialing peer: {:?} with height(rx/sha) {}/{} on {}",
+            record.peer_id, record.peer_info.current_random_x_height,
+            record.peer_info.current_sha3x_height,
+            record.peer_info.public_addresses().iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", ")
+        );
+        let dial_opts = DialOpts::peer_id(record.peer_id)
+            .addresses(record.peer_info.public_addresses().clone())
+            .extend_addresses_through_behaviour()
+            .build();
+        let _unused = self.swarm.dial(dial_opts).map_err(|e| {
+            warn!(target: LOG_TARGET, "Failed to dial peer: {e:?}");
+        });
     }
 
     async fn get_same_squad_peer_records(&self, filter_peers: &[PeerId], is_relay: bool) -> Vec<PeerStoreRecord> {

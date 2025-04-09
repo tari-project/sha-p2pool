@@ -234,9 +234,8 @@ impl PeerStore {
         peers.into_iter().cloned().collect()
     }
 
-    pub fn best_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
+    pub fn best_squad_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
-        peers.extend(self.non_squad_peers.values().collect::<Vec<_>>());
         peers.retain(|peer| {
             !peer.peer_info.public_addresses().is_empty() &&
                 (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
@@ -257,6 +256,16 @@ impl PeerStore {
 
     pub fn update_last_dial_attempt(&mut self, peer_id: &PeerId) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_dial_attempt = Some(Instant::now());
+            *entry = new_record;
+        }
+        if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_dial_attempt = Some(Instant::now());
+            *entry = new_record;
+        }
+        if let Some(entry) = self.non_squad_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();
             new_record.last_dial_attempt = Some(Instant::now());
             *entry = new_record;
@@ -303,6 +312,20 @@ impl PeerStore {
     /// If a peer already exists, just replaces it.
     pub async fn add(&mut self, peer_id: PeerId, peer_info: PeerInfo) -> AddPeerStatus {
         debug!(target: LOG_TARGET, "Try add peer to store: {}", peer_id);
+
+        if peer_info.squad != self.my_squad {
+            info!(target: LOG_TARGET, "Peer non squad peer: {}", peer_id);
+            let return_type = if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
+                AddPeerStatus::NonSquad
+            } else {
+                AddPeerStatus::Existing
+            };
+            self.non_squad_peers
+                .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
+            self.update_peer_stats();
+            return return_type;
+        }
+
         // Seed peers are automatically greylisted so that we don't overwhelm them with syncs
         if self.seed_peers.contains(&peer_id) {
             let mut peer_record = PeerStoreRecord::new(peer_id, peer_info.clone());
@@ -318,18 +341,6 @@ impl PeerStore {
 
         if let Some(_grey) = self.greylist_peers.get(&peer_id.to_base58()) {
             return AddPeerStatus::Greylisted;
-        }
-
-        if peer_info.squad != self.my_squad {
-            let return_type = if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
-                AddPeerStatus::NonSquad
-            } else {
-                AddPeerStatus::Existing
-            };
-            self.non_squad_peers
-                .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
-            self.update_peer_stats();
-            return return_type;
         }
 
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
@@ -420,6 +431,22 @@ impl PeerStore {
 
     pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
         self.blacklist_peers.contains_key(&peer_id.to_base58())
+    }
+
+    pub fn peer_type(&self, peer_id: &PeerId) -> Option<AddPeerStatus> {
+        if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
+            return Some(AddPeerStatus::Existing);
+        }
+        if self.greylist_peers.contains_key(&peer_id.to_base58()) {
+            return Some(AddPeerStatus::Greylisted);
+        }
+        if self.blacklist_peers.contains_key(&peer_id.to_base58()) {
+            return Some(AddPeerStatus::Blacklisted);
+        }
+        if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
+            return Some(AddPeerStatus::NonSquad);
+        }
+        None
     }
 
     // pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
