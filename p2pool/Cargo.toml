@@ -84,11 +84,8 @@ name = "sha_p2pool"
 path = "src/main.rs"
 
 [features]
-dhat-heap = []    # if you are doing heap profiling
-
-[profile.release]
-opt-level = 3
-debug = false
-
-[profile.release.dhat-heap]
-debug = true
+# If you are doing heap profiling, use 'dhat-heap' and enable debug symbols:
+#   CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin minotari_node --features=dhat-heap            ...(Linux)
+#   $env:CARGO_PROFILE_RELEASE_DEBUG = "true"; cargo build --release --bin minotari_node --features=dhat-heap  ...(PowerShell)
+dhat-heap = []
+ 
