@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use libp2p::PeerId;
@@ -235,21 +235,26 @@ impl PeerStore {
         peers.into_iter().cloned().collect()
     }
 
-    pub fn best_squad_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
+    pub fn best_squad_peers_to_dial(
+        &self,
+        count: usize,
+        include_randomx: bool,
+        include_sha3: bool,
+    ) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         peers.retain(|peer| {
             !peer.peer_info.public_addresses().is_empty() &&
                 (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
         });
         peers.sort_by(|a, b| {
-            b.num_grey_listings
-                .cmp(&a.num_grey_listings)
-                .then(
-                    (if a.peer_info.squad == self.my_squad { 0 } else { 1 })
-                        .cmp(&(if b.peer_info.squad == self.my_squad { 0 } else { 1 })),
-                )
-                .then(b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow))
-                .then(b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow))
+            let mut builder = a.num_grey_listings.cmp(&b.num_grey_listings);
+            if include_randomx {
+                builder = builder.then(b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow));
+            }
+            if include_sha3 {
+                builder = builder.then(b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow));
+            }
+            builder
         });
         peers.truncate(count);
         peers.into_iter().cloned().collect()
@@ -328,7 +333,7 @@ impl PeerStore {
         debug!(target: LOG_TARGET, "Try add peer to store: {}", peer_id);
 
         if peer_info.squad != self.my_squad {
-            info!(target: LOG_TARGET, "Peer non squad peer: {}", peer_id);
+            debug!(target: LOG_TARGET, "Peer non squad peer: {}", peer_id);
             let return_type = if self.non_squad_peers.contains_key(&peer_id.to_base58()) {
                 AddPeerStatus::Existing
             } else {
@@ -372,10 +377,17 @@ impl PeerStore {
             return AddPeerStatus::Existing;
         }
 
+        let first_address = peer_info
+            .public_addresses()
+            .first()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "None".to_string());
+        let age = Duration::from_secs(EpochTime::now().as_u64().saturating_sub(peer_info.timestamp));
+        let heights = (peer_info.current_random_x_height, peer_info.current_sha3x_height);
         self.whitelist_peers
             .insert(peer_id.to_base58(), PeerStoreRecord::new(peer_id, peer_info));
         self.update_peer_stats();
-        debug!(target: LOG_TARGET, "Peer NewPeer: {}", peer_id);
+        info!(target: LOG_TARGET, "Peer NewPeer: {} at address {} age: {:.2?} heights (rx,sha): {}/{}", peer_id, first_address, age, heights.0, heights.1);
         AddPeerStatus::NewPeer
     }
 
