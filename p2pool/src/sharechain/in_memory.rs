@@ -669,7 +669,7 @@ impl ShareChain for InMemoryShareChain {
         };
 
         let difficulty = chain_read_lock
-            .get_target_difficulty_for_block(&new_tip_block)
+            .get_target_difficulty_for_block(new_tip_block)
             .unwrap_or(min);
 
         Ok((res, difficulty))
@@ -920,7 +920,7 @@ pub mod test {
     use rand::Rng;
     use tari_common::configuration::Network;
     use tari_common_types::tari_address::TariAddressFeatures;
-    use tari_core::proof_of_work::lwma_diff::LinearWeightedMovingAverage;
+    use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, DifficultyAdjustment};
     use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
 
     use super::*;
