@@ -1687,6 +1687,9 @@ pub mod test {
                 .with_miner_coinbase_extra(static_coinbase_extra.clone())
                 .build()
                 .unwrap();
+            let mut tip = (*new_tip).clone();
+            tip.original_header.pow.pow_algo = pow_algo;
+            let new_tip = Arc::new(tip);
 
             // Force the LWMA to return a very low difficulty
             let mut wl = share_chain.p2_chain.write().await;
