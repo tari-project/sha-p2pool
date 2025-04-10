@@ -18,7 +18,11 @@ resolver = "2"
 
 
 [profile.release]
+overflow-checks = true
 opt-level = 3
 debug = false
-overflow-checks = true
-
+# To enable debug symbols with dhat profiling in release mode, enable the 'dhat-heap' feature and use
+# CARGO_PROFILE_* Environment Variables:
+#   CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --features=dhat-heap               ...(Linux)
+#   $env:CARGO_PROFILE_RELEASE_DEBUG = "true"; cargo build --release --features=dhat-heap     ...(PowerShell)
+ 
