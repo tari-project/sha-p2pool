@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # setup envs based on tag passed
 tagnet=$1
-echo $tagnet
+echo "${tagnet}"
 # case match is not RegEx, but wildcards/globs
-case "$tagnet" in
+case "${tagnet}" in
   v*-pre.* | *esme* | *esmeralda* )
     echo "esme"
     export TARI_NETWORK=esme

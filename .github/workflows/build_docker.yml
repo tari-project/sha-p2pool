@@ -92,7 +92,7 @@ jobs:
           GHA_NETWORK: ${{ github.ref_name }}
         shell: bash
         run: |
-          source ./scripts/multinet_envs.sh ${{ env.GHA_NETWORK }}
+          source ./scripts/multinet_envs.sh "${{ env.GHA_NETWORK }}"
           echo ${TARI_NETWORK}
           echo ${TARI_TARGET_NETWORK}
 
