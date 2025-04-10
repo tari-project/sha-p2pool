@@ -9,14 +9,7 @@ use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
-    proof_of_work::{
-        randomx_difficulty,
-        sha3x_difficulty,
-        AccumulatedDifficulty,
-        Difficulty,
-        DifficultyAdjustment,
-        PowAlgorithm,
-    },
+    proof_of_work::{randomx_difficulty, sha3x_difficulty, AccumulatedDifficulty, Difficulty, PowAlgorithm},
     PrunedOutputMmr,
 };
 use tari_crypto::{compressed_key::CompressedKey, ristretto::RistrettoPublicKey};
@@ -675,28 +668,9 @@ impl ShareChain for InMemoryShareChain {
             PowAlgorithm::Sha3x => Difficulty::from_u64(self.minimum_sha3_target_difficulty).unwrap(),
         };
 
-        let difficulty = match chain_read_lock.lwma.get_difficulty() {
-            Some(val) => {
-                if val < min {
-                    debug!(
-                        target: LOG_TARGET,
-                        "[{:?}] Calculated difficulty ({}) at height {:?} too low, using the minimum ({})",
-                        self.pow_algo, val, self.tip_height().await.unwrap_or_default(), min
-                    );
-                    min
-                } else {
-                    val
-                }
-            },
-            None => {
-                debug!(
-                    target: LOG_TARGET,
-                    "[{:?}] Difficulty could not be calculated at height {:?}, using the minimum ({})",
-                    self.pow_algo, self.tip_height().await.unwrap_or_default(), min
-                );
-                min
-            },
-        };
+        let difficulty = chain_read_lock
+            .get_target_difficulty_for_block(&new_tip_block)
+            .unwrap_or(min);
 
         Ok((res, difficulty))
     }
