@@ -316,6 +316,7 @@ where S: ShareChain
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
     share_window: u64,
     dialed_seed_peers: HashSet<PeerId>,
+    is_private_nat: bool,
 }
 
 impl<S> Service<S>
@@ -392,6 +393,7 @@ where S: ShareChain
             missing_blocks_sync_request_depth: HashMap::new(),
             share_window,
             dialed_seed_peers: HashSet::new(),
+            is_private_nat: false,
         })
     }
 
@@ -1558,8 +1560,8 @@ where S: ShareChain
                 error!(target: LOG_TARGET, "Listener error: {listener_id:?} -> {error:?}");
             },
             SwarmEvent::ExternalAddrExpired { address } => {
-                warn!(target: LOG_TARGET, "External address has expired: {address:?}. TODO: Do we need to create a new one?");
-                self.attempt_relay_reservation().await;
+                info!(target: LOG_TARGET, "External address expired: {address:?}");
+                // self.attempt_relay_reservation().await;
             },
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer_id),
@@ -1883,6 +1885,24 @@ where S: ShareChain
                     },
                     ServerNetworkBehaviourEvent::RelayClient(event) => {
                         info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                        match event {
+                            relay::client::Event::ReservationReqAccepted {
+                                relay_peer_id,
+                                renewal,
+                                limit,
+                            } => {
+                                if let Some(l) = limit {
+                                    let mut lock = self.relay_store.write().await;
+                                    lock.confirm_reservation(
+                                        relay_peer_id,
+                                        Instant::now() + l.duration().unwrap_or(Duration::from_secs(60)),
+                                    );
+                                } else {
+                                    warn!(target: LOG_TARGET, "Relay peer {relay_peer_id} accepted reservation request with no limit set. This is not expected.");
+                                }
+                            },
+                            _ => (),
+                        }
                     },
                     ServerNetworkBehaviourEvent::Dcutr(event) => {
                         info!(target: "tari::p2pool::dcutr", "[DCUTR]: {event:?}");
@@ -2183,8 +2203,6 @@ where S: ShareChain
                 let mut lock = self.relay_store.write().await;
                 if lock.add_possible_relay(peer_id, addr.clone()) {
                     info!(target: LOG_TARGET, "Added possible relay: {peer_id:?} -> {addr:?}");
-                    drop(lock);
-                    self.attempt_relay_reservation().await;
                 }
             }
         }
@@ -2345,15 +2363,14 @@ where S: ShareChain
                     //     .behaviour_mut()
                     //     .relay_server
                     //     .set_public_address(public_address.clone());
+                    self.is_private_nat = false;
                 },
                 NatStatus::Private => {
                     warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
                     // let lock = self.relay_store.read().await;
                     // if !lock.has_active_relay() {
                     // drop(lock);
-                    if !self.config.is_seed_peer {
-                        self.attempt_relay_reservation().await;
-                    }
+                    self.is_private_nat = true;
                     // }
                 },
                 _ => {
@@ -2374,58 +2391,34 @@ where S: ShareChain
         }
     }
 
-    async fn attempt_relay_reservation(&mut self) {
+    async fn attempt_relay_reservation(&mut self, peer_id: PeerId, addresses: &[Multiaddr]) {
         // Can happen that a previous lock already set the relaty
-        if self.swarm.external_addresses().count() > 0 {
-            warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
-            return;
-        }
-        let mut lock = self.relay_store.write().await;
-        // Check again after we get the lock.
-        if self.swarm.external_addresses().count() > 0 {
-            warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
-            return;
-        }
-        // TODO: Do relays expire?
-        // if lock.has_active_relay() {
+        // if self.swarm.external_addresses().count() > 0 {
+        //     warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
         //     return;
         // }
-        lock.select_random_relay();
-        if let Some(relay) = lock.selected_relay_mut() {
-            let mut addresses = relay.addresses.clone();
-            addresses.truncate(8);
 
-            // Try dial, this should already be happening though
-            // if let Err(err) = self.swarm.dial(
-            //     DialOpts::peer_id(relay.peer_id)
-            //         .addresses(relay.addresses.clone())
-            //         // .condition(PeerCondition::NotDialing)
-            //         .build(),
-            // ) {
-            //     debug!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
-            //     // return;
-            // }
-
-            for addr in &addresses {
-                if !Self::is_p2p_address_without_circuit(addr) {
-                    continue;
-                }
-                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
-                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                match self.swarm.listen_on(listen_addr.clone()) {
-                    Ok(_) => {
-                        // The relay is not confirmed yet, we still need to negotiate the relay
-                        // info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
-                        // relay.is_circuit_established = true;
-                        break;
-                    },
-                    Err(error) => {
-                        warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
-                    },
-                }
+        let mut relay_lock = self.relay_store.write().await;
+        for addr in addresses {
+            if !Self::is_p2p_address_without_circuit(addr) {
+                warn!(target: LOG_TARGET, "Attempeted to reserve relay address, but it is not a p2p address without circuit: {:?}", addr);
+                continue;
             }
-        } else {
-            warn!(target: LOG_TARGET, "No relay selected");
+            relay_lock.add_pending_reservation(peer_id, addr.clone());
+
+            let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+            info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+            match self.swarm.listen_on(listen_addr.clone()) {
+                Ok(_) => {
+                    // The relay is not confirmed yet, we still need to negotiate the relay
+                    // info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
+                    // relay.is_circuit_established = true;
+                    break;
+                },
+                Err(error) => {
+                    warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
+                },
+            }
         }
     }
 
@@ -2628,6 +2621,9 @@ where S: ShareChain
         let mut connection_churn_interval = tokio::time::interval(Duration::from_secs(CONNECTION_CHURN_DELAY_SECS));
         connection_churn_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut relay_job_interval = tokio::time::interval(Duration::from_secs(30));
+        relay_job_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))
         } else {
@@ -2645,6 +2641,7 @@ where S: ShareChain
         tokio::pin!(connection_stats_publish);
         tokio::pin!(seek_connections_interval);
         tokio::pin!(connection_churn_interval);
+        tokio::pin!(relay_job_interval);
 
         let uptime = Instant::now();
         loop {
@@ -2662,6 +2659,28 @@ where S: ShareChain
                     }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Query handling took too long: {:?}", timer.elapsed());
+                    }
+                },
+                _ = relay_job_interval.tick() => {
+
+                    info!(target: LOG_TARGET, "Running relay job");
+                    let relay_store = self.relay_store.read().await;
+                    let expiring = relay_store.get_expiring_reservations(Duration::from_secs(60));
+                    info!(target: LOG_TARGET, "Number of expiring relay reservations: {}", expiring.len());
+                    drop(relay_store);
+                    for (peer_id, address) in expiring {
+                        info!(target: LOG_TARGET, "Expiring relay reservation for peer {} at address {}, attempting to renew", peer_id, address);
+                        self.attempt_relay_reservation(peer_id, &[address]).await;
+                    }
+
+                    if self.swarm.external_addresses().count() == 0 && self.is_private_nat {
+                        info!(target: LOG_TARGET, "No external addresses, attempting to reserve relay...");
+                        let relay_store = self.relay_store.read().await;
+                        let addresses = relay_store.get_potential_relays().into_iter().take(3);
+                        drop(relay_store);
+                        for (peer_id, address) in addresses {
+                            self.attempt_relay_reservation(peer_id, &[address]).await;
+                        }
                     }
                 },
                 _ = connection_churn_interval.tick() => {
