@@ -231,7 +231,7 @@ pub enum P2pServiceQuery {
 #[derive(Serialize, Clone)]
 pub(crate) struct ConnectedPeerInfo {
     pub peer_id: String,
-    pub peer_info: PeerInfo,
+    pub peer_info: Option<PeerInfo>,
     pub last_grey_list_reason: Option<String>,
     pub last_ping: Option<EpochTime>, /* peer_addresses: Vec<Multiaddr>,
                                        * is_pending: bol, */
@@ -316,6 +316,7 @@ where S: ShareChain
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
     share_window: u64,
     dialed_seed_peers: HashSet<PeerId>,
+    is_private_nat: bool,
 }
 
 impl<S> Service<S>
@@ -392,6 +393,7 @@ where S: ShareChain
             missing_blocks_sync_request_depth: HashMap::new(),
             share_window,
             dialed_seed_peers: HashSet::new(),
+            is_private_nat: false,
         })
     }
 
@@ -1515,19 +1517,20 @@ where S: ShareChain
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, "Listening on {address:?}");
                 let timer = Instant::now();
-                info!(target: LOG_TARGET, "Publishing peer info");
+                if !is_localhost_or_private(&address) {
+                    info!(target: LOG_TARGET, "Publishing peer info");
 
-                // broadcast peer info
-                if let Err(error) = self.broadcast_peer_info().await {
-                    warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
+                    // broadcast peer info
+                    if let Err(error) = self.broadcast_peer_info().await {
+                        warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
+                    }
+
+                    // lets dial the seed peers again, so that they can update our new address
+                    // We will disconnect again after a peer sync
+                    // if let Err(e) = self.dial_seed_peers().await {
+                    //     warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
+                    // }
                 }
-
-                // lets dial the seed peers again, so that they can update our new address
-                // We will disconnect again after a peer sync
-                if let Err(e) = self.dial_seed_peers().await {
-                    warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
-                }
-
                 if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                     warn!(target: LOG_TARGET, "Peer info publishing took too long: {:?}", timer.elapsed());
                 }
@@ -1557,8 +1560,8 @@ where S: ShareChain
                 error!(target: LOG_TARGET, "Listener error: {listener_id:?} -> {error:?}");
             },
             SwarmEvent::ExternalAddrExpired { address } => {
-                warn!(target: LOG_TARGET, "External address has expired: {address:?}. TODO: Do we need to create a new one?");
-                self.attempt_relay_reservation().await;
+                info!(target: LOG_TARGET, "External address expired: {address:?}");
+                // self.attempt_relay_reservation().await;
             },
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer_id),
@@ -1882,9 +1885,25 @@ where S: ShareChain
                     },
                     ServerNetworkBehaviourEvent::RelayClient(event) => {
                         info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                        if let relay::client::Event::ReservationReqAccepted {
+                            relay_peer_id,
+                            renewal: _,
+                            limit,
+                        } = event
+                        {
+                            if let Some(l) = limit {
+                                let mut lock = self.relay_store.write().await;
+                                lock.confirm_reservation(
+                                    relay_peer_id,
+                                    Instant::now() + l.duration().unwrap_or(Duration::from_secs(60)),
+                                );
+                            } else {
+                                warn!(target: LOG_TARGET, "Relay peer {relay_peer_id} accepted reservation request with no limit set. This is not expected.");
+                            }
+                        }
                     },
                     ServerNetworkBehaviourEvent::Dcutr(event) => {
-                        info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
+                        info!(target: "tari::p2pool::dcutr", "[DCUTR]: {event:?}");
                     },
                     ServerNetworkBehaviourEvent::Autonat(event) => {
                         trace!(target: LOG_TARGET, "ServerNetworkBehaviourEvent::Autonat: {:?}", event);
@@ -2169,18 +2188,19 @@ where S: ShareChain
             // return;
         }
 
+        let is_seed_peer = self.network_peer_store.read().await.is_seed_peer(&peer_id);
+
         // adding peer to kademlia and gossipsub
         for addr in info.listen_addrs {
             // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
-            if Self::is_p2p_address(&addr)
+            if Self::is_p2p_address_without_circuit(&addr)
                 // && addr.is_global_ip()
                 && is_relay
+                && !is_seed_peer
             {
                 let mut lock = self.relay_store.write().await;
                 if lock.add_possible_relay(peer_id, addr.clone()) {
                     info!(target: LOG_TARGET, "Added possible relay: {peer_id:?} -> {addr:?}");
-                    drop(lock);
-                    self.attempt_relay_reservation().await;
                 }
             }
         }
@@ -2327,8 +2347,9 @@ where S: ShareChain
         Ok(())
     }
 
-    fn is_p2p_address(address: &Multiaddr) -> bool {
-        address.iter().any(|p| matches!(p, Protocol::P2p(_)))
+    fn is_p2p_address_without_circuit(address: &Multiaddr) -> bool {
+        address.iter().any(|p| matches!(p, Protocol::P2p(_))) &&
+            !address.iter().any(|p| matches!(p, Protocol::P2pCircuit))
     }
 
     async fn handle_autonat_event(&mut self, event: autonat::Event) {
@@ -2340,15 +2361,14 @@ where S: ShareChain
                     //     .behaviour_mut()
                     //     .relay_server
                     //     .set_public_address(public_address.clone());
+                    self.is_private_nat = false;
                 },
                 NatStatus::Private => {
                     warn!(target: LOG_TARGET, "[AUTONAT]: We are behind a NAT, connecting to relay!");
                     // let lock = self.relay_store.read().await;
                     // if !lock.has_active_relay() {
                     // drop(lock);
-                    if !self.config.is_seed_peer {
-                        self.attempt_relay_reservation().await;
-                    }
+                    self.is_private_nat = true;
                     // }
                 },
                 _ => {
@@ -2369,48 +2389,34 @@ where S: ShareChain
         }
     }
 
-    async fn attempt_relay_reservation(&mut self) {
+    async fn attempt_relay_reservation(&mut self, peer_id: PeerId, addresses: &[Multiaddr]) {
         // Can happen that a previous lock already set the relaty
-        if self.swarm.external_addresses().count() > 0 {
-            warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
-            return;
-        }
-        let mut lock = self.relay_store.write().await;
-        // TODO: Do relays expire?
-        // if lock.has_active_relay() {
+        // if self.swarm.external_addresses().count() > 0 {
+        //     warn!(target: LOG_TARGET, "No need to relay, we have an external address or relay already");
         //     return;
         // }
-        lock.select_random_relay();
-        if let Some(relay) = lock.selected_relay_mut() {
-            let mut addresses = relay.addresses.clone();
-            addresses.truncate(8);
 
-            // Try dial, this should already be happening though
-            // if let Err(err) = self.swarm.dial(
-            //     DialOpts::peer_id(relay.peer_id)
-            //         .addresses(relay.addresses.clone())
-            //         // .condition(PeerCondition::NotDialing)
-            //         .build(),
-            // ) {
-            //     debug!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
-            //     // return;
-            // }
+        let mut relay_lock = self.relay_store.write().await;
+        for addr in addresses {
+            if !Self::is_p2p_address_without_circuit(addr) {
+                warn!(target: LOG_TARGET, "Attempeted to reserve relay address, but it is not a p2p address without circuit: {:?}", addr);
+                continue;
+            }
+            relay_lock.add_pending_reservation(peer_id, addr.clone());
 
-            addresses.iter().for_each(|addr| {
-                let listen_addr = addr.clone().with(Protocol::P2pCircuit);
-                info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                match self.swarm.listen_on(listen_addr.clone()) {
-                    Ok(_) => {
-                        info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
-                        relay.is_circuit_established = true;
-                    },
-                    Err(error) => {
-                        warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
-                    },
-                }
-            });
-        } else {
-            warn!(target: LOG_TARGET, "No relay selected");
+            let listen_addr = addr.clone().with(Protocol::P2pCircuit);
+            info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
+            match self.swarm.listen_on(listen_addr.clone()) {
+                Ok(_) => {
+                    // The relay is not confirmed yet, we still need to negotiate the relay
+                    // info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
+                    // relay.is_circuit_established = true;
+                    break;
+                },
+                Err(error) => {
+                    warn!(target: LOG_TARGET, "Failed to listen on relay address ({:?}): {:?}", listen_addr, error);
+                },
+            }
         }
     }
 
@@ -2428,7 +2434,7 @@ where S: ShareChain
                 for (p, info) in connected_peers {
                     white_list_res.push(ConnectedPeerInfo {
                         peer_id: p.to_string(),
-                        peer_info: info.peer_info.clone(),
+                        peer_info: Some(info.peer_info.clone()),
                         last_grey_list_reason: info.last_grey_list_reason.clone(),
                         last_ping: info.last_ping,
                     });
@@ -2438,7 +2444,7 @@ where S: ShareChain
                 for (p, info) in grey_list_peers {
                     grey_list_res.push(ConnectedPeerInfo {
                         peer_id: p.to_string(),
-                        peer_info: info.peer_info.clone(),
+                        peer_info: Some(info.peer_info.clone()),
                         last_grey_list_reason: info.last_grey_list_reason.clone(),
                         last_ping: info.last_ping,
                     });
@@ -2454,11 +2460,18 @@ where S: ShareChain
                     if let Some(peer_info) = peer_info {
                         let p = ConnectedPeerInfo {
                             peer_id: p.to_string(),
-                            peer_info: peer_info.peer_info,
+                            peer_info: Some(peer_info.peer_info),
                             last_grey_list_reason: peer_info.last_grey_list_reason,
                             last_ping: peer_info.last_ping,
                         };
                         res.push(p);
+                    } else {
+                        res.push(ConnectedPeerInfo {
+                            peer_id: p.to_string(),
+                            peer_info: None,
+                            last_grey_list_reason: None,
+                            last_ping: None,
+                        });
                     }
                 }
                 let _unused = reply.send(res);
@@ -2606,6 +2619,9 @@ where S: ShareChain
         let mut connection_churn_interval = tokio::time::interval(Duration::from_secs(CONNECTION_CHURN_DELAY_SECS));
         connection_churn_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        let mut relay_job_interval = tokio::time::interval(Duration::from_secs(30));
+        relay_job_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         let mut debug_chain_graph = if self.config.debug_print_chain {
             tokio::time::interval(Duration::from_secs(60))
         } else {
@@ -2623,8 +2639,8 @@ where S: ShareChain
         tokio::pin!(connection_stats_publish);
         tokio::pin!(seek_connections_interval);
         tokio::pin!(connection_churn_interval);
+        tokio::pin!(relay_job_interval);
 
-        let uptime = Instant::now();
         loop {
             select! {
                 // biased;
@@ -2642,6 +2658,28 @@ where S: ShareChain
                         warn!(target: LOG_TARGET, "Query handling took too long: {:?}", timer.elapsed());
                     }
                 },
+                _ = relay_job_interval.tick() => {
+
+                    info!(target: LOG_TARGET, "Running relay job");
+                    let relay_store = self.relay_store.read().await;
+                    let expiring = relay_store.get_expiring_reservations(Duration::from_secs(60));
+                    info!(target: LOG_TARGET, "Number of expiring relay reservations: {}", expiring.len());
+                    drop(relay_store);
+                    for (peer_id, address) in expiring {
+                        info!(target: LOG_TARGET, "Expiring relay reservation for peer {} at address {}, attempting to renew", peer_id, address);
+                        self.attempt_relay_reservation(peer_id, &[address]).await;
+                    }
+
+                    if self.swarm.external_addresses().count() == 0 && self.is_private_nat {
+                        info!(target: LOG_TARGET, "No external addresses, attempting to reserve relay...");
+                        let relay_store = self.relay_store.read().await;
+                        let addresses = relay_store.get_potential_relays().into_iter().take(3);
+                        drop(relay_store);
+                        for (peer_id, address) in addresses {
+                            self.attempt_relay_reservation(peer_id, &[address]).await;
+                        }
+                    }
+                },
                 _ = connection_churn_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
@@ -2652,22 +2690,32 @@ where S: ShareChain
                         let mut non_squad_peers = Vec::new();
 
                         for peer in self.swarm.connected_peers(){
-                            if let Some(peer_type) = store_read_lock.peer_type(peer){
+                            let peer_type = store_read_lock.peer_type(peer);
                                 match peer_type{
-                                    AddPeerStatus::NonSquad => non_squad_peers.push(*peer),
-                                    _ => {
+                                    Some(AddPeerStatus::Greylisted) | Some(AddPeerStatus::NewPeer) | Some(AddPeerStatus::Existing) => {
                                         if let Some(record) = store_read_lock.get(peer){
                                             squad_peers.push(record.clone())
                                         }
-                                    }
+                                    },
+                                    // Assume None is non-squad.
+                                    _ => non_squad_peers.push(*peer),
                                 }
-                            }
                         }
 
-                        while non_squad_peers.len() > 1 {
-                            let peer_id = non_squad_peers.pop().expect("should be able to pop peer");
+                        // Relays can be non-squad
+                        let relays = self.relay_store.read().await.get_relay_peer_ids();
+                        let mut num_non_squads = 0;
+                        for peer_id in &non_squad_peers {
+                            num_non_squads += 1;
+                            // let peer_id = non_squad_peers.pop().expect("should be able to pop peer");
+                            if relays.contains(peer_id) {
+                                debug!(target: LOG_TARGET, "Non-squad peer is a relay, not disconnecting: {}", peer_id);
+                                continue;
+                            }
+                            if num_non_squads > 1 {
                             debug!(target: LOG_TARGET, "Disconnecting non squad peer due to churn: {}", peer_id);
-                            let _ = self.swarm.disconnect_peer_id(peer_id);
+                            let _ = self.swarm.disconnect_peer_id(*peer_id);
+                            }
                         }
 
 
@@ -2698,15 +2746,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        let info = self.swarm.network_info();
-                        let counters = info.connection_counters();
 
-                        let num_connections = counters.num_established_outgoing();
-                        if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
-                            if let Err(e) = self.dial_seed_peers().await {
-                                warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
-                            }
-                         }
                         let mut store_write_lock = self.network_peer_store.write().await;
 
                         let mut squad_peers = Vec::new();
@@ -2728,7 +2768,7 @@ where S: ShareChain
                                 }
                             }
                         }
-                        let mut num_dialed = non_squad_peers.len();
+                        let mut num_dialed = 0;
                         if non_squad_peers.len() < MAX_OUTBOUND_NON_SQUAD_PEERS{
                             debug!(target: LOG_TARGET, "Less than the required non squad peers, dialing non squad peers");
                             for record in store_write_lock.random_non_squad_peers_to_dial(20){
@@ -2743,8 +2783,9 @@ where S: ShareChain
                                         record.peer_info.current_sha3x_height,
                                         record.peer_info.public_addresses().iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", ")
                                     );
+                                    let addresses = record.peer_info.public_addresses().into_iter().filter(|a| !is_localhost_or_private(a)).collect::<Vec<_>>();
                                     let dial_opts = DialOpts::peer_id(record.peer_id)
-                                        .addresses(record.peer_info.public_addresses().clone())
+                                        .addresses(addresses)
                                         .extend_addresses_through_behaviour()
                                         .build();
                                     let _unused = self.swarm.dial(dial_opts).map_err(|e| {
@@ -2759,9 +2800,10 @@ where S: ShareChain
                                 }
                             }
                         }
+                        let mut num_dialed = 0;
                         if squad_peers.len() < MAX_OUTBOUND_SQUAD_PEERS {
                             debug!(target: LOG_TARGET, "Less than the required squad peers, dialing squad peers");
-                            for record in store_write_lock.best_squad_peers_to_dial(100) {
+                            for record in store_write_lock.best_squad_peers_to_dial(100, self.config.randomx_enabled, self.config.sha3x_enabled) {
                                 if !self.swarm.is_connected(&record.peer_id) &&
                                     !store_write_lock.is_seed_peer(&record.peer_id)
                                 {
@@ -2773,8 +2815,9 @@ where S: ShareChain
                                         record.peer_info.current_sha3x_height,
                                         record.peer_info.public_addresses().iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", ")
                                     );
+                                    let addresses = record.peer_info.public_addresses().into_iter().filter(|a| !is_localhost_or_private(a)).collect::<Vec<_>>();
                                     let dial_opts = DialOpts::peer_id(record.peer_id)
-                                        .addresses(record.peer_info.public_addresses().clone())
+                                        .addresses(addresses)
                                         .extend_addresses_through_behaviour()
                                         .build();
                                     let _unused = self.swarm.dial(dial_opts).map_err(|e| {
@@ -2783,7 +2826,7 @@ where S: ShareChain
 
                                     num_dialed += 1;
                                     // lets go up to 8 squad connections
-                                    if num_dialed > MAX_OUTBOUND_NON_SQUAD_PEERS + (MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(squad_peers.len())) {
+                                    if num_dialed > MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(squad_peers.len()) {
                                         break;
                                     }
                                 }
@@ -3698,4 +3741,20 @@ fn format_swarm_event<TBehaviourOutEvent: std::fmt::Debug>(event: &SwarmEvent<TB
         SwarmEvent::Behaviour(_) => "SwarmEvent::Behaviour({..})".to_string(),
         _ => format!("{:?})", event),
     }
+}
+
+fn is_localhost_or_private(addr: &Multiaddr) -> bool {
+    for proto in addr {
+        if let libp2p::multiaddr::Protocol::Ip4(ip) = proto {
+            if ip.is_loopback() || ip.is_private() {
+                return true;
+            }
+        }
+        if let libp2p::multiaddr::Protocol::Ip6(ip) = proto {
+            if ip.is_loopback() {
+                return true;
+            }
+        }
+    }
+    false
 }

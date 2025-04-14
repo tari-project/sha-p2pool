@@ -151,6 +151,22 @@ appenders:
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"
 
+  dcutr:
+    kind: rolling_file
+    path: "{{log_dir}}/log/dcutr.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 5
+        pattern: "{{log_dir}}/log/dcutr.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} {l:5} {m} // {f}:{L}{n}"    
+
 # Set the default logging level to "warn" and attach the "stdout" appender to the root
 root:
   level: info
@@ -187,6 +203,11 @@ loggers:
     appenders:
       - new_tip_notify
     additive: false
+  tari::p2pool::dcutr:
+    level: debug
+    appenders:
+      - dcutr
+    additive: false  
   # tari::p2pool::server::p2p:
   #   level: info
   #   appenders:
