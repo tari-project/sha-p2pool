@@ -311,7 +311,7 @@ version = "0.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.borsh]]
-version = "1.5.5"
+version = "1.5.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.borsh-derive]]
@@ -1619,7 +1619,7 @@ version = "0.8.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.minotari_app_grpc]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.mintex]]
@@ -2619,31 +2619,31 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_common]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_common_sqlite]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_common_types]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_comms]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_comms_dht]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_comms_rpc_macros]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_core]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_crypto]]
@@ -2651,43 +2651,43 @@ version = "0.22.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_features]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_hashing]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_key_manager]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_mmr]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_p2p]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_script]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_service_framework]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_shutdown]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_storage]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_test_utils]]
-version = "1.11.5-pre.0@git:b3dc63f79e7bedd19854c17e5d9809deb652e61d"
+version = "1.13.4-pre.0@git:c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8"
 criteria = "safe-to-deploy"
 
 [[exemptions.tari_utilities]]
