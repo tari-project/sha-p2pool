@@ -8,18 +8,18 @@ license.workspace = true
 
 [dependencies]
 # From tari base layer project
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_common = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_core = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "c0783dfe5fb643bb4f0fd066dcaf2854bdd05bb8" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_core = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "2a8ea56e6da3ff5e8fdf05e7f3baa98293e7a4ac" }
 # From the tari crypto project
 tari_crypto = "0.22"
 # From tari sha-p2pool project
