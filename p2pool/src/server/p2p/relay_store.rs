@@ -12,7 +12,6 @@ use log::warn;
 const LOG_TARGET: &str = "tari::p2pool::relay_store";
 #[derive(Debug)]
 struct Reservation {
-    peer_id: PeerId,
     address: Multiaddr,
     expires_at: Option<Instant>,
     pending: bool,
@@ -33,7 +32,6 @@ impl RelayStore {
         if let Some(reservation) = self.active_reservations.get_mut(&peer) {
             reservation.pending = false;
             reservation.expires_at = Some(expires_at);
-            return;
         } else {
             warn!(target: LOG_TARGET, "No reservation found for peer {}", peer);
         }
@@ -43,10 +41,8 @@ impl RelayStore {
         if let Some(reservation) = self.active_reservations.get_mut(&peer) {
             reservation.pending = true;
             reservation.address = address;
-            return;
         } else {
             self.active_reservations.insert(peer, Reservation {
-                peer_id: peer,
                 address,
                 expires_at: None,
                 pending: true,
@@ -57,7 +53,7 @@ impl RelayStore {
     pub fn get_potential_relays(&self) -> Vec<(PeerId, Multiaddr)> {
         self.possible_relays
             .iter()
-            .flat_map(|(peer_id, addresses)| addresses.iter().map(|address| (peer_id.clone(), address.clone())))
+            .flat_map(|(peer_id, addresses)| addresses.iter().map(|address| (*peer_id, address.clone())))
             .collect()
     }
 
@@ -71,7 +67,7 @@ impl RelayStore {
             .filter_map(|(p, r)| {
                 if let Some(expires_at) = r.expires_at {
                     if expires_at < Instant::now() + within_duration {
-                        Some((p.clone(), r.address.clone()))
+                        Some((*p, r.address.clone()))
                     } else {
                         None
                     }
@@ -89,7 +85,7 @@ impl RelayStore {
             .filter_map(|(p, r)| {
                 if let Some(expires) = r.expires_at {
                     if expires > Instant::now() {
-                        Some(p.clone())
+                        Some(*p)
                     } else {
                         None
                     }

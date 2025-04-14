@@ -1885,23 +1885,21 @@ where S: ShareChain
                     },
                     ServerNetworkBehaviourEvent::RelayClient(event) => {
                         info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
-                        match event {
-                            relay::client::Event::ReservationReqAccepted {
-                                relay_peer_id,
-                                renewal,
-                                limit,
-                            } => {
-                                if let Some(l) = limit {
-                                    let mut lock = self.relay_store.write().await;
-                                    lock.confirm_reservation(
-                                        relay_peer_id,
-                                        Instant::now() + l.duration().unwrap_or(Duration::from_secs(60)),
-                                    );
-                                } else {
-                                    warn!(target: LOG_TARGET, "Relay peer {relay_peer_id} accepted reservation request with no limit set. This is not expected.");
-                                }
-                            },
-                            _ => (),
+                        if let relay::client::Event::ReservationReqAccepted {
+                            relay_peer_id,
+                            renewal: _,
+                            limit,
+                        } = event
+                        {
+                            if let Some(l) = limit {
+                                let mut lock = self.relay_store.write().await;
+                                lock.confirm_reservation(
+                                    relay_peer_id,
+                                    Instant::now() + l.duration().unwrap_or(Duration::from_secs(60)),
+                                );
+                            } else {
+                                warn!(target: LOG_TARGET, "Relay peer {relay_peer_id} accepted reservation request with no limit set. This is not expected.");
+                            }
                         }
                     },
                     ServerNetworkBehaviourEvent::Dcutr(event) => {
@@ -2643,7 +2641,6 @@ where S: ShareChain
         tokio::pin!(connection_churn_interval);
         tokio::pin!(relay_job_interval);
 
-        let uptime = Instant::now();
         loop {
             select! {
                 // biased;
@@ -2717,7 +2714,7 @@ where S: ShareChain
                             }
                             if num_non_squads > 1 {
                             debug!(target: LOG_TARGET, "Disconnecting non squad peer due to churn: {}", peer_id);
-                            let _ = self.swarm.disconnect_peer_id(peer_id.clone());
+                            let _ = self.swarm.disconnect_peer_id(*peer_id);
                             }
                         }
 
@@ -2749,15 +2746,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        let info = self.swarm.network_info();
-                        let counters = info.connection_counters();
 
-                        let num_connections = counters.num_established_outgoing();
-                        // if num_connections == 0 && uptime.elapsed() < Duration::from_secs(60) {
-                        //     if let Err(e) = self.dial_seed_peers().await {
-                        //         warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
-                        //     }
-                        //  }
                         let mut store_write_lock = self.network_peer_store.write().await;
 
                         let mut squad_peers = Vec::new();
@@ -3755,24 +3744,9 @@ fn format_swarm_event<TBehaviourOutEvent: std::fmt::Debug>(event: &SwarmEvent<TB
 }
 
 fn is_localhost_or_private(addr: &Multiaddr) -> bool {
-    for proto in addr.iter() {
+    for proto in addr {
         if let libp2p::multiaddr::Protocol::Ip4(ip) = proto {
             if ip.is_loopback() || ip.is_private() {
-                return true;
-            }
-        }
-        if let libp2p::multiaddr::Protocol::Ip6(ip) = proto {
-            if ip.is_loopback() {
-                return true;
-            }
-        }
-    }
-    false
-}
-fn is_localhost(addr: &Multiaddr) -> bool {
-    for proto in addr.iter() {
-        if let libp2p::multiaddr::Protocol::Ip4(ip) = proto {
-            if ip.is_loopback() {
                 return true;
             }
         }

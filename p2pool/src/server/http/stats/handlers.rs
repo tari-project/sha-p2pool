@@ -83,7 +83,7 @@ pub(crate) async fn handle_peers(State(state): State<AppState>) -> Result<Json<P
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let mut res = rx.await.map_err(|e| {
+    let res = rx.await.map_err(|e| {
         error!(target: LOG_TARGET, "Failed to receive from oneshot: {e:?}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
