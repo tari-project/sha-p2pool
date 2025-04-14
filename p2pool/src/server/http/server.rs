@@ -74,6 +74,7 @@ impl HttpServer {
             .route("/chain", get(handlers::handle_chain))
             .route("/peer", get(handlers::handle_peers))
             .route("/connections", get(handlers::handle_connections))
+            .route("/metrics", get(handlers::handle_metrics))
             .with_state(AppState {
                 stats_client: self.stats_client.clone(),
                 p2p_service_client: self.p2p_service_client.clone(),
