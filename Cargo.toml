@@ -2,16 +2,13 @@
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/sha-p2pool"
 license = "BSD-3-Clause"
-version = "0.25.1"
+version = "0.25.2"
 edition = "2021"
 
 
 [workspace]
 
-members = [
-    "p2pool",
-    "integration_tests",
-]
+members = ["p2pool", "integration_tests"]
 
 # Add here until we move to edition=2021
 resolver = "2"
@@ -25,4 +22,3 @@ debug = false
 # CARGO_PROFILE_* Environment Variables:
 #   CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --features=dhat-heap               ...(Linux)
 #   $env:CARGO_PROFILE_RELEASE_DEBUG = "true"; cargo build --release --features=dhat-heap     ...(PowerShell)
- 
