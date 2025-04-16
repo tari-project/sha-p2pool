@@ -173,7 +173,7 @@ impl BlockCache for LmdbBlockStorage {
             let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
             let mut writer = env.write().expect("writer");
             let block_blob = bincode::serialize(&block).unwrap();
-            info!(target: LOG_TARGET, "Inserting block into lmdb size: {:?}", block_blob.len());
+            // info!(target: LOG_TARGET, "Inserting block into lmdb size: {:?}", block_blob.len());
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
                 Ok(_) => match writer.commit() {
                     Ok(_) => {
