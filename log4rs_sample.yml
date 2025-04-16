@@ -189,7 +189,6 @@ loggers:
   tari::p2pool::peer_store:
     level: info
     appenders:
-      - p2pool
       - stdout
       - peers
     additive: false

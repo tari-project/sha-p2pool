@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashMap, fs, sync::Arc};
+use std::{cmp, collections::HashMap, fs, sync::Arc, time::Instant};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -314,12 +314,17 @@ impl InMemoryShareChain {
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
     ) -> Result<ChainAddResult, ShareChainError> {
+        let timer = Instant::now();
         let new_block_p2pool_height = block.height;
 
         // Check if already added.
         if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
             if level.contains(&block.hash) {
                 let block_in_chain = level.get(&block.hash).unwrap();
+
+                if timer.elapsed().as_millis() > 100 {
+                    warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock get_block took too long: {:?}", self.pow_algo, timer.elapsed());
+                }
 
                 // info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo,
                 // block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
@@ -332,6 +337,9 @@ impl InMemoryShareChain {
         }
 
         if let Some(tip) = p2_chain.get_tip() {
+            if timer.elapsed().as_millis() > 100 {
+                warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock get tip took too long: {:?}", self.pow_algo, timer.elapsed());
+            }
             // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
             // older than the share window is way too old for us to care about.
             let tip_height = tip.height();
@@ -343,17 +351,31 @@ impl InMemoryShareChain {
         }
         // validate
         self.validate_block(p2_chain, &mut block).await?;
+        if timer.elapsed().as_millis() > 100 {
+            warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock validate_block took too long: {:?}", self.pow_algo, timer.elapsed());
+        }
+
         let _validate_result = self.validate_claimed_difficulty(&block, params).await?;
+        if timer.elapsed().as_millis() > 100 {
+            warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock validate_claimed_difficulty took too long: {:?}", self.pow_algo, timer.elapsed());
+        }
         block.verified.set_difficulty_verified();
         let new_block = Arc::new(block.clone());
 
         // add block to chain
         let new_tip = p2_chain.add_block_to_chain(new_block)?;
+        if timer.elapsed().as_millis() > 100 {
+            warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock add_block_to_chain took too long: {:?}", self.pow_algo, timer.elapsed());
+        }
 
         // update coinbase extra cache
         let mut coinbase_extras_lock = self.coinbase_extras.write().await;
 
         coinbase_extras_lock.insert(block.miner_wallet_address.to_base58(), block.get_miner_coinbase_extra());
+
+        if timer.elapsed().as_millis() > 100 {
+            warn!(target: LOG_TARGET, "[{:?}] submit_block_with_lock coinbase extras step took too long: {:?}", self.pow_algo, timer.elapsed());
+        }
 
         Ok(new_tip)
     }
@@ -483,9 +505,14 @@ impl ShareChain for InMemoryShareChain {
         res
     }
 
-    async fn add_synced_blocks(&self, blocks: Vec<P2Block>) -> Result<ChainAddResult, ShareChainError> {
+    async fn add_synced_blocks(&self, blocks: Vec<Arc<P2Block>>) -> Result<ChainAddResult, ShareChainError> {
+        let timer = Instant::now();
+        info!(target: LOG_TARGET, "[{:?}] adding synced blocks: {}, first height: {}", self.pow_algo, blocks.len(), blocks[0].height);
         let mut p2_chain_write_lock = self.p2_chain.write().await;
 
+        if timer.elapsed().as_millis() > 100 {
+            warn!(target: LOG_TARGET, "[{:?}] add_synced_blocks took too long to get write lock: {:?} num blocks: {}", self.pow_algo, timer.elapsed(), blocks.len());
+        }
         let mut blocks = blocks.to_vec();
         let mut known_blocks_incoming = Vec::new();
         if !blocks.is_sorted_by_key(|block| block.height) {
@@ -508,6 +535,7 @@ impl ShareChain for InMemoryShareChain {
             }
             let height = block.height;
             // info!(target: LOG_TARGET, "[{:?}] ✅ adding Block from sync: {:?}", self.pow_algo, height);
+            let block = (*block).clone();
             match self
                 .submit_block_with_lock(
                     &mut p2_chain_write_lock,
@@ -518,6 +546,10 @@ impl ShareChain for InMemoryShareChain {
                 .await
             {
                 Ok(tip_change) => {
+                    if timer.elapsed().as_millis() > 100 {
+                        warn!(target: LOG_TARGET, "[{:?}] add_synced_block submit_block_with_lock Block:{} took too long: {:?}", self.pow_algo, height, timer.elapsed());
+                    }
+
                     debug!(target: LOG_TARGET, "[{:?}] ✅ added Block({}): {} ", self.pow_algo, height, tip_change);
                     match (&mut add_result.new_tip, tip_change.new_tip) {
                         (Some(current_tip), Some(other_tip)) => {
@@ -796,6 +828,20 @@ impl ShareChain for InMemoryShareChain {
                     if let Some(block) = level.get_block_in_main_chain() {
                         blocks.push(block.clone());
                     }
+                }
+            }
+        }
+        blocks
+    }
+
+    async fn do_blocks_exist(&self, requested: &[(u64, FixedHash)]) -> Vec<(u64, FixedHash)> {
+        let p2_chain_read_lock = self.p2_chain.read().await;
+        let mut blocks = Vec::with_capacity(requested.len());
+
+        for block in requested {
+            if let Some(level) = p2_chain_read_lock.level_at_height(block.0) {
+                if level.contains(&block.1) {
+                    blocks.push(*block);
                 }
             }
         }

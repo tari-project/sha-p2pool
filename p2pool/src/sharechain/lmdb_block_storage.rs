@@ -26,10 +26,11 @@ use std::{
     fs,
     path::Path,
     sync::{Arc, RwLock},
+    time::Instant,
 };
 
 use anyhow::{anyhow, Error};
-use log::{error, info};
+use log::{error, info, warn};
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
     Manager,
@@ -153,20 +154,26 @@ impl BlockCache for LmdbBlockStorage {
     }
 
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
+        let timer = Instant::now();
         // Retry if the map is full
         // This weird pattern of setting a bool is so that the env is closed before resizing, otherwise
         // you can't resize with active transactions.
         let mut next_resize = false;
 
-        for _retry in 0..10 {
+        for retry in 0..10 {
             let env = self.file_handle.read().expect("reader");
+            if timer.elapsed().as_millis() > 50 {
+                warn!(target: LOG_TARGET, "Inserting block into lmdb took too long: {:?}, retry num: {}", timer.elapsed(), retry);
+            }
             if next_resize {
                 resize_db(&env);
                 // next_resize = false;
             }
+
             let store = env.open_single("block_cache_v2", StoreOptions::create()).unwrap();
             let mut writer = env.write().expect("writer");
             let block_blob = bincode::serialize(&block).unwrap();
+            info!(target: LOG_TARGET, "Inserting block into lmdb size: {:?}", block_blob.len());
             match store.put(&mut writer, hash.as_bytes(), &rkv::Value::Blob(&block_blob)) {
                 Ok(_) => match writer.commit() {
                     Ok(_) => {
