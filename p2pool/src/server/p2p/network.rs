@@ -91,6 +91,8 @@ use crate::{
 
 const PEER_INFO_TOPIC: &str = "peer_info";
 const BLOCK_NOTIFY_TOPIC: &str = "block_notify";
+const BLOCK_NOTIFY_RX_TOPIC: &str = "block_notify_rx";
+const BLOCK_NOTIFY_SHA3X_TOPIC: &str = "block_notify_sha3x";
 pub(crate) const SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL: &str = "/share_chain_sync/5";
 pub(crate) const DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_direct_peer_info/5";
 pub(crate) const META_DATA_EXCHANGE_REQ_RESP_PROTOCOL: &str = "/tari_meta_data_info/5";
@@ -457,17 +459,19 @@ where S: ShareChain
 
         match result {
             Ok(block) => {
+                let algo = block.algo();
                 let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
                         let squad = self.squad_topic(BLOCK_NOTIFY_TOPIC);
+                        // Legacy, to be removed.
                         match self
                             .swarm
                             .behaviour_mut()
                             .gossipsub
                             .publish(
                                 IdentTopic::new(squad),
-                                block_raw,
+                                block_raw.clone(),
                             )
                         // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
                         {
@@ -480,6 +484,28 @@ where S: ShareChain
                                 }
                             },
                         }
+
+                        // Broadcast on the actual algo
+                        let topic = self.squad_topic(&format!("{}-{}", BLOCK_NOTIFY_TOPIC, algo));
+                        match self
+                                .swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .publish(
+                                    IdentTopic::new(topic),
+                                    block_raw,
+                                )
+                            // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
+                            {
+                                Ok(_) => {},
+                                Err(error) => {
+                                    if matches!(error, PublishError::InsufficientPeers)  {
+                                        debug!(target: LOG_TARGET, "No peers to broadcast new block");
+                                    } else {
+                                        error!(target: LOG_TARGET, "Failed to broadcast new block: {error}");
+                                    }
+                                },
+                            }
                     },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block to bytes: {error}")
@@ -516,6 +542,7 @@ where S: ShareChain
         } else {
             Self::network_topic(topic)
         };
+        info!(target: LOG_TARGET, "Subscribing to topic: {topic}");
         self.swarm
             .behaviour_mut()
             .gossipsub
@@ -526,11 +553,18 @@ where S: ShareChain
     /// Subscribes to all topics we need.
     async fn subscribe_to_topics(&mut self) {
         self.subscribe(PEER_INFO_TOPIC, false);
-        if self.config.is_seed_peer {
-            return;
-        }
+        // if self.config.is_seed_peer {
+        // return;
+        // }
         if !self.config.diagnostic_mode {
+            // Legacy. To be removed in the future.
             self.subscribe(BLOCK_NOTIFY_TOPIC, true);
+            if self.config.randomx_enabled {
+                self.subscribe(BLOCK_NOTIFY_RX_TOPIC, true);
+            }
+            if self.config.sha3x_enabled {
+                self.subscribe(BLOCK_NOTIFY_SHA3X_TOPIC, true);
+            }
         }
     }
 
@@ -552,13 +586,13 @@ where S: ShareChain
                         Ok(payload) => {
                             debug!(target: LOG_TARGET, "[PEER_INFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
                             if payload.version != PROTOCOL_VERSION {
-                                debug!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
+                                warn!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
 
                             // 60 seconds. TODO: make config
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
-                                debug!(
+                                warn!(
                                     target: LOG_TARGET,
                                     "Peer {} sent a peer info message that is too old, skipping",
                                     source_peer
@@ -571,7 +605,7 @@ where S: ShareChain
                             return Ok(MessageAcceptance::Accept);
                         },
                         Err(error) => {
-                            debug!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
+                            warn!(target: LOG_TARGET, "Can't deserialize peer info payload: {:?}", error);
                             return Ok(MessageAcceptance::Reject);
                         },
                     }
@@ -579,7 +613,11 @@ where S: ShareChain
                 // TODO: send a signature that proves that the actual block was coming from this peer
                 // TODO: (sender peer's wallet address should be included always in the conibases with a fixed percent
                 // (like 20%))
-                topic if topic == self.squad_topic(BLOCK_NOTIFY_TOPIC) => {
+                topic
+                    if topic == self.squad_topic(BLOCK_NOTIFY_TOPIC) ||
+                        topic == self.squad_topic(BLOCK_NOTIFY_RX_TOPIC) ||
+                        topic == self.squad_topic(BLOCK_NOTIFY_SHA3X_TOPIC) =>
+                {
                     // if self.sync_in_progress.load(Ordering::SeqCst) {
                     //     return;
                     // }
@@ -588,13 +626,13 @@ where S: ShareChain
                             let algo = payload.algo();
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "New new tip notify: {}", payload);
                             if payload.version != PROTOCOL_VERSION {
-                                info!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
+                                warn!(target: LOG_TARGET, "Peer {} has an outdated version, skipping", source_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
                             // lets check age
                             // if this timestamp is older than 60 seconds, we reject it
                             if payload.timestamp < EpochTime::now().as_u64().saturating_sub(60) {
-                                info!(
+                                warn!(
                                     target: LOG_TARGET,
                                     "Peer {} sent a notify message that is too old, skipping",
                                     source_peer
@@ -602,7 +640,7 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             if algo == PowAlgorithm::RandomX && !self.config.randomx_enabled {
-                                info!(
+                                warn!(
                                     target: LOG_TARGET,
                                     "Peer {} sent a RandomX block but RandomX is disabled, skipping",
                                     source_peer
@@ -610,7 +648,7 @@ where S: ShareChain
                                 return Ok(MessageAcceptance::Ignore);
                             }
                             if algo == PowAlgorithm::Sha3x && !self.config.sha3x_enabled {
-                                info!(
+                                warn!(
                                     target: LOG_TARGET,
                                     "Peer {} sent a Sha3x block but Sha3x is disabled, skipping",
                                     source_peer
@@ -1076,9 +1114,9 @@ where S: ShareChain
                 if self.config.is_seed_peer {
                     return;
                 }
-                if should_we_make_explict_peer {
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
+                // if should_we_make_explict_peer {
+                // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                // }
                 let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
 
                 if self.config.sha3x_enabled && response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
@@ -2286,7 +2324,6 @@ where S: ShareChain
             // }
         }
 
-
         let permit = permit.unwrap();
         let (mut i_have_blocks, last_block_from_them) = match (last_block_from_them, last_progress) {
             (None, Some(last_progress)) => {
@@ -2724,6 +2761,8 @@ where S: ShareChain
                         let mut squad_peers = Vec::new();
                         let mut non_squad_peers = Vec::new();
 
+
+
                         for peer in self.swarm.connected_peers(){
                             let peer_type = store_read_lock.peer_type(peer);
                                 match peer_type{
@@ -2781,6 +2820,14 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
+
+
+                        {
+                            let mesh = self.swarm.behaviour().gossipsub.all_mesh_peers();
+                            info!(target: LOG_TARGET, "Mesh peers: {:?}", mesh.map(|p| p.to_base58()).collect::<Vec<String>>().join(", "));
+                            let all_peers = self.swarm.behaviour().gossipsub.all_peers();
+                            info!(target: LOG_TARGET, "All peers: {:?}", all_peers.map(|(p, topic)| format!("{}-{}", p.to_base58(), topic.iter().join("|"))).collect::<Vec<String>>().join(", "));
+                        }
 
                         let mut store_write_lock = self.network_peer_store.write().await;
 
