@@ -1271,14 +1271,8 @@ where S: ShareChain
         // return;
         // },
         let algo = response.algo();
-        let share_chain = match algo {
-            PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
-            PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
-        };
         let blocks: Vec<_> = response.into_blocks().into_iter().collect();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
-        let tx = self.inner_request_tx.clone();
-        let peer_store = self.network_peer_store.clone();
         // tokio::spawn(async move {
 
         for block in blocks {
