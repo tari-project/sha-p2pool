@@ -460,10 +460,18 @@ where S: ShareChain
         match result {
             Ok(block) => {
                 let algo = block.algo();
+                let version = block.version;
+                let squad = if version <= 35 {
+                    self.squad_topic(BLOCK_NOTIFY_TOPIC)
+                } else {
+                    match algo {
+                        PowAlgorithm::RandomX => self.squad_topic(BLOCK_NOTIFY_RX_TOPIC),
+                        PowAlgorithm::Sha3x => self.squad_topic(BLOCK_NOTIFY_SHA3X_TOPIC),
+                    }
+                };
                 let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
-                        let squad = self.squad_topic(BLOCK_NOTIFY_TOPIC);
                         // Legacy, to be removed.
                         match self
                             .swarm
@@ -484,28 +492,6 @@ where S: ShareChain
                                 }
                             },
                         }
-
-                        // Broadcast on the actual algo
-                        let topic = self.squad_topic(&format!("{}-{}", BLOCK_NOTIFY_TOPIC, algo));
-                        match self
-                                .swarm
-                                .behaviour_mut()
-                                .gossipsub
-                                .publish(
-                                    IdentTopic::new(topic),
-                                    block_raw,
-                                )
-                            // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
-                            {
-                                Ok(_) => {},
-                                Err(error) => {
-                                    if matches!(error, PublishError::InsufficientPeers)  {
-                                        debug!(target: LOG_TARGET, "No peers to broadcast new block");
-                                    } else {
-                                        error!(target: LOG_TARGET, "Failed to broadcast new block: {error}");
-                                    }
-                                },
-                            }
                     },
                     Err(error) => {
                         error!(target: LOG_TARGET, "Failed to convert block to bytes: {error}")
@@ -1094,11 +1080,7 @@ where S: ShareChain
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                     return;
                 }
-                // I dont think this is required, but we should not change too much at once, so lets leave this for now
-                let mut should_we_make_explict_peer = false;
-                if self.add_peer(response.info.clone(), peer_id).await {
-                    should_we_make_explict_peer = true;
-                }
+                self.add_peer(response.info.clone(), peer_id).await;
 
                 // This is a seed peer, so we dont care about chain pow
                 if self.network_peer_store.read().await.is_seed_peer(&peer_id) {
@@ -1290,7 +1272,6 @@ where S: ShareChain
             trace!(target: LOG_TARGET, "Peer {} sent 0 blocks", peer);
             return;
         }
-        let timer = Instant::now();
         // if !self.sync_in_progress.load(Ordering::SeqCst) {
         // return;
         // },
