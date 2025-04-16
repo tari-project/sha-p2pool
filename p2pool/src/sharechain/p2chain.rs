@@ -72,7 +72,7 @@ pub const SAFETY_MARGIN: u64 = 20;
 // this is the max extra lenght the chain can grow in front of our tip
 pub const MAX_EXTRA_SYNC: u64 = 2000;
 // this is the max missing parents we allow to process before we stop processing a chain and wait for more parents
-pub const MAX_MISSING_PARENTS: usize = 1;
+pub const MAX_MISSING_PARENTS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct ChainAddResult {
