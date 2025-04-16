@@ -472,20 +472,15 @@ where S: ShareChain
                 let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
-                        // Legacy, to be removed.
                         match self
                             .swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(
-                                IdentTopic::new(squad),
-                                block_raw.clone(),
-                            )
-                        // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
+                            .publish(IdentTopic::new(squad), block_raw.clone())
                         {
                             Ok(_) => {},
                             Err(error) => {
-                                if matches!(error, PublishError::InsufficientPeers)  {
+                                if matches!(error, PublishError::InsufficientPeers) {
                                     debug!(target: LOG_TARGET, "No peers to broadcast new block");
                                 } else {
                                     error!(target: LOG_TARGET, "Failed to broadcast new block: {error}");
