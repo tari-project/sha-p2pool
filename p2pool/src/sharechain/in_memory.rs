@@ -1206,7 +1206,7 @@ pub mod test {
                 .build()
                 .unwrap();
             prev_block = Some(block.clone());
-            blocks.push((*block).clone());
+            blocks.push((block).clone());
         }
         chain.add_synced_blocks(blocks.clone()).await.unwrap();
         assert_eq!(chain.tip_height().await.unwrap(), 9);
