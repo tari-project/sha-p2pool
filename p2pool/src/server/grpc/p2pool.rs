@@ -11,7 +11,6 @@ use std::{
     time::Instant,
 };
 
-use libp2p::PeerId;
 use log::{debug, error, info, warn};
 use minotari_app_grpc::tari_rpc::{
     pow_algo::PowAlgos,
@@ -47,7 +46,7 @@ use crate::{
     server::{
         grpc::{error::Error, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
-        p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
+        p2p::client::ServiceClient,
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
     PROFILING_LOG_TARGET,
@@ -61,7 +60,6 @@ const LOG_TARGET: &str = "tari::p2pool::server::grpc::p2pool";
 pub(crate) struct ShaP2PoolGrpc<S>
 where S: ShareChain
 {
-    local_peer_id: PeerId,
     /// Base node client
     // client: Arc<RwLock<BaseNodeClient<tonic::transport::Channel>>>,
     client_address: String,
@@ -85,6 +83,8 @@ where S: ShareChain
     are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
     squad: String,
+    cache_get_tip_info: RwLock<(Instant, Option<GetTipInfoResponse>)>,
+    cache_time: std::time::Duration,
 }
 
 impl<S> ShaP2PoolGrpc<S>
@@ -92,7 +92,6 @@ where S: ShareChain
 {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        local_peer_id: PeerId,
         base_node_address: String,
         p2p_client: ServiceClient,
         share_chain_sha3x: Arc<S>,
@@ -104,9 +103,9 @@ where S: ShareChain
         are_we_synced_with_randomx_p2pool: Arc<AtomicBool>,
         are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
         squad: String,
+        cache_time: std::time::Duration,
     ) -> Result<Self, Error> {
         Ok(Self {
-            local_peer_id,
             // client: Arc::new(RwLock::new(
             // util::connect_base_node(base_node_address, shutdown_signal).await?,
             // )),
@@ -130,6 +129,8 @@ where S: ShareChain
             are_we_synced_with_randomx_p2pool,
             are_we_synced_with_sha3x_p2pool,
             squad,
+            cache_get_tip_info: RwLock::new((Instant::now(), None)),
+            cache_time,
         })
     }
 
@@ -159,18 +160,17 @@ where S: ShareChain
             Ok(new_tip) => {
                 if new_tip.new_tip.is_some() {
                     let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
-                    let mut new_blocks = vec![Arc::<P2Block>::unwrap_or_clone(Arc::new(block))];
-                    let mut uncles = share_chain
-                        .get_blocks(&new_blocks[0].uncles)
-                        .await
-                        .into_iter()
-                        .map(Arc::<P2Block>::unwrap_or_clone)
-                        .collect();
-                    new_blocks.append(&mut uncles);
-                    let notify = NotifyNewTipBlock::new(self.local_peer_id, new_blocks);
+                    let new_block = Arc::new(block);
+                    for uncle in share_chain.get_blocks(&new_block.uncles).await {
+                        let _unused = self
+                            .p2p_client
+                            .broadcast_block(uncle.clone())
+                            .inspect_err(|e| error!(target: LOG_TARGET, "Failed to broadcast uncle block: {e}"));
+                    }
+                    // new_blocks.append(&mut uncles);
                     let res = self
                         .p2p_client
-                        .broadcast_block(notify)
+                        .broadcast_block(new_block)
                         .map_err(|error| Status::internal(error.to_string()));
                     if res.is_ok() {
                         info!(target: LOG_TARGET, "Broadcast new block: {:?}", hash_string);
@@ -196,8 +196,48 @@ impl<S> ShaP2Pool for ShaP2PoolGrpc<S>
 where S: ShareChain
 {
     async fn get_tip_info(&self, _request: Request<GetTipInfoRequest>) -> Result<Response<GetTipInfoResponse>, Status> {
+        debug!(target: LOG_TARGET, "get_tip_info called");
         let timer = Instant::now();
         let timeout_duration = MAX_ACCEPTABLE_GRPC_TIMEOUT;
+
+        let cache_time = self.cache_time;
+
+        let (cache_expired, cached_response) = {
+            let rwlock = self.cache_get_tip_info.read().await;
+            if rwlock.1.is_none() || rwlock.0.elapsed() > cache_time {
+                debug!(target: LOG_TARGET, "get_tip_info cache expired, updating cache: {:?}", rwlock.0.elapsed());
+                // If there is a value, but it is expired, we only want one thread to update it, so
+                // if there is already a lock on the thread, then we can return an expired value.
+                (true, rwlock.1.clone())
+            } else {
+                (false, rwlock.1.clone())
+            }
+        };
+
+        if !cache_expired {
+            // This should always be true, but just in case, we check again.
+            if let Some(cache) = cached_response {
+                debug!(target: LOG_TARGET, "get_tip_info cache hit rx/sha:{}/{}: {:?}", cache.p2pool_rx_height, cache.p2pool_sha_height, timer.elapsed());
+                return Ok(Response::new(cache));
+            }
+        }
+        // Otherwise see if another thread is trying to update the cache.
+        let mut cache_lock = self.cache_get_tip_info.try_write();
+        if cache_lock.is_err() {
+            // Another thread is already updating the cache, so we can return the expired value.
+            if let Some(cache) = cached_response {
+                debug!(target: LOG_TARGET, "get_tip_info cache expired, but another process is busy, returning old value: {:?}", timer.elapsed());
+                return Ok(Response::new(cache));
+            } else {
+                // wait for a lock
+                cache_lock = Ok(self.cache_get_tip_info.write().await);
+            }
+        }
+        let mut cache_lock = cache_lock.unwrap();
+        if cache_lock.0.elapsed() < cache_time && cache_lock.1.is_some() {
+            debug!(target: LOG_TARGET, "get_tip_info cache hit after write lock rx/sha:{}/{}: {:?}", cache_lock.1.as_ref().unwrap().p2pool_rx_height, cache_lock.1.as_ref().unwrap().p2pool_sha_height, timer.elapsed());
+            return Ok(Response::new(cache_lock.1.clone().unwrap()));
+        }
 
         let result = timeout(timeout_duration, async {
             let (rx_height, rx_hash) = self
@@ -233,14 +273,26 @@ where S: ShareChain
                 p2pool_sha_height: sha3_height,
                 p2pool_sha_tip_hash: sha3_hash.to_vec(),
             };
-            Ok(Response::new(response))
+            Ok(response)
         })
         .await;
 
         match result {
-            Ok(response) => response.inspect_err(|e| error!(target: LOG_TARGET, "get_tip_info failed: {e:?}")),
+            Ok(response) => match response {
+                Ok(r) => {
+                    debug!(target: LOG_TARGET, "get_tip_info responded successfully. height:{}rx/{}sha: {:?}",r.p2pool_rx_height, r.p2pool_sha_height, timer.elapsed());
+                    // let mut write_lock = self.cache_get_tip_info.write().await;
+                    cache_lock.0 = Instant::now();
+                    cache_lock.1 = Some(r.clone());
+                    Ok(Response::new(r.clone()))
+                },
+                Err(response) => {
+                    error!(target: LOG_TARGET, "get_tip_info failed: {:?}", response);
+                    Err(response)
+                },
+            },
             Err(_) => {
-                error!(target: LOG_TARGET, "get_tip_info timed out after {}ms.", timer.elapsed().as_millis());
+                error!(target: LOG_TARGET, "get_tip_info timed out after {:?}", timer.elapsed());
                 Err(Status::deadline_exceeded("get_tip_info timed out"))
             },
         }

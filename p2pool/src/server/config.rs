@@ -26,6 +26,7 @@ pub struct Config {
     pub block_cache_file: PathBuf,
     pub minimum_sha3_target_difficulty: Option<u64>,
     pub minimum_randomx_target_difficulty: Option<u64>,
+    pub grpc_cache_time: Duration,
 }
 
 impl Default for Config {
@@ -47,6 +48,7 @@ impl Default for Config {
             block_cache_file: PathBuf::from("block_cache"),
             minimum_sha3_target_difficulty: None,
             minimum_randomx_target_difficulty: None,
+            grpc_cache_time: Duration::from_secs(1),
         }
     }
 }
@@ -92,6 +94,11 @@ impl ConfigBuilder {
 
     pub fn with_minimum_randomx_target_difficulty(&mut self, difficulty: u64) -> &mut Self {
         self.config.minimum_randomx_target_difficulty = Some(difficulty);
+        self
+    }
+
+    pub fn with_grpc_cache_time(&mut self, time: Duration) -> &mut Self {
+        self.config.grpc_cache_time = time;
         self
     }
 

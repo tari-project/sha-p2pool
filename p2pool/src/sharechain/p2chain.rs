@@ -72,7 +72,7 @@ pub const SAFETY_MARGIN: u64 = 20;
 // this is the max extra lenght the chain can grow in front of our tip
 pub const MAX_EXTRA_SYNC: u64 = 2000;
 // this is the max missing parents we allow to process before we stop processing a chain and wait for more parents
-pub const MAX_MISSING_PARENTS: usize = 100;
+pub const MAX_MISSING_PARENTS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct ChainAddResult {
@@ -342,11 +342,19 @@ impl<T: BlockCache> P2Chain<T> {
     }
 
     fn verify_chain(&mut self, new_block_height: u64, hash: FixedHash) -> Result<ChainAddResult, ShareChainError> {
+        let timer = Instant::now();
         let mut next_level = VecDeque::new();
         let mut processed = HashSet::new();
+        let mut num_processed = 0;
         next_level.push_back((new_block_height, hash));
         let mut new_tip = ChainAddResult::default();
         while let Some((next_height, next_hash)) = next_level.pop_front() {
+            num_processed += 1;
+
+            if timer.elapsed().as_millis() > 100 {
+                warn!(target: LOG_TARGET, "Processing chain took too long, {:?} after {}", timer.elapsed(), num_processed);
+            }
+
             match self.verify_chain_inner(next_height, next_hash) {
                 Ok((add_result, do_next_level)) => {
                     processed.insert(next_hash);
@@ -379,7 +387,7 @@ impl<T: BlockCache> P2Chain<T> {
     ) -> Result<(ChainAddResult, Vec<(u64, FixedHash)>), ShareChainError> {
         trace!(target: LOG_TARGET, "Trying to verify new block to add: {}:{}", new_block_height, &hash.to_hex()[0..8]);
         // we should validate what we can if a block is invalid, we should delete it.
-        let mut new_tip = ChainAddResult::default();
+        let mut chain_add_result = ChainAddResult::default();
         let block_prev_hash = self
             .get_parent_of(new_block_height, &hash)
             .ok_or(ShareChainError::BlockNotFound)?;
@@ -389,7 +397,7 @@ impl<T: BlockCache> P2Chain<T> {
         if new_block_height != 0 {
             if !self.block_exists(new_block_height.saturating_sub(1), &block_prev_hash) {
                 // we dont know the parent
-                new_tip
+                chain_add_result
                     .missing_blocks
                     .insert(block_prev_hash, new_block_height.saturating_sub(1));
             }
@@ -398,20 +406,20 @@ impl<T: BlockCache> P2Chain<T> {
             for uncle in &self.get_uncles(new_block_height, &hash) {
                 if let Some(uncle_parent_hash) = self.get_parent_of(uncle.0, &uncle.1) {
                     if !self.block_exists(uncle.0.saturating_sub(1), &uncle_parent_hash) {
-                        new_tip
+                        chain_add_result
                             .missing_blocks
                             .insert(uncle_parent_hash, uncle.0.saturating_sub(1));
                     }
                 } else {
-                    new_tip.missing_blocks.insert(uncle.1, uncle.0);
+                    chain_add_result.missing_blocks.insert(uncle.1, uncle.0);
                 }
             }
         }
 
         // lets verify the block
-        if !new_tip.missing_blocks.is_empty() {
-            let next_level_data = self.calculate_next_level_data(new_block_height, hash);
-            return Ok((new_tip, next_level_data));
+        if !chain_add_result.missing_blocks.is_empty() {
+            let descendants = self.get_all_children_and_nephews(new_block_height, hash);
+            return Ok((chain_add_result, descendants));
         }
         self.verify_block(hash, new_block_height)?;
         // we have to reload the block to check if verified is set to true now
@@ -425,11 +433,11 @@ impl<T: BlockCache> P2Chain<T> {
         // edge case for chain start
         if self.get_tip().is_none() && new_block_height == 0 {
             self.set_new_tip(new_block_height, hash)?;
-            new_tip.set_new_tip(hash, new_block_height);
-            return Ok((new_tip, Vec::new()));
+            chain_add_result.set_new_tip(hash, new_block_height);
+            return Ok((chain_add_result, Vec::new()));
         }
         if !block.verified.is_verified() {
-            return Ok((new_tip, Vec::new()));
+            return Ok((chain_add_result, Vec::new()));
         }
 
         if self.get_tip().is_some() && self.get_tip().unwrap().chain_block() == block.prev_hash {
@@ -464,7 +472,7 @@ impl<T: BlockCache> P2Chain<T> {
             }
 
             self.set_new_tip(new_block_height, hash)?;
-            new_tip.set_new_tip(hash, new_block_height);
+            chain_add_result.set_new_tip(hash, new_block_height);
         } else {
             let mut all_blocks_verified = true;
             debug!(target: LOG_TARGET, "[{:?}] New block is not on the tip, checking for reorg: {:?}", algo, new_block_height);
@@ -487,20 +495,20 @@ impl<T: BlockCache> P2Chain<T> {
                         // so this block is unverified, we cannot count it but lets see if it just misses some blocks so
                         // we can ask for them
                         if !self.block_exists(parent.height.saturating_sub(1), &parent.prev_hash) {
-                            new_tip
+                            chain_add_result
                                 .missing_blocks
                                 .insert(parent.prev_hash, parent.height.saturating_sub(1));
                         }
                         for uncle in &parent.uncles {
                             if !self.block_exists(uncle.0, &uncle.1) {
-                                new_tip.missing_blocks.insert(uncle.1, uncle.0);
+                                chain_add_result.missing_blocks.insert(uncle.1, uncle.0);
                             }
                         }
                         // we cannot count unverified blocks
                         break;
                     }
                 } else {
-                    new_tip.missing_blocks.insert(
+                    chain_add_result.missing_blocks.insert(
                         current_counting_block.prev_hash,
                         current_counting_block.height.saturating_sub(1),
                     );
@@ -525,16 +533,16 @@ impl<T: BlockCache> P2Chain<T> {
             }
 
             if !all_blocks_verified {
-                let next_level_data = self.calculate_next_level_data(new_block_height, hash);
-                return Ok((new_tip, next_level_data));
+                let next_level_data = self.get_all_children_and_nephews(new_block_height, hash);
+                return Ok((chain_add_result, next_level_data));
             }
-            if !new_tip.missing_blocks.is_empty() {
+            if !chain_add_result.missing_blocks.is_empty() {
                 // we are missing blocks, stop counting
-                let next_level_data = self.calculate_next_level_data(new_block_height, hash);
-                return Ok((new_tip, next_level_data));
+                let next_level_data = self.get_all_children_and_nephews(new_block_height, hash);
+                return Ok((chain_add_result, next_level_data));
             }
             if block.total_pow > self.total_accumulated_tip_difficulty() {
-                new_tip.set_new_tip(hash, new_block_height);
+                chain_add_result.set_new_tip(hash, new_block_height);
                 // we need to reorg the chain
                 // lets start by resetting the lwma
                 let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, self.block_time)
@@ -632,15 +640,15 @@ impl<T: BlockCache> P2Chain<T> {
             }
         }
 
-        let next_level_data = self.calculate_next_level_data(new_block_height, hash);
+        let next_level_data = self.get_all_children_and_nephews(new_block_height, hash);
 
         if !next_level_data.is_empty() {
             debug!(target: LOG_TARGET, "[{:?}] Found link in chain with other blocks we have: {:?}", algo, new_block_height);
         }
-        Ok((new_tip, next_level_data))
+        Ok((chain_add_result, next_level_data))
     }
 
-    fn calculate_next_level_data(&self, height: u64, hash: FixedHash) -> Vec<(u64, FixedHash)> {
+    fn get_all_children_and_nephews(&self, height: u64, hash: FixedHash) -> Vec<(u64, FixedHash)> {
         let mut next_level_data = Vec::new();
 
         // let see if we already have a block is a missing block of some other block

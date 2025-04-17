@@ -14,8 +14,12 @@ use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::Shutdown;
+use tokio::sync::mpsc;
 
-use super::http::stats_collector::{StatsBroadcastClient, StatsCollector};
+use super::{
+    http::stats_collector::{StatsBroadcastClient, StatsCollector},
+    p2p::client::ServiceClient,
+};
 use crate::{
     server::{
         config,
@@ -67,7 +71,49 @@ where S: ShareChain
         let are_we_synced_with_randomx_p2pool = Arc::new(AtomicBool::new(false));
         let are_we_synced_with_sha3x_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();
-        let mut p2p_service: p2p::Service<S> = p2p::Service::new(
+
+        let mut base_node_grpc_server = None;
+        let mut p2pool_server = None;
+        let randomx_factory = RandomXFactory::new(1);
+        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
+        let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
+        let (broadcast_blocks_tx, broadcast_blocks_rx) = tokio::sync::mpsc::unbounded_channel();
+        if !config.p2p_service.is_seed_peer {
+            let base_node_grpc_service =
+                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown.clone()).await?;
+            base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
+
+            let p2pool_grpc_service = ShaP2PoolGrpc::new(
+                config.base_node_address.clone(),
+                ServiceClient::new(broadcast_blocks_tx),
+                share_chain_sha3x.clone(),
+                share_chain_random_x.clone(),
+                randomx_factory,
+                consensus_manager,
+                genesis_block_hash,
+                stats_broadcast_client.clone(),
+                are_we_synced_with_randomx_p2pool.clone(),
+                are_we_synced_with_sha3x_p2pool.clone(),
+                squad.clone(),
+                config.grpc_cache_time,
+            )
+            .await?;
+            p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
+        }
+
+        let (query_tx, query_rx) = mpsc::channel(1000);
+        let http_server = if config.http_server.enabled {
+            Some(Arc::new(HttpServer::new(
+                stats_client,
+                config.http_server.port,
+                query_tx,
+                shutdown.clone(),
+            )))
+        } else {
+            None
+        };
+
+        let p2p_service: p2p::Service<S> = p2p::Service::new(
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
@@ -80,49 +126,11 @@ where S: ShareChain
             config.share_window,
             swarm,
             squad.clone(),
+            broadcast_blocks_rx,
+            query_rx,
         )
         .await?;
-        let local_peer_id = p2p_service.local_peer_id();
-
-        let mut base_node_grpc_server = None;
-        let mut p2pool_server = None;
-        let randomx_factory = RandomXFactory::new(1);
-        let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
-        let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
-        if !config.p2p_service.is_seed_peer {
-            let base_node_grpc_service =
-                TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown.clone()).await?;
-            base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
-
-            let p2pool_grpc_service = ShaP2PoolGrpc::new(
-                local_peer_id,
-                config.base_node_address.clone(),
-                p2p_service.client(),
-                share_chain_sha3x.clone(),
-                share_chain_random_x.clone(),
-                randomx_factory,
-                consensus_manager,
-                genesis_block_hash,
-                stats_broadcast_client.clone(),
-                are_we_synced_with_randomx_p2pool.clone(),
-                are_we_synced_with_sha3x_p2pool.clone(),
-                squad,
-            )
-            .await?;
-            p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));
-        }
-
-        let query_client = p2p_service.create_query_client();
-        let http_server = if config.http_server.enabled {
-            Some(Arc::new(HttpServer::new(
-                stats_client,
-                config.http_server.port,
-                query_client,
-                shutdown.clone(),
-            )))
-        } else {
-            None
-        };
+        // let local_peer_id = p2p_service.local_peer_id();
 
         Ok(Self {
             config,
@@ -163,6 +171,16 @@ where S: ShareChain
 
     pub async fn start(&mut self) -> Result<(), Error> {
         info!(target: LOG_TARGET, "⛏ Starting Tari SHA-3 mining P2Pool...");
+        let stats_server = self.stats_collector.take();
+        if let Some(mut stats_server) = stats_server {
+            tokio::spawn(async move {
+                if let Err(err) = stats_server.run().await {
+                    error!(target: LOG_TARGET, "Stats collector encountered an error: {:?}", err);
+                }
+
+                info!(target: LOG_TARGET, "Stats collector stopped!");
+            });
+        }
 
         let sync_start_sha3 = self.are_we_synced_with_sha3x_p2pool.clone();
         let sync_start_rx = self.are_we_synced_with_randomx_p2pool.clone();
@@ -188,17 +206,6 @@ where S: ShareChain
                     error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
                 }
                 info!(target: LOG_TARGET, "GRPC Server stopped!");
-            });
-        }
-
-        let stats_server = self.stats_collector.take();
-        if let Some(mut stats_server) = stats_server {
-            tokio::spawn(async move {
-                if let Err(err) = stats_server.run().await {
-                    error!(target: LOG_TARGET, "Stats collector encountered an error: {:?}", err);
-                }
-
-                info!(target: LOG_TARGET, "Stats collector stopped!");
             });
         }
 

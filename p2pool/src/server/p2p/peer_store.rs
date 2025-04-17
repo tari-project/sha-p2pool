@@ -291,15 +291,6 @@ impl PeerStore {
         }
     }
 
-    pub fn reset_last_sync_attempt(&mut self, peer_id: &PeerId) {
-        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
-            let mut new_record = entry.clone();
-            new_record.last_rx_sync_attempt = None;
-            new_record.last_sha3x_sync_attempt = None;
-            *entry = new_record;
-        }
-    }
-
     pub fn update_last_sync_attempt(&mut self, peer_id: PeerId, algo: PowAlgorithm) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();

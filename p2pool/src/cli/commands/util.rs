@@ -99,6 +99,10 @@ pub async fn server(
         config_builder.with_minimum_randomx_target_difficulty(difficulty);
     }
 
+    if let Some(grpc_cache_time) = args.grpc_cache_seconds {
+        config_builder.with_grpc_cache_time(Duration::from_secs(grpc_cache_time));
+    }
+
     // set default tari network specific seed peer address
     let mut seed_peers = vec![];
     let network = Network::get_current_or_user_setting_or_default();

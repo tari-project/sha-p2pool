@@ -109,6 +109,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                 // .max_messages_per_rpc(Some(1000))
                 // We get a lot of messages, so 
                 //.duplicate_cache_time(Duration::from_secs(1))
+                .max_transmit_size(1024 * 1024) // 1024 KB
                 .message_id_fn(id_fn)
                 .validate_messages()
                 .build()

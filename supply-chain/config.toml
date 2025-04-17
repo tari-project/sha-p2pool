@@ -7,6 +7,12 @@ version = "0.10"
 [policy.minotari_app_grpc]
 audit-as-crates-io = true
 
+[policy.minotari_app_utilities]
+audit-as-crates-io = true
+
+[policy.tari_libtor]
+audit-as-crates-io = true
+
 [policy.tari_common]
 audit-as-crates-io = true
 
