@@ -46,7 +46,7 @@ use crate::{
     server::{
         grpc::{error::Error, util::convert_coinbase_extra, MAX_ACCEPTABLE_GRPC_TIMEOUT},
         http::stats_collector::StatsBroadcastClient,
-        p2p::{client::ServiceClient, messages::NotifyNewTipBlock},
+        p2p::client::ServiceClient,
     },
     sharechain::{p2block::P2Block, BlockValidationParams, ShareChain},
     PROFILING_LOG_TARGET,
@@ -84,7 +84,6 @@ where S: ShareChain
     are_we_synced_with_sha3x_p2pool: Arc<AtomicBool>,
     squad: String,
     cache_get_tip_info: RwLock<(Instant, Option<GetTipInfoResponse>)>,
-    cache_get_new_block: RwLock<HashMap<(TariAddress, String), (Instant, Option<GetNewBlockResponse>)>>,
     cache_time: std::time::Duration,
 }
 
@@ -131,7 +130,6 @@ where S: ShareChain
             are_we_synced_with_sha3x_p2pool,
             squad,
             cache_get_tip_info: RwLock::new((Instant::now(), None)),
-            cache_get_new_block: RwLock::new(HashMap::new()),
             cache_time,
         })
     }
@@ -163,7 +161,7 @@ where S: ShareChain
                 if new_tip.new_tip.is_some() {
                     let _unused = self.stats_broadcast.send_miner_block_accepted(pow_algo);
                     let new_block = Arc::new(block);
-                    for uncle in share_chain.get_blocks(&new_block.uncles).await.into_iter() {
+                    for uncle in share_chain.get_blocks(&new_block.uncles).await {
                         let _unused = self
                             .p2p_client
                             .broadcast_block(uncle.clone())
@@ -225,7 +223,7 @@ where S: ShareChain
         }
         // Otherwise see if another thread is trying to update the cache.
         let mut cache_lock = self.cache_get_tip_info.try_write();
-        if !cache_lock.is_ok() {
+        if cache_lock.is_err() {
             // Another thread is already updating the cache, so we can return the expired value.
             if let Some(cache) = cached_response {
                 debug!(target: LOG_TARGET, "get_tip_info cache expired, but another process is busy, returning old value: {:?}", timer.elapsed());
@@ -236,6 +234,10 @@ where S: ShareChain
             }
         }
         let mut cache_lock = cache_lock.unwrap();
+        if cache_lock.0.elapsed() < cache_time && cache_lock.1.is_some() {
+            debug!(target: LOG_TARGET, "get_tip_info cache hit after write lock rx/sha:{}/{}: {:?}", cache_lock.1.as_ref().unwrap().p2pool_rx_height, cache_lock.1.as_ref().unwrap().p2pool_sha_height, timer.elapsed());
+            return Ok(Response::new(cache_lock.1.clone().unwrap()));
+        }
 
         let result = timeout(timeout_duration, async {
             let (rx_height, rx_hash) = self

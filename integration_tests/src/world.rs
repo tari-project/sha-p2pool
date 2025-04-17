@@ -60,11 +60,11 @@ impl TariWorld {
         &mut self,
         name: &S,
     ) -> anyhow::Result<ShaP2PoolClient<TonicChannel>> {
-        self.get_p2pool_node(name).inspect_err(|e| {
-            error!(target: LOG_TARGET, "p2pool node '{}' not found: {}", name, e.to_string())
-        })?.get_grpc_client().await.inspect_err(|e| {
-            error!(target: LOG_TARGET, "Could not connect p2pool node '{}' grpc client: {}", name, e.to_string())
-        })
+        self.get_p2pool_node(name)
+            .inspect_err(|e| error!(target: LOG_TARGET, "p2pool node '{}' not found: {}", name, e))?
+            .get_grpc_client()
+            .await
+            .inspect_err(|e| error!(target: LOG_TARGET, "Could not connect p2pool node '{}' grpc client: {}", name, e))
     }
 
     pub async fn get_base_node_client<S: AsRef<str> + std::fmt::Display>(
@@ -72,12 +72,10 @@ impl TariWorld {
         name: &S,
     ) -> anyhow::Result<BaseNodeGrpcClient<TonicChannel>> {
         self.get_base_node(name)
-            .inspect_err(|e| error!(target: LOG_TARGET, "base node '{}' not found: {}", name, e.to_string()))?
+            .inspect_err(|e| error!(target: LOG_TARGET, "base node '{}' not found: {}", name, e))?
             .get_grpc_client()
             .await
-            .inspect_err(
-                |e| error!(target: LOG_TARGET, "Could not connect base node '{}' grpc client: {}", name, e.to_string()),
-            )
+            .inspect_err(|e| error!(target: LOG_TARGET, "Could not connect base node '{}' grpc client: {}", name, e))
     }
 
     pub fn get_p2pool_node<S: AsRef<str>>(&mut self, node_name: &S) -> anyhow::Result<&mut P2PoolProcess> {

@@ -50,8 +50,7 @@ use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::{
     select,
     sync::{
-        broadcast::{self, error::RecvError},
-        mpsc::{self, Sender, UnboundedReceiver},
+        mpsc::{self, UnboundedReceiver},
         oneshot,
         OwnedSemaphorePermit,
         RwLock,
@@ -68,7 +67,6 @@ use crate::{
         diagnostics::{DiagnosticPeerInfo, DiagnosticsBroadcastClient, DiagnosticsReceiverClient},
         http::stats_collector::StatsBroadcastClient,
         p2p::{
-            client::ServiceClient,
             messages::{
                 self,
                 DirectPeerInfoRequest,
@@ -395,12 +393,6 @@ where S: ShareChain
             is_private_nat: false,
         })
     }
-
-    /// Creates a new client for this service, it is thread safe (Send + Sync).
-    /// Any amount of clients can be created, no need to share the same one across many components.
-    // pub fn client(&mut self) -> ServiceClient {
-    //     ServiceClient::new(self.client_broadcast_block_tx.clone())
-    // }
 
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
     /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
