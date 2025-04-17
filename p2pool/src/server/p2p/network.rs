@@ -456,9 +456,12 @@ where S: ShareChain
 
         match result {
             Ok(block) => {
+                let coinbases_len = block.new_blocks.iter().map(|b| b.coinbases.len()).collect::<Vec<_>>();
+                let uncles_len = block.new_blocks.iter().map(|b| b.uncles.len()).collect::<Vec<_>>();
                 let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
                 match block_raw_result {
                     Ok(block_raw) => {
+                        let block_raw_len = block_raw.len();
                         let squad = self.squad_topic(BLOCK_NOTIFY_TOPIC);
                         match self
                             .swarm
@@ -468,14 +471,17 @@ where S: ShareChain
                                 IdentTopic::new(squad),
                                 block_raw,
                             )
-                        // .map_err(|error| ShareChainError::LibP2P(LibP2PError::Publish(error)))
                         {
                             Ok(_) => {},
                             Err(error) => {
                                 if matches!(error, PublishError::InsufficientPeers)  {
                                     debug!(target: LOG_TARGET, "No peers to broadcast new block");
                                 } else {
-                                    error!(target: LOG_TARGET, "Failed to broadcast new block: {error:?}");
+                                    error!(
+                                        target: LOG_TARGET, 
+                                        "Failed to broadcast new block (size: {} bytes, coinbases: {:?}, uncles: {:?}): {:?}", 
+                                        block_raw_len, coinbases_len, uncles_len, error
+                                    );
                                 }
                             },
                         }
