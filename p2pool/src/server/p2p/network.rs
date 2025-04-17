@@ -51,7 +51,7 @@ use tokio::{
     select,
     sync::{
         broadcast::{self, error::RecvError},
-        mpsc::{self, Sender},
+        mpsc::{self, Sender, UnboundedReceiver},
         oneshot,
         OwnedSemaphorePermit,
         RwLock,
@@ -293,13 +293,8 @@ where S: ShareChain
     network_peer_store: Arc<RwLock<PeerStore>>,
     config: Config,
     shutdown: Shutdown,
-    // share_chain_sync_tx: broadcast::Sender<LocalShareChainSyncRequest>,
-    query_tx: mpsc::Sender<P2pServiceQuery>,
     query_rx: mpsc::Receiver<P2pServiceQuery>,
-    // service client related channels
-    // TODO: consider mpsc channels instead of broadcast to not miss any message (might drop)
-    client_broadcast_block_tx: broadcast::Sender<NotifyNewTipBlock>,
-    client_broadcast_block_rx: broadcast::Receiver<NotifyNewTipBlock>,
+    client_broadcast_block_rx: UnboundedReceiver<Arc<P2Block>>,
     inner_request_tx: mpsc::UnboundedSender<InnerRequest>,
     inner_request_rx: mpsc::UnboundedReceiver<InnerRequest>,
 
@@ -340,15 +335,17 @@ where S: ShareChain
         share_window: u64,
         swarm: Swarm<ServerNetworkBehaviour>,
         squad: String,
+        broadcast_block_rx: UnboundedReceiver<Arc<P2Block>>,
+        query_rx: mpsc::Receiver<P2pServiceQuery>,
     ) -> Result<Self, Error> {
         let _res = stats_broadcast_client.send_info_changed(squad.clone(), *swarm.local_peer_id());
 
         let network_peer_store = PeerStore::new(stats_broadcast_client.clone(), squad.clone());
         // client related channels
-        let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<NotifyNewTipBlock>(100);
+        // let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<NotifyNewTipBlock>(100);
         // let (_share_chain_sync_tx, _share_chain_sync_rx) = broadcast::channel::<LocalShareChainSyncRequest>(1000);
         // let (snooze_block_tx, snooze_block_rx) = mpsc::channel::<(usize, P2Block)>(1000);
-        let (query_tx, query_rx) = mpsc::channel(100);
+        // let (query_tx, query_rx) = mpsc::channel(100);
         // This should not be unbounded but we need to find out what is using up all the permits
         let (inner_request_tx, inner_request_rx) = mpsc::unbounded_channel();
 
@@ -374,11 +371,10 @@ where S: ShareChain
             network_peer_store: Arc::new(RwLock::new(network_peer_store)),
             config: config.p2p_service.clone(),
             shutdown,
-            client_broadcast_block_tx: broadcast_block_tx,
+            // client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
             inner_request_tx,
             inner_request_rx,
-            query_tx,
             query_rx,
             relay_store: Arc::new(RwLock::new(RelayStore::default())),
             are_we_synced_with_randomx_p2pool,
@@ -402,9 +398,9 @@ where S: ShareChain
 
     /// Creates a new client for this service, it is thread safe (Send + Sync).
     /// Any amount of clients can be created, no need to share the same one across many components.
-    pub fn client(&mut self) -> ServiceClient {
-        ServiceClient::new(self.client_broadcast_block_tx.clone())
-    }
+    // pub fn client(&mut self) -> ServiceClient {
+    //     ServiceClient::new(self.client_broadcast_block_tx.clone())
+    // }
 
     /// Broadcasting current peer's information ([`PeerInfo`]) to other peers in the network
     /// by sending this data to [`PEER_INFO_TOPIC`] gossipsub topic.
@@ -452,49 +448,43 @@ where S: ShareChain
     }
 
     /// Broadcasting a new mined [`Block`] to the network (assume it is already validated with the network).
-    async fn broadcast_block(&mut self, result: Result<NotifyNewTipBlock, RecvError>) {
+    async fn broadcast_block(&mut self, block: Arc<P2Block>) {
         // if self.sync_in_progress.load(Ordering::SeqCst) {
         //     return;
         // }
 
-        match result {
-            Ok(block) => {
-                let algo = block.algo();
-                let version = block.version;
-                let squad = if version <= 35 {
-                    self.squad_topic(BLOCK_NOTIFY_TOPIC)
-                } else {
-                    match algo {
-                        PowAlgorithm::RandomX => self.squad_topic(BLOCK_NOTIFY_RX_TOPIC),
-                        PowAlgorithm::Sha3x => self.squad_topic(BLOCK_NOTIFY_SHA3X_TOPIC),
-                    }
-                };
-                let block_raw_result: Result<Vec<u8>, Error> = block.clone().try_into();
-                match block_raw_result {
-                    Ok(block_raw) => {
-                        match self
-                            .swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .publish(IdentTopic::new(squad), block_raw.clone())
-                        {
-                            Ok(_) => {},
-                            Err(error) => {
-                                if matches!(error, PublishError::InsufficientPeers) {
-                                    debug!(target: LOG_TARGET, "No peers to broadcast new block");
-                                } else {
-                                    error!(target: LOG_TARGET, "Failed to broadcast new block: {error}");
-                                }
-                            },
-                        }
-                    },
+        let algo = block.algo();
+        let version = block.version;
+        let squad = if version <= 35 {
+            self.squad_topic(BLOCK_NOTIFY_TOPIC)
+        } else {
+            match algo {
+                PowAlgorithm::RandomX => self.squad_topic(BLOCK_NOTIFY_RX_TOPIC),
+                PowAlgorithm::Sha3x => self.squad_topic(BLOCK_NOTIFY_SHA3X_TOPIC),
+            }
+        };
+        let message = NotifyNewTipBlock::new(self.local_peer_id(), vec![Arc::unwrap_or_clone(block)]);
+        let block_raw_result: Result<Vec<u8>, Error> = message.try_into();
+        match block_raw_result {
+            Ok(block_raw) => {
+                match self
+                    .swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(IdentTopic::new(squad), block_raw.clone())
+                {
+                    Ok(_) => {},
                     Err(error) => {
-                        error!(target: LOG_TARGET, "Failed to convert block to bytes: {error}")
+                        if matches!(error, PublishError::InsufficientPeers) {
+                            debug!(target: LOG_TARGET, "No peers to broadcast new block");
+                        } else {
+                            error!(target: LOG_TARGET, "Failed to broadcast new block: {error}");
+                        }
                     },
                 }
             },
             Err(error) => {
-                error!(target: LOG_TARGET, "Failed to receive new block: {error}")
+                error!(target: LOG_TARGET, "Failed to convert block to bytes: {error}")
             },
         }
     }
@@ -2912,7 +2902,15 @@ where S: ShareChain
                 }
                 blocks = self.client_broadcast_block_rx.recv() => {
                     let timer = Instant::now();
-                    self.broadcast_block(blocks).await;
+
+                    match blocks {
+                        Some(res) => {
+                            self.broadcast_block(res).await;
+                        },
+                        None => {
+                            warn!(target: LOG_TARGET, "Failed to receive blocks from channel. Sender dropped?");
+                        }
+                    }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Client broadcast took too long: {:?}", timer.elapsed());
                     }
@@ -3730,10 +3728,6 @@ where S: ShareChain
             None => Err(anyhow!("Missing `dnsaddr=` prefix.")),
             Some(a) => Ok(Multiaddr::try_from(a)?),
         }
-    }
-
-    pub fn create_query_client(&self) -> Sender<P2pServiceQuery> {
-        self.query_tx.clone()
     }
 
     pub async fn dial_seed_peers(&mut self) -> Result<(), Error> {

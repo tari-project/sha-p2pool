@@ -15,7 +15,7 @@ use tari_common_types::{
 use tari_core::{
     blocks::{Block, BlockHeader, BlocksHashDomain},
     consensus::DomainSeparatedConsensusHasher,
-    proof_of_work::{AccumulatedDifficulty, Difficulty},
+    proof_of_work::{AccumulatedDifficulty, Difficulty, PowAlgorithm},
     transactions::transaction_components::TransactionOutput,
 };
 use tari_script::script;
@@ -151,6 +151,10 @@ impl P2Block {
             .map_err(|e| ShareChainError::InvalidBlock { reason: e.to_string() })?;
         self.original_header = block.header;
         Ok(())
+    }
+
+    pub fn algo(&self) -> PowAlgorithm {
+        self.original_header.pow_algo()
     }
 }
 

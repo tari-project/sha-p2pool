@@ -202,6 +202,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         },
         minimum_sha3_target_difficulty: Some(Difficulty::min().as_u64()),
         minimum_randomx_target_difficulty: Some(Difficulty::min().as_u64()),
+        grpc_cache_seconds: None,
     };
 
     let name_cloned = p2pool_name.clone();

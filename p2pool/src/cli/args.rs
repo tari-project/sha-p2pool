@@ -162,6 +162,10 @@ pub struct StartArgs {
     /// Minimum RandomX target difficulty.
     #[arg(long)]
     pub minimum_randomx_target_difficulty: Option<u64>,
+
+    /// The amount of time (in seconds) to cache certain grpc responses. Currently only get_tip_info is cached.
+    #[arg(long, alias = "grpc-cache-time")]
+    pub grpc_cache_seconds: Option<u64>,
 }
 
 #[derive(Clone, Parser, Debug)]
