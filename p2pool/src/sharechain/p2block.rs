@@ -8,6 +8,7 @@ use blake2::Blake2b;
 use digest::consts::U32;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use tari_common::configuration::Network;
 use tari_common_types::{
     tari_address::TariAddress,
     types::{BlockHash, FixedHash},
@@ -29,12 +30,12 @@ use crate::{
 
 lazy_static! {
     pub static ref CURRENT_CHAIN_ID: String = {
-        // let network = Network::get_current_or_user_setting_or_default();
+        let network = Network::get_current_or_user_setting_or_default();
         // let network_genesis_block = get_genesis_block(network);
         // let network_genesis_block_hash = network_genesis_block.block().header.hash().to_hex();
         // This is hard coded for compatibility
-        let network_genesis_block_hash = "6df34a9e6e40e0e28222aa36a668e17a1b8f5d62beca70dea96ac729104fa402";
-        format!("{network_genesis_block_hash}_{CHAIN_ID}")
+        // let network_genesis_block_hash = "6df34a9e6e40e0e28222aa36a668e17a1b8f5d62beca70dea96ac729104fa402";
+        format!("{network}_{CHAIN_ID}")
     };
 }
 
