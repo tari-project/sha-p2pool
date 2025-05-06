@@ -19,7 +19,7 @@ use minotari_app_grpc::{
 use reqwest::Client;
 use serde_json::Value;
 use sha_p2pool::{LibP2pInfo, ShaP2PoolConfig, StartArgs};
-use tari_common::{configuration::Network, network_check::set_network_if_choice_valid};
+use tari_common::{configuration::Network, network_check::set_network_if_choice_valid, MAX_GRPC_MESSAGE_SIZE};
 use tari_core::proof_of_work::Difficulty;
 use tonic::{codegen::InterceptedService, transport::Channel as TonicChannel};
 
@@ -251,7 +251,10 @@ impl P2PoolProcess {
     pub async fn get_grpc_client(&self) -> anyhow::Result<ShaP2PoolClient<TonicChannel>> {
         let dst = format!("http://127.0.0.1:{}", self.config.grpc_port);
         debug!(target: LOG_TARGET, "get_grpc_client: trying to connect to '{}'", dst);
-        Ok(ShaP2PoolClient::connect(dst).await?)
+        Ok(ShaP2PoolClient::connect(dst)
+            .await?
+            .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
+            .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE))
     }
 
     pub fn kill(&mut self) {

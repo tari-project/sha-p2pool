@@ -31,20 +31,20 @@ pub async fn connect_base_node(
             tokio::pin!(shutdown_signal);
             while client.is_none() {
                 select! {
-                        () = &mut shutdown_signal => {
-                            return Err(Error::Shutdown);
-                        }
-                        _ = retry_interval.tick() => {
-                            match BaseNodeGrpcClient::connect(base_node_address.clone())
-                                .await
-                            {
-                                Ok(curr_client) => client = Some(curr_client
-                                    .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
-                                    .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE)),
-                                Err(error) => error!("[Retry] Failed to connect to Tari base node: {:?}", error.to_string()),
-                            }
+                    () = &mut shutdown_signal => {
+                        return Err(Error::Shutdown);
+                    }
+                    _ = retry_interval.tick() => {
+                        match BaseNodeGrpcClient::connect(base_node_address.clone())
+                            .await
+                        {
+                            Ok(curr_client) => client = Some(curr_client
+                                .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
+                                .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE)),
+                            Err(error) => error!("[Retry] Failed to connect to Tari base node: {:?}", error.to_string()),
                         }
                     }
+                }
             }
             client.unwrap()
         },
