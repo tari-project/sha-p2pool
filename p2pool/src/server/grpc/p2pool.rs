@@ -25,6 +25,7 @@ use minotari_app_grpc::tari_rpc::{
     SubmitBlockResponse,
 };
 use minotari_node_grpc_client::BaseNodeGrpcClient;
+use tari_common::MAX_GRPC_MESSAGE_SIZE;
 use tari_common_types::{tari_address::TariAddress, types::FixedHash};
 use tari_core::{
     blocks::Block,
@@ -258,7 +259,9 @@ where S: ShareChain
 
             let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?
+                .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
+                .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE);
             let tip_info = client.get_tip_info(Empty {}).await?.into_inner();
             let (node_height, node_tip_hash) = tip_info
                 .metadata
@@ -357,7 +360,9 @@ where S: ShareChain
             debug!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?
+                .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
+                .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE);
 
             debug!(target: PROFILING_LOG_TARGET, "get_new_block timer: {:?}", timer.elapsed());
             let mut response = client
@@ -608,7 +613,9 @@ where S: ShareChain
                 let grpc_request = Request::from_parts(metadata, extensions, grpc_request_payload);
                 let mut client = BaseNodeGrpcClient::connect(self.client_address.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?;
+                .map_err(|e| Status::internal(format!("Could not connect to base node {e:?}")))?
+                    .max_decoding_message_size(MAX_GRPC_MESSAGE_SIZE)
+                    .max_encoding_message_size(MAX_GRPC_MESSAGE_SIZE);
 
                 match client.submit_block(grpc_request).await {
                     Ok(_resp) => {

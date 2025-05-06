@@ -38,7 +38,7 @@ pub async fn mine_and_submit_tari_blocks(
         .map_err(|e| format!("Failed to get p2pool node grpc client: {}", e))?;
 
     for i in 0..number_of_blocks {
-        let wallet_payment_address = new_random_dual_tari_address().to_hex();
+        let wallet_payment_address = new_random_dual_tari_address()?.to_hex();
         let block = timeout(Duration::from_secs(10), async {
             p2pool_client
                 .get_new_block(GetNewBlockRequest {
@@ -82,7 +82,7 @@ pub async fn mine_and_submit_tari_blocks(
     Ok(())
 }
 
-pub fn new_random_dual_tari_address() -> TariAddress {
+pub fn new_random_dual_tari_address() -> TestResult<TariAddress> {
     let mut rng = rand::thread_rng();
     let (_, view) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
     let (_, spend) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
@@ -91,7 +91,9 @@ pub fn new_random_dual_tari_address() -> TariAddress {
         spend,
         Network::LocalNet,
         TariAddressFeatures::create_interactive_and_one_sided(),
+        None,
     )
+    .map_err(|err| format!("Failed to create dual address: {}", err).into())
 }
 
 pub fn find_sha3x_header_with_achieved_difficulty(
