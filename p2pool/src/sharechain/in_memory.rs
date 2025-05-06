@@ -1016,7 +1016,7 @@ pub mod test {
         let mut rng = rand::thread_rng();
         let (_, view) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
         let (_, spend) = CompressedKey::<RistrettoPublicKey>::random_keypair(&mut rng);
-        TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE)
+        TariAddress::new_dual_address(view, spend, Network::LocalNet, TariAddressFeatures::INTERACTIVE, None).unwrap()
     }
 
     // we need to do this as clippy complains about the public key as mutable, which the underlying struct

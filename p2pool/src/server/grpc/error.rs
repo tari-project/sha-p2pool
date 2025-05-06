@@ -1,18 +1,16 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use minotari_app_grpc::authentication::BasicAuthError;
 use thiserror::Error;
+use tonic::transport::Error as TonicTransport;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Tonic error: {0}")]
-    Tonic(#[from] TonicError),
     #[error("Shutdown")]
     Shutdown,
-}
-
-#[derive(Error, Debug)]
-pub enum TonicError {
-    #[error("Transport error: {0}")]
-    Transport(#[from] tonic::transport::Error),
+    #[error("Tonic error: {0}")]
+    TonicTransport(#[from] TonicTransport),
+    #[error("Tonic error: {0}")]
+    BasicAuth(#[from] BasicAuthError),
 }

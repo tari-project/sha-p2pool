@@ -320,6 +320,7 @@ where S: ShareChain
 {
     /// Constructs a new Service from the provided config.
     /// It also instantiates libp2p swarm inside.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &config::Config,
         share_chain_sha3x: Arc<S>,
