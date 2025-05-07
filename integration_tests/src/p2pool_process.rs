@@ -192,7 +192,8 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         max_connections: None,
         randomx_disabled: !node_config.p2p_service.randomx_enabled,
         sha3x_disabled: !node_config.p2p_service.sha3x_enabled,
-        block_time: Some(1),
+        block_time_sha: Some(1),
+        block_time_rx: Some(1),
         share_window: Some(100),
         export_libp2p_info: Some(temp_dir_path.join(LIBP2P_INFO_FILE).clone()),
         network_silence_delay: {
@@ -432,8 +433,12 @@ pub fn to_args_command_line(args: StartArgs) -> Vec<String> {
         args_vec.push("--sha3x-disabled".to_string());
     }
 
-    if let Some(block_time) = args.block_time {
-        args_vec.push(format!("--block-time={}", block_time));
+    if let Some(block_time) = args.block_time_sha {
+        args_vec.push(format!("--block-time-sha={}", block_time));
+    }
+
+    if let Some(block_time) = args.block_time_rx {
+        args_vec.push(format!("--block-time-rx={}", block_time));
     }
 
     if let Some(share_window) = args.share_window {

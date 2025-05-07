@@ -21,7 +21,8 @@ pub struct Config {
     pub network_silence_delay: u64,
     pub max_relay_circuits: Option<usize>,
     pub max_relay_circuits_per_peer: Option<usize>,
-    pub block_time: u64,
+    pub block_time_sha: u64,
+    pub block_time_rx: u64,
     pub share_window: u64,
     pub block_cache_file: PathBuf,
     pub minimum_sha3_target_difficulty: Option<u64>,
@@ -43,8 +44,9 @@ impl Default for Config {
             network_silence_delay: 300,
             max_relay_circuits: None,
             max_relay_circuits_per_peer: None,
-            block_time: 20,
-            share_window: 2160,
+            block_time_sha: 20,
+            block_time_rx: 30,
+            share_window: 1000,
             block_cache_file: PathBuf::from("block_cache"),
             minimum_sha3_target_difficulty: None,
             minimum_randomx_target_difficulty: None,
@@ -224,8 +226,13 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_block_time(&mut self, config: u64) -> &mut Self {
-        self.config.block_time = config;
+    pub fn with_sha3_block_time(&mut self, config: u64) -> &mut Self {
+        self.config.block_time_sha = config;
+        self
+    }
+
+    pub fn with_rx_block_time(&mut self, config: u64) -> &mut Self {
+        self.config.block_time_rx = config;
         self
     }
 

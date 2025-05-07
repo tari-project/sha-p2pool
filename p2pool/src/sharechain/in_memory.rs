@@ -80,6 +80,11 @@ impl InMemoryShareChain {
 
         let data_path = config.block_cache_file.join(pow_algo.to_string());
 
+        let block_time = match pow_algo {
+            PowAlgorithm::RandomX => config.block_time_rx,
+            PowAlgorithm::Sha3x => config.block_time_sha,
+        };
+
         let mut p2chain = None;
         if fs::exists(&data_path).map_err(|e| anyhow!("block cache file errored when checking exists: {}", e))? {
             let bkp_file = config
@@ -104,7 +109,7 @@ impl InMemoryShareChain {
                 pow_algo,
                 config.share_window * 2,
                 config.share_window,
-                config.block_time,
+                block_time,
                 old,
                 new,
                 &squad,
@@ -131,7 +136,7 @@ impl InMemoryShareChain {
                 pow_algo,
                 config.share_window * 2,
                 config.share_window,
-                config.block_time,
+                block_time,
                 block_cache,
                 config
                     .minimum_randomx_target_difficulty
