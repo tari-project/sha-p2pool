@@ -995,7 +995,7 @@ pub mod test {
             pow_algo,
             config.share_window * 2,
             config.share_window,
-            config.block_time,
+            config.block_time_sha,
             block_cache,
             1,
             1,
@@ -1082,7 +1082,7 @@ pub mod test {
             miners.push(address);
         }
         let mut lwma =
-            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time_sha).unwrap();
         for i in 0..15 {
             let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
             let address = miners[i % 5].clone();
@@ -1305,7 +1305,7 @@ pub mod test {
             pow_algo,
             config.share_window * 2,
             config.share_window,
-            config.block_time,
+            config.block_time_sha,
             block_cache,
             1,
             1,
@@ -1329,7 +1329,7 @@ pub mod test {
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
         let address = new_random_address();
-        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time_sha).unwrap();
         for i in 0..14 {
             let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
@@ -1385,7 +1385,7 @@ pub mod test {
             pow_algo,
             config.share_window * 2,
             config.share_window,
-            config.block_time,
+            config.block_time_sha,
             block_cache,
             1,
             1,
@@ -1409,7 +1409,7 @@ pub mod test {
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
         let address = new_random_address();
-        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time_sha).unwrap();
         for i in 0..5 {
             let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
             timestamp = timestamp.checked_add(EpochTime::from(5)).unwrap();
@@ -1478,7 +1478,7 @@ pub mod test {
             pow_algo,
             config.share_window * 2,
             config.share_window,
-            config.block_time,
+            config.block_time_sha,
             block_cache,
             1,
             1,
@@ -1503,7 +1503,7 @@ pub mod test {
         let first_timestamp = timestamp;
         let mut prev_block = None;
         let address = new_random_address();
-        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+        let mut lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time_sha).unwrap();
         for i in 0..5 {
             let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
@@ -1561,7 +1561,7 @@ pub mod test {
             pow_algo,
             config.share_window * 2,
             config.share_window,
-            config.block_time,
+            config.block_time_sha,
             block_cache,
             1,
             1,
@@ -1585,7 +1585,7 @@ pub mod test {
         let mut timestamp = EpochTime::now();
         let mut prev_block = None;
         let mut lwma =
-            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time).unwrap();
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, share_chain.config.block_time_sha).unwrap();
 
         let target_diff = lwma.get_difficulty().unwrap_or(Difficulty::min());
         let address = new_random_address();
@@ -1703,7 +1703,7 @@ pub mod test {
                 pow_algo,
                 config.share_window * 2,
                 config.share_window,
-                config.block_time,
+                config.block_time_sha,
                 block_cache,
                 config
                     .minimum_randomx_target_difficulty
@@ -1744,7 +1744,7 @@ pub mod test {
 
             // Force the LWMA to return a very low difficulty
             let mut wl = share_chain.p2_chain.write().await;
-            wl.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time).unwrap();
+            wl.lwma = LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, config.block_time_sha).unwrap();
             for i in 0..10 {
                 wl.lwma
                     .add_back(EpochTime::from(1000 + i), Difficulty::from_u64(1).unwrap());
