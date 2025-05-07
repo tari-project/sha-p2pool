@@ -147,6 +147,9 @@ pub struct StartArgs {
     #[arg(long, value_name = "btr")]
     pub block_time_rx: Option<u64>,
 
+    #[arg(long, value_name = "ncs")]
+    pub num_concurrent_syncs: Option<u32>,
+
     #[arg(long, value_name = "sw")]
     pub share_window: Option<u64>,
 

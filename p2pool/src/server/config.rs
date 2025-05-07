@@ -255,6 +255,11 @@ impl ConfigBuilder {
         self.config.p2p_service.diagnostic_mode = config;
         self
     }
+    
+    pub fn with_num_concurrent_syncs(&mut self, config: usize) -> &mut Self {
+        self.config.p2p_service.num_concurrent_syncs = config;
+        self
+    }
 
     pub fn build(&self) -> Config {
         self.config.clone()

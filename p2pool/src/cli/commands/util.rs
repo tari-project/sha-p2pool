@@ -80,6 +80,10 @@ pub async fn server(
     if let Some(block_time) = args.block_time_rx {
         config_builder.with_rx_block_time(block_time);
     }
+    
+    if let Some(num_concurrent_syncs) = args.num_concurrent_syncs{
+        config_builder.with_num_concurrent_syncs(num_concurrent_syncs as usize);
+    }
 
     if let Some(share_window) = args.share_window {
         config_builder.with_share_window(share_window);
