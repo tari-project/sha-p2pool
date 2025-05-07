@@ -73,8 +73,12 @@ pub async fn server(
         config_builder.with_p2p_port(p2p_port);
     }
 
-    if let Some(block_time) = args.block_time {
-        config_builder.with_block_time(block_time);
+    if let Some(block_time) = args.block_time_sha {
+        config_builder.with_sha3_block_time(block_time);
+    }
+
+    if let Some(block_time) = args.block_time_rx {
+        config_builder.with_rx_block_time(block_time);
     }
 
     if let Some(share_window) = args.share_window {
