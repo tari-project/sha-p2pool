@@ -37,6 +37,7 @@ use libp2p::{
     PeerId,
     Swarm,
 };
+use libc;
 use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
@@ -273,6 +274,23 @@ enum InnerRequest {
         source_peer: PeerId,
         depth: usize,
     },
+}
+
+// Helper function to check for EAFNOSUPPORT
+// This ideally should be more robust, perhaps by checking the specific TransportError variant
+// or the inner std::io::Error's kind or raw_os_error.
+fn is_eafnosupport(e: &libp2p::TransportError<std::io::Error>) -> bool {
+    if let libp2p::TransportError::Other(io_err) = e {
+        // Since 'e' is &libp2p::TransportError<std::io::Error>,
+        // 'io_err' here will be a &std::io::Error.
+        if let Some(raw_os_err) = io_err.raw_os_error() {
+            return raw_os_err == libc::EAFNOSUPPORT;
+        }
+    }
+    // If 'e' is libp2p::TransportError::MultiaddrNotSupported(_), or if Other(io_err)
+    // doesn't contain a raw_os_error or the error code doesn't match,
+    // we correctly return false.
+    false
 }
 
 /// Service is the implementation that holds every peer-to-peer related logic
@@ -3736,19 +3754,66 @@ where S: ShareChain
     /// Please note that this is a blocking call!
     pub async fn start(&mut self) -> Result<(), Error> {
         // listen on local address
-
-        let ips_to_bind_to = [
-            IpAddr::from_str("::").unwrap(),      // IN_ADDR_ANY_V6
-            IpAddr::from_str("0.0.0.0").unwrap(), // IN_ADDR_ANY_V4
+        let listen_configs = [
+            // Try IPv6 first
+            (IpAddr::from_str("::").unwrap(), "ip6", "IPv6"),
+            // Fallback to IPv4
+            (IpAddr::from_str("0.0.0.0").unwrap(), "ip4", "IPv4"),
         ];
 
         let port = self.port;
-        for addr in ips_to_bind_to {
-            let ip_label = if addr.is_ipv4() { "ip4" } else { "ip6" };
-            self.swarm
-                .listen_on(format!("/{ip_label}/{addr}/udp/{port}/quic-v1").parse()?)?;
-            self.swarm
-                .listen_on(format!("/{ip_label}/{addr}/tcp/{port}").parse()?)?;
+        let mut listeners_started_count = 0;
+
+        for (addr_ip, ip_label, readable_name) in listen_configs.iter() {
+            let quic_multiaddr_str = format!("/{}/{}/udp/{}/quic-v1", ip_label, addr_ip, port);
+            match quic_multiaddr_str.parse::<Multiaddr>() {
+                Ok(quic_maddr) => {
+                    match self.swarm.listen_on(quic_maddr.clone()) {
+                        Ok(_) => {
+                            info!(target: LOG_TARGET, "Listening on QUIC {} address: {}", readable_name, quic_maddr);
+                            listeners_started_count += 1;
+                        }
+                        Err(e) => {
+                            if addr_ip.is_ipv6() && is_eafnosupport(&e) {
+                                warn!(target: LOG_TARGET, "QUIC: {} not supported on this system (EAFNOSUPPORT). Skipping {}. Error: {}", readable_name, quic_maddr, e);
+                            } else {
+                                // Log other errors (e.g. port in use) as more severe warnings or errors
+                                error!(target: LOG_TARGET, "Failed to listen on QUIC address {}: {}", quic_maddr, e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                     error!(target: LOG_TARGET, "Failed to parse QUIC multiaddress '{}': {}", quic_multiaddr_str, e);
+                }
+            }
+
+            let tcp_multiaddr_str = format!("/{}/{}/tcp/{}", ip_label, addr_ip, port);
+            match tcp_multiaddr_str.parse::<Multiaddr>() {
+                Ok(tcp_maddr) => {
+                    match self.swarm.listen_on(tcp_maddr.clone()) {
+                        Ok(_) => {
+                            info!(target: LOG_TARGET, "Listening on TCP {} address: {}", readable_name, tcp_maddr);
+                            listeners_started_count += 1;
+                        }
+                        Err(e) => {
+                             if addr_ip.is_ipv6() && is_eafnosupport(&e) {
+                                warn!(target: LOG_TARGET, "TCP: {} not supported on this system (EAFNOSUPPORT). Skipping {}. Error: {}", readable_name, tcp_maddr, e);
+                            } else {
+                                error!(target: LOG_TARGET, "Failed to listen on TCP address {}: {}", tcp_maddr, e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Failed to parse TCP multiaddress '{}': {}", tcp_multiaddr_str, e);
+                }
+            }
+        }
+
+        if listeners_started_count == 0 {
+            error!(target: LOG_TARGET, "Failed to start any P2P listeners. Application cannot continue.");
+            return Err(anyhow!("P2P listeners could not be established. Check IPv4/IPv6 configuration and port availability."));
         }
         // external address
         if let Some(external_addr) = &self.config.external_addr {
@@ -3803,3 +3868,4 @@ fn is_localhost_or_private(addr: &Multiaddr) -> bool {
     }
     false
 }
+
