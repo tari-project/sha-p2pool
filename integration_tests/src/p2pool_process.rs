@@ -194,6 +194,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         sha3x_disabled: !node_config.p2p_service.sha3x_enabled,
         block_time_sha: Some(1),
         block_time_rx: Some(1),
+        num_concurrent_syncs: Some(1),
         share_window: Some(100),
         export_libp2p_info: Some(temp_dir_path.join(LIBP2P_INFO_FILE).clone()),
         network_silence_delay: {
