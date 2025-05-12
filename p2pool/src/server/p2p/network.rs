@@ -2217,6 +2217,7 @@ where S: ShareChain
         // }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn perform_catch_up_sync(&mut self, perform_catch_up_sync: PerformCatchUpSync) -> Result<(), Error> {
         let PerformCatchUpSync {
             algo,
