@@ -308,6 +308,8 @@ where S: ShareChain
     sha3x_last_sync_requested_block: Option<(u64, FixedHash)>,
     randomx_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
     sha3x_in_progress_syncs: HashMap<PeerId, (OutboundRequestId, OwnedSemaphorePermit)>,
+    last_failed_randomx_peer: Option<PeerId>,
+    last_failed_sha3x_peer: Option<PeerId>,
     recent_synced_tips: HashMap<PowAlgorithm, Arc<RwLock<LruCache<PeerId, (u64, FixedHash)>>>>,
     missing_blocks_sync_request_depth: HashMap<OutboundRequestId, usize>,
     share_window: u64,
@@ -387,6 +389,8 @@ where S: ShareChain
             sha3x_last_sync_requested_block: None,
             randomx_in_progress_syncs: HashMap::new(),
             sha3x_in_progress_syncs: HashMap::new(),
+            last_failed_sha3x_peer: None,
+            last_failed_randomx_peer: None,
             recent_synced_tips,
             missing_blocks_sync_request_depth: HashMap::new(),
             share_window,
@@ -1819,6 +1823,7 @@ where S: ShareChain
                                     if let Some((_r, permit)) = self.randomx_in_progress_syncs.remove(&peer) {
                                         // Probably don't need to do this
                                         info!(target: SYNC_REQUEST_LOG_TARGET, "Removing randomx_in_progress_syncs: {peer} -> {error:?}");
+                                        self.last_failed_randomx_peer = Some(peer);
                                         drop(permit);
                                     }
                                 }
@@ -1831,7 +1836,7 @@ where S: ShareChain
                                 if should_remove {
                                     if let Some((_r, permit)) = self.sha3x_in_progress_syncs.remove(&peer) {
                                         info!(target: SYNC_REQUEST_LOG_TARGET, "Removing sha3x_in_progress_syncs: {peer} -> {error:?}");
-
+                                        self.last_failed_sha3x_peer = Some(peer);
                                         // Probably don't need to do this
                                         drop(permit);
                                     }
@@ -1994,6 +1999,7 @@ where S: ShareChain
             .filter_map(|(peer, r)| if r.0 == request_id { Some(*peer) } else { None })
             .collect();
         for peer in should_remove {
+            self.last_failed_randomx_peer = None;
             if let Some((_r, permit)) = self.randomx_in_progress_syncs.remove(&peer) {
                 return Some(permit);
             }
@@ -2005,6 +2011,7 @@ where S: ShareChain
             .filter_map(|(peer, r)| if r.0 == request_id { Some(*peer) } else { None })
             .collect();
         for peer in should_remove {
+            self.last_failed_sha3x_peer = None;
             if let Some((_r, permit)) = self.sha3x_in_progress_syncs.remove(&peer) {
                 return Some(permit);
             }
@@ -2231,18 +2238,36 @@ where S: ShareChain
         // First check if we have a sync in progress for this peer.
 
         let (share_chain, semaphore, in_progress_syncs, last_progress) = match algo {
-            PowAlgorithm::RandomX => (
-                self.share_chain_random_x.clone(),
-                self.randomx_sync_semaphore.clone(),
-                &mut self.randomx_in_progress_syncs,
-                self.randomx_last_sync_requested_block.take(),
-            ),
-            PowAlgorithm::Sha3x => (
-                self.share_chain_sha3x.clone(),
-                self.sha3x_sync_semaphore.clone(),
-                &mut self.sha3x_in_progress_syncs,
-                self.sha3x_last_sync_requested_block.take(),
-            ),
+            PowAlgorithm::RandomX => {
+                if let Some(last_sync_peer) = self.last_failed_randomx_peer {
+                    if last_sync_peer == peer {
+                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is the last failed sync peer, not syncing this round", peer);
+                        self.last_failed_randomx_peer = None;
+                        return Ok(());
+                    }
+                }
+                (
+                    self.share_chain_random_x.clone(),
+                    self.randomx_sync_semaphore.clone(),
+                    &mut self.randomx_in_progress_syncs,
+                    self.randomx_last_sync_requested_block.take(),
+                )
+            },
+            PowAlgorithm::Sha3x => {
+                if let Some(last_sync_peer) = self.last_failed_sha3x_peer {
+                    if last_sync_peer == peer {
+                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is the last failed sync peer, not syncing this round", peer);
+                        self.last_failed_sha3x_peer = None;
+                        return Ok(());
+                    }
+                }
+                (
+                    self.share_chain_sha3x.clone(),
+                    self.sha3x_sync_semaphore.clone(),
+                    &mut self.sha3x_in_progress_syncs,
+                    self.sha3x_last_sync_requested_block.take(),
+                )
+            },
         };
         // let our_pow = share_chain.get_total_chain_pow().await;
 
