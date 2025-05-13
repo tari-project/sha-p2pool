@@ -6890,6 +6890,7 @@ dependencies = [
  "humantime",
  "itertools 0.13.0",
  "lazy_static",
+ "libc",
  "libp2p",
  "log",
  "log4rs",

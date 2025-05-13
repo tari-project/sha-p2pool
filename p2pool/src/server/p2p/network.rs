@@ -20,6 +20,7 @@ use hickory_resolver::{
     TokioAsyncResolver,
 };
 use itertools::Itertools;
+use libc;
 use libp2p::{
     autonat::{self, NatStatus, OutboundProbeEvent},
     dcutr,
@@ -37,7 +38,6 @@ use libp2p::{
     PeerId,
     Swarm,
 };
-use libc;
 use log::{debug, error, info, trace, warn};
 use lru::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
@@ -3764,7 +3764,7 @@ where S: ShareChain
         let port = self.port;
         let mut listeners_started_count = 0;
 
-        for (addr_ip, ip_label, readable_name) in listen_configs.iter() {
+        for (addr_ip, ip_label, readable_name) in &listen_configs {
             let quic_multiaddr_str = format!("/{}/{}/udp/{}/quic-v1", ip_label, addr_ip, port);
             match quic_multiaddr_str.parse::<Multiaddr>() {
                 Ok(quic_maddr) => {
@@ -3772,7 +3772,7 @@ where S: ShareChain
                         Ok(_) => {
                             info!(target: LOG_TARGET, "Listening on QUIC {} address: {}", readable_name, quic_maddr);
                             listeners_started_count += 1;
-                        }
+                        },
                         Err(e) => {
                             if addr_ip.is_ipv6() && is_eafnosupport(&e) {
                                 warn!(target: LOG_TARGET, "QUIC: {} not supported on this system (EAFNOSUPPORT). Skipping {}. Error: {}", readable_name, quic_maddr, e);
@@ -3780,40 +3780,40 @@ where S: ShareChain
                                 // Log other errors (e.g. port in use) as more severe warnings or errors
                                 error!(target: LOG_TARGET, "Failed to listen on QUIC address {}: {}", quic_maddr, e);
                             }
-                        }
+                        },
                     }
-                }
+                },
                 Err(e) => {
-                     error!(target: LOG_TARGET, "Failed to parse QUIC multiaddress '{}': {}", quic_multiaddr_str, e);
-                }
+                    error!(target: LOG_TARGET, "Failed to parse QUIC multiaddress '{}': {}", quic_multiaddr_str, e);
+                },
             }
 
             let tcp_multiaddr_str = format!("/{}/{}/tcp/{}", ip_label, addr_ip, port);
             match tcp_multiaddr_str.parse::<Multiaddr>() {
-                Ok(tcp_maddr) => {
-                    match self.swarm.listen_on(tcp_maddr.clone()) {
-                        Ok(_) => {
-                            info!(target: LOG_TARGET, "Listening on TCP {} address: {}", readable_name, tcp_maddr);
-                            listeners_started_count += 1;
+                Ok(tcp_maddr) => match self.swarm.listen_on(tcp_maddr.clone()) {
+                    Ok(_) => {
+                        info!(target: LOG_TARGET, "Listening on TCP {} address: {}", readable_name, tcp_maddr);
+                        listeners_started_count += 1;
+                    },
+                    Err(e) => {
+                        if addr_ip.is_ipv6() && is_eafnosupport(&e) {
+                            warn!(target: LOG_TARGET, "TCP: {} not supported on this system (EAFNOSUPPORT). Skipping {}. Error: {}", readable_name, tcp_maddr, e);
+                        } else {
+                            error!(target: LOG_TARGET, "Failed to listen on TCP address {}: {}", tcp_maddr, e);
                         }
-                        Err(e) => {
-                             if addr_ip.is_ipv6() && is_eafnosupport(&e) {
-                                warn!(target: LOG_TARGET, "TCP: {} not supported on this system (EAFNOSUPPORT). Skipping {}. Error: {}", readable_name, tcp_maddr, e);
-                            } else {
-                                error!(target: LOG_TARGET, "Failed to listen on TCP address {}: {}", tcp_maddr, e);
-                            }
-                        }
-                    }
-                }
+                    },
+                },
                 Err(e) => {
                     error!(target: LOG_TARGET, "Failed to parse TCP multiaddress '{}': {}", tcp_multiaddr_str, e);
-                }
+                },
             }
         }
 
         if listeners_started_count == 0 {
             error!(target: LOG_TARGET, "Failed to start any P2P listeners. Application cannot continue.");
-            return Err(anyhow!("P2P listeners could not be established. Check IPv4/IPv6 configuration and port availability."));
+            return Err(anyhow!(
+                "P2P listeners could not be established. Check IPv4/IPv6 configuration and port availability."
+            ));
         }
         // external address
         if let Some(external_addr) = &self.config.external_addr {
@@ -3868,4 +3868,3 @@ fn is_localhost_or_private(addr: &Multiaddr) -> bool {
     }
     false
 }
-
