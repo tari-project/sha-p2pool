@@ -825,7 +825,7 @@ where S: ShareChain
                         self.match_non_squad_topic(BLOCK_NOTIFY_RX_TOPIC, &topic) ||
                         self.match_non_squad_topic(BLOCK_NOTIFY_SHA3X_TOPIC, &topic) =>
                 {
-                    debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Non squad block, ignoring and passing on");
+                    debug!(target: LOG_TARGET, "Non squad block, ignoring and passing on");
                     return Ok(MessageAcceptance::Accept);
                 },
                 _ => {
