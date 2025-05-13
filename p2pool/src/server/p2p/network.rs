@@ -528,12 +528,12 @@ where S: ShareChain
         let chain_id = CURRENT_CHAIN_ID.clone();
         let squad = &self.squad;
         let topic = format!("{network}_{chain_id}_{squad}_{topic}_{PROTOCOL_VERSION}");
-        let parts = topic.split('_');
-        let message_parts = message_topic.split('_');
-        if parts.count() != message_parts.count() {
+        let parts: Vec<&str> = topic.split('_').collect();
+        let message_parts: Vec<&str> = message_topic.split('_').collect();
+        if parts.len() != message_parts.len() {
             return false;
         }
-        for (part, message_part) in parts.zip(message_parts) {
+        for (part, message_part) in parts.into_iter().zip(message_parts) {
             if part == squad {
                 continue;
             };
