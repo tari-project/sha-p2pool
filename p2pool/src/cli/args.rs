@@ -26,6 +26,10 @@ pub struct StartArgs {
     #[arg(short, long, value_name = "p2p-port")]
     pub p2p_port: Option<u16>,
 
+    /// (Optional) Stratum port to use.
+    #[arg(long, value_name = "stratum-port")]
+    pub stratum_port: Option<u16>,
+
     /// (Optional) stats server port to use.
     #[arg(long, value_name = "stats-server-port")]
     pub stats_server_port: Option<u16>,

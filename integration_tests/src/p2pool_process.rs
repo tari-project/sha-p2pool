@@ -168,6 +168,7 @@ pub async fn spawn_p2pool_node_and_wait_for_start(
         base_dir: Some(temp_dir_path.clone()),
         grpc_port: Some(node_config.grpc_port),
         p2p_port: Some(node_config.p2p_port),
+        stratum_port: None,
         stats_server_port: Some(node_config.http_server.port),
         external_address: node_config.p2p_service.external_addr.clone(),
         base_node_address,

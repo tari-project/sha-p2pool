@@ -6910,6 +6910,7 @@ dependencies = [
  "tari_mmr",
  "tari_script",
  "tari_shutdown",
+ "tari_stratum",
  "tari_utilities",
  "tempfile",
  "thiserror 1.0.69",
@@ -7792,6 +7793,17 @@ dependencies = [
  "log",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "tari_stratum"
+version = "1.0.1"
+dependencies = [
+ "anyhow",
+ "log",
+ "serde_json",
+ "tari_shutdown",
+ "tokio",
 ]
 
 [[package]]

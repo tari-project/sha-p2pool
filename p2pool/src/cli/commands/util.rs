@@ -73,6 +73,10 @@ pub async fn server(
         config_builder.with_p2p_port(p2p_port);
     }
 
+    if let Some(stratum_port) = args.stratum_port {
+        config_builder.with_stratum_port(stratum_port);
+    }
+
     if let Some(block_time) = args.block_time_sha {
         config_builder.with_sha3_block_time(block_time);
     }

@@ -13,6 +13,7 @@ pub struct Config {
     pub base_node_address: String,
     pub p2p_port: u16,
     pub grpc_port: u16,
+    pub stratum_port: Option<u16>,
     pub idle_connection_timeout: Duration,
     pub p2p_service: p2p::Config,
     pub http_server: http::server::Config,
@@ -36,6 +37,7 @@ impl Default for Config {
             base_node_address: String::from("http://127.0.0.1:18182"),
             p2p_port: 0,      // bind to any free port
             grpc_port: 18145, // to possibly not collide with any other ports
+            stratum_port: Some(6119),
             idle_connection_timeout: Duration::from_secs(60),
             p2p_service: p2p::Config::default(),
             http_server: http::server::Config::default(),
@@ -76,6 +78,11 @@ impl ConfigBuilder {
 
     pub fn with_grpc_port(&mut self, port: u16) -> &mut Self {
         self.config.grpc_port = port;
+        self
+    }
+
+    pub fn with_stratum_port(&mut self, port: u16) -> &mut Self {
+        self.config.stratum_port = Some(port);
         self
     }
 

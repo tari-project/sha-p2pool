@@ -14,6 +14,7 @@ use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::Shutdown;
+use tari_stratum::StratumServerBuilder;
 use tokio::sync::mpsc;
 
 use super::{
@@ -26,10 +27,10 @@ use crate::{
         diagnostics::{DiagnosticsBroadcastClient, DiagnosticsCollector, DiagnosticsReceiverClient},
         grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
-        p2p,
-        p2p::ServerNetworkBehaviour,
+        p2p::{self, ServerNetworkBehaviour},
     },
     sharechain::ShareChain,
+    stratum::StratumJobHandlerImpl,
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::server";
@@ -206,6 +207,22 @@ where S: ShareChain
                     error!(target: LOG_TARGET, "GRPC Server encountered an error: {:?}", error);
                 }
                 info!(target: LOG_TARGET, "GRPC Server stopped!");
+            });
+        }
+
+        if let Some(port) = self.config.stratum_port {
+            let handler = StratumJobHandlerImpl::new();
+            let stratum_server = StratumServerBuilder::<StratumJobHandlerImpl>::new()
+                .with_port(port)
+                .with_job_handler(handler)
+                // .set_p2p_service(self.p2p_service.clone())
+                .build();
+            let shutdown_signal = self.shutdown.to_signal();
+            tokio::spawn(async move {
+                if let Err(err) = stratum_server.start(shutdown_signal).await {
+                    error!(target: LOG_TARGET, "Stratum server encountered an error: {:?}", err);
+                }
+                info!(target: LOG_TARGET, "Stratum server stopped!");
             });
         }
 

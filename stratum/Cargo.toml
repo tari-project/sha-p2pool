@@ -1,0 +1,14 @@
+[package]
+name = "tari_stratum"
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+tari_shutdown = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
