@@ -14,7 +14,7 @@ use minotari_app_grpc::tari_rpc::{base_node_server::BaseNodeServer, sha_p2_pool_
 use tari_common::configuration::Network;
 use tari_core::{consensus::ConsensusManager, proof_of_work::randomx_factory::RandomXFactory};
 use tari_shutdown::Shutdown;
-use tari_stratum::StratumServerBuilder;
+use tari_stratum::{NiceHashStyleStatumStreamAdapter, StratumServerBuilder};
 use tokio::sync::mpsc;
 
 use super::{
@@ -212,7 +212,7 @@ where S: ShareChain
 
         if let Some(port) = self.config.stratum_port {
             let handler = StratumJobHandlerImpl::new();
-            let stratum_server = StratumServerBuilder::<StratumJobHandlerImpl>::new()
+            let stratum_server = StratumServerBuilder::<StratumJobHandlerImpl, NiceHashStyleStatumStreamAdapter>::new()
                 .with_port(port)
                 .with_job_handler(handler)
                 // .set_p2p_service(self.p2p_service.clone())

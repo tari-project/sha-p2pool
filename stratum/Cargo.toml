@@ -9,6 +9,7 @@ edition.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tari_shutdown = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

@@ -1,5 +1,6 @@
 use tari_stratum::{StratumJobHandler, StratumStreamAdapter};
 
+#[derive(Clone)]
 pub struct StratumJobHandlerImpl {}
 
 impl StratumJobHandlerImpl {
@@ -8,8 +9,8 @@ impl StratumJobHandlerImpl {
     }
 }
 
-impl StratumJobHandler for StratumJobHandlerImpl {}
-
-pub struct StratumStreamAdapterImpl {}
-
-impl StratumStreamAdapter for StratumStreamAdapterImpl {}
+impl StratumJobHandler for StratumJobHandlerImpl {
+    fn handle_request(&self, request: tari_stratum::StratumRequest) -> anyhow::Result<serde_json::Value> {
+        todo!()
+    }
+}

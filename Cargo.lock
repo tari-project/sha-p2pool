@@ -7801,6 +7801,7 @@ version = "1.0.1"
 dependencies = [
  "anyhow",
  "log",
+ "serde",
  "serde_json",
  "tari_shutdown",
  "tokio",
