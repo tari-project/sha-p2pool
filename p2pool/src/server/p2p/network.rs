@@ -107,7 +107,7 @@ const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: u64 = 500;
-const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 2;
+const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 5;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
