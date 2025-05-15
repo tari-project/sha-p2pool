@@ -3288,7 +3288,7 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
 name = "integration_tests"
-version = "1.0.1"
+version = "1.0.3"
 dependencies = [
  "cucumber",
  "indexmap 1.9.3",
@@ -6870,7 +6870,7 @@ dependencies = [
 
 [[package]]
 name = "sha_p2pool"
-version = "1.0.1"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "async-trait",
