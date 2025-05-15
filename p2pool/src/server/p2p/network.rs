@@ -107,7 +107,7 @@ const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: u64 = 500;
-const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 10;
+const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 2;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
@@ -711,8 +711,8 @@ where S: ShareChain
                                     "Peer {} sent a block that is much higher than ours, skipping",
                                     message_peer
                                 );
-                                // Is reject too harsh? Maybe we should just ignore it
-                                return Ok(MessageAcceptance::Ignore);
+                                // Return accept so that the rest of the network can get it
+                                return Ok(MessageAcceptance::Accept);
                             }
 
                             let max_payload_height = payload
