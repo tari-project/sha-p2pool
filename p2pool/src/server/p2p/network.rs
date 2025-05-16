@@ -1797,7 +1797,7 @@ where S: ShareChain
                                         peer,
                                         format!("ShareChainError during share chain sync:{}", error),
                                     );
-                                    let _ = self.swarm.disconnect_peer_id(peer).inspect(|e| {
+                                    let _ = self.swarm.disconnect_peer_id(peer).inspect_err(|e| {
                                         warn!(target: SYNC_REQUEST_LOG_TARGET, "Failed to disconnect peer {peer}: {e:?}");
                                     });
                                 }
