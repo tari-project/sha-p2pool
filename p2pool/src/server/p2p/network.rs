@@ -890,13 +890,6 @@ where S: ShareChain
     }
 
     async fn initiate_meta_data_exchange(&mut self, peer: &PeerId, my_info: PeerInfo) {
-        // if let Ok(my_info) = self
-        //     .create_peer_info(self.swarm.external_addresses().cloned().collect())
-        //     .await
-        //     .inspect_err(|error| {
-        //         error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
-        //     })
-        // {
         let local_peer_id = *self.swarm.local_peer_id();
         if peer == &local_peer_id {
             return;
