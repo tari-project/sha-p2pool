@@ -110,10 +110,11 @@ impl PeerStore {
             new_record.last_ping = Some(timestamp);
             *entry = new_record;
             // Move it to the whitelist
-            let mut record = self.greylist_peers.remove(&peer_id.to_base58()).unwrap();
-            record.num_grey_listings = 0;
+            //            let record = self.greylist_peers.remove(&peer_id.to_base58()).unwrap();
 
-            self.whitelist_peers.insert(peer_id.to_base58(), record);
+            // record.num_grey_listings = 0;
+
+            // self.whitelist_peers.insert(peer_id.to_base58(), record);
             self.update_peer_stats();
         }
 
@@ -448,6 +449,10 @@ impl PeerStore {
 
     pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
         self.blacklist_peers.contains_key(&peer_id.to_base58())
+    }
+
+    pub fn is_greylisted(&self, peer_id: &PeerId) -> bool {
+        self.greylist_peers.contains_key(&peer_id.to_base58())
     }
 
     pub fn peer_type(&self, peer_id: &PeerId) -> Option<AddPeerStatus> {

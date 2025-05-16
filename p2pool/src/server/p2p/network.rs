@@ -163,7 +163,7 @@ impl Default for Config {
             squad_override: None,
             num_squads: 1,
             user_agent: "tari-p2pool".to_string(),
-            grey_list_clear_interval: Duration::from_secs(60 * 15),
+            grey_list_clear_interval: Duration::from_secs(60 * 2),
             black_list_clear_interval: Duration::from_secs(60 * 60),
             meta_data_exchange_interval: Duration::from_secs(5),
             peer_exchange_interval: Duration::from_secs(60 * 60),
@@ -889,31 +889,31 @@ where S: ShareChain
         }
     }
 
-    async fn initiate_meta_data_exchange(&mut self, peer: &PeerId) {
-        if let Ok(my_info) = self
-            .create_peer_info(self.swarm.external_addresses().cloned().collect())
-            .await
-            .inspect_err(|error| {
-                error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
-            })
-        {
-            let local_peer_id = *self.swarm.local_peer_id();
-            if peer == &local_peer_id {
-                return;
-            }
-
-            let request = MetaDataRequest {
-                my_info,
-                peer_id: local_peer_id.to_base58(),
-            };
-            debug!(target: LOG_TARGET, "Initiate meta data exchange with peer: {}, request: {:?}", peer, request);
-            self.swarm
-                .behaviour_mut()
-                .meta_data_exchange
-                .send_request(peer, request);
-        } else {
-            error!(target: LOG_TARGET, "Failed to create peer info");
+    async fn initiate_meta_data_exchange(&mut self, peer: &PeerId, my_info: PeerInfo) {
+        // if let Ok(my_info) = self
+        //     .create_peer_info(self.swarm.external_addresses().cloned().collect())
+        //     .await
+        //     .inspect_err(|error| {
+        //         error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
+        //     })
+        // {
+        let local_peer_id = *self.swarm.local_peer_id();
+        if peer == &local_peer_id {
+            return;
         }
+
+        let request = MetaDataRequest {
+            my_info,
+            peer_id: local_peer_id.to_base58(),
+        };
+        debug!(target: LOG_TARGET, "Initiate meta data exchange with peer: {}, request: {:?}", peer, request);
+        self.swarm
+            .behaviour_mut()
+            .meta_data_exchange
+            .send_request(peer, request);
+        // } else {
+        //     error!(target: LOG_TARGET, "Failed to create peer info");
+        // }
     }
 
     async fn handle_direct_peer_exchange_request(
@@ -1087,6 +1087,14 @@ where S: ShareChain
                     return;
                 }
 
+                if self.network_peer_store.read().await.is_blacklisted(&peer_id) {
+                    debug!(target: LOG_TARGET, "Peer {} is blacklisted, skipping", peer_id);
+                    return;
+                }
+                if self.network_peer_store.read().await.is_greylisted(&peer_id) {
+                    debug!(target: LOG_TARGET, "Peer {} is greylisted, skipping", peer_id);
+                    return;
+                }
                 if response.info.squad != self.squad {
                     // this is a non squad peer, so we should not care about their tips
                     return;
@@ -1789,6 +1797,9 @@ where S: ShareChain
                                         peer,
                                         format!("ShareChainError during share chain sync:{}", error),
                                     );
+                                    let _ = self.swarm.disconnect_peer_id(peer).inspect(|e| {
+                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Failed to disconnect peer {peer}: {e:?}");
+                                    });
                                 }
 
                                 // Remove peer from peer store to try to sync from another peer,
@@ -2250,6 +2261,10 @@ where S: ShareChain
         {
             if self.network_peer_store.read().await.is_blacklisted(&peer) {
                 warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is blacklisted, not syncing", peer);
+                return Ok(());
+            }
+            if self.network_peer_store.read().await.is_greylisted(&peer) {
+                warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is greylisted, not syncing", peer);
                 return Ok(());
             }
         }
@@ -2978,11 +2993,19 @@ where S: ShareChain
                         let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
+                        if let Ok(my_info) = self
+             .create_peer_info(self.swarm.external_addresses().cloned().collect())
+            .await
+            .inspect_err(|error| {
+                error!(target: LOG_TARGET, "Failed to create peer info: {error:?}");
+            }) {
                         for peer in connected_peers.iter().take(NUM_PEERS_TO_META_DATA_EXCHANGE) {
                             // Update their latest tip.
-                            self.initiate_meta_data_exchange(peer).await;
+                            self.initiate_meta_data_exchange(peer, my_info.clone()).await;
                         }
+
                     }
+                }
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Chain height exchange took too long: {:?}", timer.elapsed());
                     }
