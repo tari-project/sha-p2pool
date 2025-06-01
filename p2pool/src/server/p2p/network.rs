@@ -118,6 +118,175 @@ const MAX_OUTBOUND_NON_SQUAD_PEERS: usize = 2;
 const CONNECTION_CHURN_DELAY_SECS: u64 = 60 * 20; // 20 minutes
 
 #[derive(Clone, Debug)]
+pub struct GracefulDegradationConfig {
+    pub enable_graceful_degradation: bool,
+    pub error_rate_threshold_high: f64,
+    pub error_rate_threshold_medium: f64,
+    pub semaphore_pressure_threshold: f64,
+    pub recovery_time: Duration,
+    pub health_check_interval: Duration,
+}
+
+impl Default for GracefulDegradationConfig {
+    fn default() -> Self {
+        Self {
+            enable_graceful_degradation: true,
+            error_rate_threshold_high: 0.15,
+            error_rate_threshold_medium: 0.10,
+            semaphore_pressure_threshold: 0.8,
+            recovery_time: Duration::from_secs(60),
+            health_check_interval: Duration::from_secs(10),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PressureLevel {
+    Normal,
+    Medium,
+    High,
+}
+
+#[derive(Clone, Debug)]
+struct P2PHealthTracker {
+    current_pressure_level: PressureLevel,
+    last_pressure_change: Instant,
+    // Phase 4: Error tracking fields
+    identify_failures: u64,
+    connection_failures: u64,
+    sync_timeouts: u64,
+    semaphore_acquisition_failures: u64,
+    message_processing_delays: u64,
+    total_operations: u64,
+}
+
+impl P2PHealthTracker {
+    fn new() -> Self {
+        Self {
+            current_pressure_level: PressureLevel::Normal,
+            last_pressure_change: Instant::now(),
+            // Phase 4: Initialize error tracking fields
+            identify_failures: 0,
+            connection_failures: 0,
+            sync_timeouts: 0,
+            semaphore_acquisition_failures: 0,
+            message_processing_delays: 0,
+            total_operations: 0,
+        }
+    }
+
+
+
+    fn calculate_error_rate(&self, _total_operations: u64) -> f64 {
+        // Phase 4: Calculate error rate using real error data
+        if self.total_operations == 0 {
+            return 0.0;
+        }
+        
+        let total_errors = self.identify_failures +
+            self.connection_failures +
+            self.sync_timeouts +
+            self.semaphore_acquisition_failures +
+            self.message_processing_delays;
+            
+        total_errors as f64 / self.total_operations as f64
+    }
+
+    fn assess_pressure_level(
+        &mut self,
+        config: &GracefulDegradationConfig,
+        semaphore_pressure: f64,
+        total_operations: u64,
+    ) -> PressureLevel {
+        let error_rate = self.calculate_error_rate(total_operations);
+        
+        let new_pressure = if error_rate > config.error_rate_threshold_high || semaphore_pressure > config.semaphore_pressure_threshold {
+            PressureLevel::High
+        } else if error_rate > config.error_rate_threshold_medium || semaphore_pressure > 0.7 {
+            PressureLevel::Medium
+        } else {
+            PressureLevel::Normal
+        };
+
+        if new_pressure != self.current_pressure_level {
+            info!(target: LOG_TARGET, "P2P pressure level changed: {:?} -> {:?} (error_rate: {:.3}, semaphore_pressure: {:.3})", 
+                  self.current_pressure_level, new_pressure, error_rate, semaphore_pressure);
+            self.current_pressure_level = new_pressure.clone();
+            self.last_pressure_change = Instant::now();
+        }
+
+        new_pressure
+    }
+
+    fn get_pressure_level(&self) -> PressureLevel {
+        self.current_pressure_level.clone()
+    }
+
+    // Phase 2: Adaptive interval calculations
+    fn get_adaptive_seek_interval(&self) -> Duration {
+        match self.current_pressure_level {
+            PressureLevel::Normal => Duration::from_secs(20),
+            PressureLevel::Medium => Duration::from_secs(45),
+            PressureLevel::High => Duration::from_secs(120),
+        }
+    }
+
+    fn get_adaptive_churn_interval(&self) -> Duration {
+        match self.current_pressure_level {
+            PressureLevel::Normal => Duration::from_secs(CONNECTION_CHURN_DELAY_SECS),
+            PressureLevel::Medium => Duration::from_secs(CONNECTION_CHURN_DELAY_SECS * 2),
+            PressureLevel::High => Duration::from_secs(CONNECTION_CHURN_DELAY_SECS * 4),
+        }
+    }
+
+
+
+    fn get_adaptive_peer_exchange_count(&self, base_count: usize) -> usize {
+        match self.current_pressure_level {
+            PressureLevel::Normal => base_count,
+            PressureLevel::Medium => base_count / 2,
+            PressureLevel::High => (base_count / 4).max(1),
+        }
+    }
+
+    fn get_adaptive_sync_limit(&self, base_limit: usize) -> usize {
+        match self.current_pressure_level {
+            PressureLevel::Normal => base_limit,
+            PressureLevel::Medium => (base_limit * 3 / 4).max(1),
+            PressureLevel::High => (base_limit / 2).max(1),
+        }
+    }
+
+    // Phase 4: Error recording methods
+    fn record_identify_failure(&mut self) {
+        self.identify_failures = self.identify_failures.saturating_add(1);
+        self.total_operations = self.total_operations.saturating_add(1);
+    }
+
+    fn record_connection_failure(&mut self) {
+        self.connection_failures = self.connection_failures.saturating_add(1);
+        self.total_operations = self.total_operations.saturating_add(1);
+    }
+
+    fn record_sync_timeout(&mut self) {
+        self.sync_timeouts = self.sync_timeouts.saturating_add(1);
+        self.total_operations = self.total_operations.saturating_add(1);
+    }
+
+    fn record_semaphore_acquisition_failure(&mut self) {
+        self.semaphore_acquisition_failures = self.semaphore_acquisition_failures.saturating_add(1);
+        self.total_operations = self.total_operations.saturating_add(1);
+    }
+
+    fn record_message_processing_delay(&mut self) {
+        self.message_processing_delays = self.message_processing_delays.saturating_add(1);
+        self.total_operations = self.total_operations.saturating_add(1);
+    }
+
+
+}
+
+#[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub external_addr: Option<String>,
@@ -146,6 +315,7 @@ pub struct Config {
     pub max_missing_blocks_sync_depth: usize,
     pub diagnostic_mode: bool,
     pub diagnostic_mode_file_path: Option<PathBuf>,
+    pub graceful_degradation: GracefulDegradationConfig,
 }
 
 impl Default for Config {
@@ -177,6 +347,7 @@ impl Default for Config {
             max_missing_blocks_sync_depth: 8,
             diagnostic_mode: false,
             diagnostic_mode_file_path: None,
+            graceful_degradation: GracefulDegradationConfig::default(),
         }
     }
 }
@@ -333,6 +504,8 @@ where S: ShareChain
     share_window: u64,
     dialed_seed_peers: HashSet<PeerId>,
     is_private_nat: bool,
+    health_tracker: P2PHealthTracker,
+    total_operations_counter: u64,
 }
 
 impl<S> Service<S>
@@ -390,7 +563,6 @@ where S: ShareChain
             network_peer_store: Arc::new(RwLock::new(network_peer_store)),
             config: config.p2p_service.clone(),
             shutdown,
-            // client_broadcast_block_tx: broadcast_block_tx,
             client_broadcast_block_rx: broadcast_block_rx,
             inner_request_tx,
             inner_request_rx,
@@ -414,6 +586,8 @@ where S: ShareChain
             share_window,
             dialed_seed_peers: HashSet::new(),
             is_private_nat: false,
+            health_tracker: P2PHealthTracker::new(),
+            total_operations_counter: 0,
         })
     }
 
@@ -561,6 +735,18 @@ where S: ShareChain
         message: Message,
         propagation_source: PeerId,
     ) -> Result<MessageAcceptance, Error> {
+        // Phase 3b: Implement gossipsub message filtering under high pressure
+        let pressure_level = self.health_tracker.get_pressure_level();
+        
+        // Under high pressure, filter out less critical messages
+        if pressure_level == PressureLevel::High {
+            let topic = message.topic.to_string();
+            // Filter out peer info messages under high pressure (keep block notifications)
+            if topic == Self::network_topic(PEER_INFO_TOPIC) {
+                debug!(target: LOG_TARGET, "Filtering peer info message under high pressure");
+                return Ok(MessageAcceptance::Ignore);
+            }
+        }
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
         let _unused = self.stats_broadcast_client.send_gossipsub_message_received();
         let source_peer = message.source;
@@ -1412,7 +1598,12 @@ where S: ShareChain
         let min_height = missing_parents.iter().map(|(height, _)| height).min().unwrap_or(&0);
         let mut peers_asked = 0;
         let mut highest_peer_height = 0;
-        for connected_peer in connected_peers {
+        
+        // Phase 3b: Apply adaptive sync limits to max peers asked
+        let max_peers_to_ask = self.health_tracker.get_adaptive_sync_limit(connected_peers.len());
+        debug!(target: LOG_TARGET, "Using adaptive sync peers limit: {} (total connected: {})", max_peers_to_ask, connected_peers.len());
+        
+        for connected_peer in connected_peers.iter().take(max_peers_to_ask) {
             let read_lock = self.network_peer_store.read().await;
             if let Some(p) = read_lock.get(&connected_peer) {
                 match algo {
@@ -1600,6 +1791,8 @@ where S: ShareChain
                     },
                     _ => {
                         warn!(target: LOG_TARGET, "Outgoing connection error: {peer_id:?} -> {error:?}");
+                        // Phase 3b: Record connection failure for error tracking
+                        self.health_tracker.record_connection_failure();
                         self.network_peer_store
                             .write()
                             .await
@@ -1780,6 +1973,11 @@ where S: ShareChain
                                         debug!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer} -> {error:?}");
                                         should_grey_list = false;
                                     },
+                                    OutboundFailure::Timeout => {
+                                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request timeout: {peer} -> {error:?}");
+                                        // Phase 3b: Record sync timeout for error tracking
+                                        self.health_tracker.record_sync_timeout();
+                                    },
                                     _ => {
                                         warn!(target: SYNC_REQUEST_LOG_TARGET, "Share chain sync request failed: {peer} -> {error:?}");
                                     },
@@ -1899,6 +2097,8 @@ where S: ShareChain
                             },
                             identify::Event::Error { peer_id, error, .. } => {
                                 warn!("Failed to identify peer {peer_id:?}: {error:?}");
+                                // Phase 3b: Record identify failure for error tracking
+                                self.health_tracker.record_identify_failure();
                                 // self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                                 // self.swarm.behaviour_mut().kademlia.remove_peer(&peer_id);
                             },
@@ -1961,10 +2161,14 @@ where S: ShareChain
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
 
+        // Phase 3b: Apply adaptive sync limits
+        let adaptive_limit = self.health_tracker.get_adaptive_sync_limit(MAX_CATCH_UP_BLOCKS_TO_RETURN);
+        debug!(target: LOG_TARGET, "Using adaptive catch up sync limit: {} (base: {})", adaptive_limit, MAX_CATCH_UP_BLOCKS_TO_RETURN);
+        
         let (blocks, our_tip, our_achieved_pow) = match share_chare
             .request_sync(
                 request.i_have(),
-                MAX_CATCH_UP_BLOCKS_TO_RETURN,
+                adaptive_limit,
                 request.last_block_received(),
             )
             .await
@@ -2300,6 +2504,8 @@ where S: ShareChain
                 Ok(permit) => Some(permit),
                 Err(_) => {
                     warn!(target: SYNC_REQUEST_LOG_TARGET, "Could not acquire semaphore for catch up sync for peer: {}", peer);
+                    // Phase 3b: Record semaphore acquisition failure
+                    self.health_tracker.record_semaphore_acquisition_failure();
                     return Ok(());
                 },
             };
@@ -2677,11 +2883,15 @@ where S: ShareChain
         let mut connection_stats_publish = tokio::time::interval(Duration::from_secs(10));
         connection_stats_publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut seek_connections_interval = tokio::time::interval(Duration::from_secs(20));
+        // Phase 2: Use adaptive intervals based on pressure level
+        let mut seek_connections_interval = tokio::time::interval(self.health_tracker.get_adaptive_seek_interval());
         seek_connections_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut connection_churn_interval = tokio::time::interval(Duration::from_secs(CONNECTION_CHURN_DELAY_SECS));
+        let mut connection_churn_interval = tokio::time::interval(self.health_tracker.get_adaptive_churn_interval());
         connection_churn_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        // Keep track of when intervals need to be updated
+        let mut last_pressure_level = self.health_tracker.get_pressure_level();
 
         let mut relay_job_interval = tokio::time::interval(Duration::from_secs(30));
         relay_job_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -2693,6 +2903,9 @@ where S: ShareChain
             tokio::time::interval(Duration::from_secs(60 * 60 * 24))
         };
         debug_chain_graph.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let mut health_check_interval = tokio::time::interval(self.config.graceful_degradation.health_check_interval);
+        health_check_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let shutdown_signal = self.shutdown.to_signal().clone();
         tokio::pin!(shutdown_signal);
@@ -2791,22 +3004,29 @@ where S: ShareChain
                         }
 
 
-                        // lets trim some connection, this will bring the connections down to a min of 5
-                        // We remove the worst sha and rx chains here
-                        while squad_peers.len() > MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(2){
-                            // we remove one sha3 and one rx
+                        // Phase 3b: Apply adaptive connection prioritization - keep best performers under pressure
+                        let pressure_level = self.health_tracker.get_pressure_level();
+                        let max_squad_peers = match pressure_level {
+                            PressureLevel::Normal => MAX_OUTBOUND_SQUAD_PEERS,
+                            PressureLevel::Medium => MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(1),
+                            PressureLevel::High => MAX_OUTBOUND_SQUAD_PEERS.saturating_sub(3),
+                        };
+                        
+                        debug!(target: LOG_TARGET, "Connection churn with pressure level {:?}: targeting {} squad peers (vs {} connected)", pressure_level, max_squad_peers, squad_peers.len());
+                        
+                        // lets trim some connection, this will bring the connections down based on pressure
+                        // We remove the worst sha and rx chains here, but prioritize keeping best performers
+                        while squad_peers.len() > max_squad_peers.saturating_sub(2){
+                            // Under pressure, prioritize peers with higher combined PoW (better performers)
                             squad_peers.sort_by(|a, b| {
-                                b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow)
+                                let a_combined_pow = a.peer_info.current_sha3x_pow + a.peer_info.current_random_x_pow;
+                                let b_combined_pow = b.peer_info.current_sha3x_pow + b.peer_info.current_random_x_pow;
+                                a_combined_pow.cmp(&b_combined_pow) // Remove lowest PoW peers first
                             });
-                            let peer = squad_peers.remove(squad_peers.len()-1);
+                            let peer = squad_peers.remove(0); // Remove the worst performer
 
-                            debug!(target: LOG_TARGET, "Disconnecting non squad peer due to churn: {}", peer.peer_id);
-                            let _ = self.swarm.disconnect_peer_id(peer.peer_id);
-                            squad_peers.sort_by(|a, b| {
-                                b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow)
-                            });
-                            let peer = squad_peers.remove(squad_peers.len()-1);
-                            debug!(target: LOG_TARGET, "Disconnecting non squad peer due to churn: {}", peer.peer_id);
+                            debug!(target: LOG_TARGET, "Disconnecting squad peer due to churn (pressure: {:?}): {} (pow: rx={}, sha={})", 
+                                   pressure_level, peer.peer_id, peer.peer_info.current_random_x_pow, peer.peer_info.current_sha3x_pow);
                             let _ = self.swarm.disconnect_peer_id(peer.peer_id);
                         }
                     }
@@ -2957,6 +3177,8 @@ where S: ShareChain
                     self.handle_event(event).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Event handling took too long: {:?}", timer.elapsed());
+                        // Phase 3b: Record message processing delay for error tracking
+                        self.health_tracker.record_message_processing_delay();
                     }
                  },
                 _ = publish_peer_info_interval.tick() => {
@@ -2978,7 +3200,10 @@ where S: ShareChain
                         let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
-                        for peer in connected_peers.iter().take(NUM_PEERS_TO_META_DATA_EXCHANGE) {
+                        // Phase 3: Apply adaptive peer exchange throttling
+                        let adaptive_count = self.health_tracker.get_adaptive_peer_exchange_count(NUM_PEERS_TO_META_DATA_EXCHANGE);
+                        debug!(target: LOG_TARGET, "Meta data exchange with {} peers (adaptive from {})", adaptive_count, NUM_PEERS_TO_META_DATA_EXCHANGE);
+                        for peer in connected_peers.iter().take(adaptive_count) {
                             // Update their latest tip.
                             self.initiate_meta_data_exchange(peer).await;
                         }
@@ -2993,7 +3218,10 @@ where S: ShareChain
                         let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
                         let mut rng = thread_rng();
                         connected_peers.shuffle(&mut rng);
-                        for peer in connected_peers.iter().take(NUM_PEERS_TO_PEER_INFO_EXCHANGE) {
+                        // Phase 3b: Apply adaptive peer exchange throttling
+                        let adaptive_count = self.health_tracker.get_adaptive_peer_exchange_count(NUM_PEERS_TO_PEER_INFO_EXCHANGE);
+                        debug!(target: LOG_TARGET, "Peer exchange with {} peers (adaptive from {})", adaptive_count, NUM_PEERS_TO_PEER_INFO_EXCHANGE);
+                        for peer in connected_peers.iter().take(adaptive_count) {
                             // Update their latest tip.
                             self.initiate_direct_peer_exchange(peer).await;
                         }
@@ -3032,6 +3260,24 @@ where S: ShareChain
                 _ = debug_chain_graph.tick() => {
                     if self.config.debug_print_chain {
                         self.print_debug_chain_graph().await;
+                    }
+                },
+                _ = health_check_interval.tick() => {
+                    let timer = Instant::now();
+                    if self.config.graceful_degradation.enable_graceful_degradation {
+                        self.perform_health_check().await;
+                        
+                        // Phase 2: Check if pressure level changed (logging for now - dynamic intervals in future iteration)
+                        let current_pressure_level = self.health_tracker.get_pressure_level();
+                        if current_pressure_level != last_pressure_level {
+                            info!(target: LOG_TARGET, "P2P pressure level changed: {:?} -> {:?}", last_pressure_level, current_pressure_level);
+                            // Note: Dynamic interval updating will be implemented in a future iteration
+                            // due to complexity with pinned intervals in tokio::select!
+                            last_pressure_level = current_pressure_level;
+                        }
+                    }
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Health check took too long: {:?}", timer.elapsed());
                     }
                 },
             }
@@ -3774,6 +4020,72 @@ where S: ShareChain
         })?;
         self.join_seed_peers(seed_peers).await;
         Ok(())
+    }
+
+    /// Performs a health check on the P2P service, monitoring semaphore pressure and error rates
+    async fn perform_health_check(&mut self) {
+        if !self.config.graceful_degradation.enable_graceful_degradation {
+            return;
+        }
+
+        // Calculate semaphore pressure (used permits / total permits)
+        let randomx_total = self.config.num_concurrent_syncs as f64;
+        let randomx_available = self.randomx_sync_semaphore.available_permits() as f64;
+        let randomx_pressure = (randomx_total - randomx_available) / randomx_total;
+
+        let sha3x_total = self.config.num_concurrent_syncs as f64;
+        let sha3x_available = self.sha3x_sync_semaphore.available_permits() as f64;
+        let sha3x_pressure = (sha3x_total - sha3x_available) / sha3x_total;
+
+        // Use the higher pressure between the two semaphores
+        let semaphore_pressure = randomx_pressure.max(sha3x_pressure);
+
+        // Increment operations counter
+        self.total_operations_counter = self.total_operations_counter.saturating_add(1);
+
+        // Assess current pressure level
+        let pressure_level = self.health_tracker.assess_pressure_level(
+            &self.config.graceful_degradation,
+            semaphore_pressure,
+            self.total_operations_counter,
+        );
+
+        // Take action based on pressure level
+        match pressure_level {
+            PressureLevel::High => {
+                warn!(target: LOG_TARGET, 
+                    "High P2P pressure detected - semaphore: {:.3}, error_rate: {:.3}, disconnecting some peers", 
+                    semaphore_pressure, 
+                    self.health_tracker.calculate_error_rate(self.total_operations_counter)
+                );
+                
+                // Disconnect some non-essential peers to reduce load
+                let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
+                let peers_to_disconnect = connected_peers.len().saturating_sub(5).min(3);
+                
+                for peer in connected_peers.iter().take(peers_to_disconnect) {
+                    if !self.network_peer_store.read().await.is_seed_peer(peer) {
+                        debug!(target: LOG_TARGET, "Disconnecting peer {} due to high pressure", peer);
+                        let _ = self.swarm.disconnect_peer_id(*peer);
+                    }
+                }
+            },
+            PressureLevel::Medium => {
+                info!(target: LOG_TARGET, 
+                    "Medium P2P pressure detected - semaphore: {:.3}, error_rate: {:.3}, reducing activity", 
+                    semaphore_pressure, 
+                    self.health_tracker.calculate_error_rate(self.total_operations_counter)
+                );
+                // Medium pressure - could implement rate limiting here if needed
+            },
+            PressureLevel::Normal => {
+                trace!(target: LOG_TARGET, 
+                    "P2P health normal - semaphore: {:.3}, error_rate: {:.3}", 
+                    semaphore_pressure, 
+                    self.health_tracker.calculate_error_rate(self.total_operations_counter)
+                );
+            },
+        }
     }
 
     /// Starts p2p service.
