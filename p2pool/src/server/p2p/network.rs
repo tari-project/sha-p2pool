@@ -239,13 +239,7 @@ impl P2PHealthTracker {
         }
     }
 
-    fn get_adaptive_timeout_multiplier(&self) -> f32 {
-        match self.current_pressure_level {
-            PressureLevel::Normal => 1.0,
-            PressureLevel::Medium => 1.5,
-            PressureLevel::High => 2.0,
-        }
-    }
+
 
     fn get_adaptive_peer_exchange_count(&self, base_count: usize) -> usize {
         match self.current_pressure_level {
@@ -289,9 +283,7 @@ impl P2PHealthTracker {
         self.total_operations = self.total_operations.saturating_add(1);
     }
 
-    fn record_successful_operation(&mut self) {
-        self.total_operations = self.total_operations.saturating_add(1);
-    }
+
 }
 
 #[derive(Clone, Debug)]
