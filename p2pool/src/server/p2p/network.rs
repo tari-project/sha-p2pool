@@ -115,7 +115,7 @@ const NUM_PEERS_TO_META_DATA_EXCHANGE: usize = 8;
 const NUM_PEERS_TO_PEER_INFO_EXCHANGE: usize = 8;
 const MAX_OUTBOUND_SQUAD_PEERS: usize = 8;
 const MAX_OUTBOUND_NON_SQUAD_PEERS: usize = 2;
-const CONNECTION_CHURN_DELAY_SECS: u64 = 60 * 20; // 20 minutes
+const CONNECTION_CHURN_DELAY_SECS: u64 = 60 * 45; // 45 minutes - less aggressive churn
 
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -172,7 +172,7 @@ impl Default for Config {
             sync_job_enabled: true,
             sha3x_enabled: true,
             randomx_enabled: true,
-            num_concurrent_syncs: 1,
+            num_concurrent_syncs: 10,
             num_sync_tips_to_keep: 10,
             max_missing_blocks_sync_depth: 8,
             diagnostic_mode: false,
@@ -2299,7 +2299,7 @@ where S: ShareChain
             permit = match semaphore.try_acquire_owned() {
                 Ok(permit) => Some(permit),
                 Err(_) => {
-                    warn!(target: SYNC_REQUEST_LOG_TARGET, "Could not acquire semaphore for catch up sync for peer: {}", peer);
+                    error!(target: SYNC_REQUEST_LOG_TARGET, "CRITICAL: Could not acquire semaphore for catch up sync for peer: {} - sync request DROPPED", peer);
                     return Ok(());
                 },
             };
