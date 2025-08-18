@@ -32,7 +32,7 @@ jobs:
     runs-on: [ ubuntu-latest ]
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -89,7 +89,7 @@ jobs:
       RUSTUP_PERMIT_COPY_RENAME: true
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: caching (stable)
         # Don't use rust-cache.
         # Rust-cache disables a key feature of actions/cache: restoreKeys.
@@ -130,7 +130,7 @@ jobs:
     runs-on: [ ubuntu-22.04 ]
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: install ripgrep
         run: |
           #wget https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep_14.1.1-1_amd64.deb.sha256
@@ -157,7 +157,7 @@ jobs:
       RUST_LOG: debug
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: toolchain
         uses: dtolnay/rust-toolchain@master
         with:
